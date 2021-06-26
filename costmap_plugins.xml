@@ -1,0 +1,5 @@
+<library path="lib/libs57_layer">
+  <class type="s57_layer::S57Layer" base_class_type="costmap_2d::Layer">
+    <description>A marine navigation chart layer for costmap_2d</description>
+  </class>
+</library>
