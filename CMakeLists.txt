@@ -29,10 +29,11 @@ include_directories(include ${catkin_INCLUDE_DIRS})
 find_package(GDAL REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
+add_subdirectory(src/iso8211)
 
 add_library(${PROJECT_NAME} src/s57_layer.cpp src/s57_catalog.cpp src/s57_dataset.cpp)
 add_dependencies(${PROJECT_NAME} ${s57_layer_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(${PROJECT_NAME} ${GDAL_LIBRARY} ${catkin_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${GDAL_LIBRARY} ${catkin_LIBRARIES} iso8211)
 
 install(TARGETS ${PROJECT_NAME}
         LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}

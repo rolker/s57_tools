@@ -5,6 +5,7 @@
 #include <memory>
 
 class GDALDataset;
+class OGREnvelope;
 
 namespace s57_layer
 {
@@ -15,9 +16,16 @@ class S57Dataset
 {
 public:
   S57Dataset(std::string path);
-  bool valid() const;
+  void setEnvelope(double minLat, double minLon, double maxLat, double maxLon);
+  std::shared_ptr<OGREnvelope> getEnvelope();
+  std::string const &filePath() const;
 private:
+  void open();
+
+private:
+  std::string m_file_path;
   std::shared_ptr<GDALDataset> m_dataset;
+  std::shared_ptr<OGREnvelope> m_envelope;
 };
 
 } // namespace s57_layer

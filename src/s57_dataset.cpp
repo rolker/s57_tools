@@ -6,19 +6,37 @@
 namespace s57_layer
 {
 
-S57Dataset::S57Dataset(std::string path)
+S57Dataset::S57Dataset(std::string path):m_file_path(path)
 {
-  std::cerr << path << std::endl;
-  m_dataset = std::shared_ptr<GDALDataset>(reinterpret_cast<GDALDataset*>(GDALOpenEx(path.c_str(), GDAL_OF_VECTOR,  nullptr, nullptr, nullptr)),GDALDeleter);
+}
+
+void S57Dataset::setEnvelope(double minLat, double minLon, double maxLat, double maxLon)
+{
+  m_envelope = std::shared_ptr<OGREnvelope>(new OGREnvelope);
+  m_envelope->Merge(minLon, minLat);
+  m_envelope->Merge(maxLon, maxLat);
+}
+
+std::shared_ptr<OGREnvelope> S57Dataset::getEnvelope()
+{
+  if(!m_envelope || (!m_envelope->IsInit() && !m_dataset))
+    open();
+  return m_envelope;
+}
+
+void S57Dataset::open()
+{
+  m_dataset = std::shared_ptr<GDALDataset>(reinterpret_cast<GDALDataset*>(GDALOpenEx(m_file_path.c_str(), GDAL_OF_VECTOR,  nullptr, nullptr, nullptr)),GDALDeleter);
+  
   if(m_dataset)
   {
     OGRLayer* coverage = m_dataset->GetLayerByName("M_COVR");
     if(coverage)
     {
-      OGREnvelope extent;
-      if(coverage->GetExtent(&extent) == OGRERR_NONE)
+      OGREnvelope envelope;
+      if(coverage->GetExtent(&envelope) == OGRERR_NONE)
       {
-        std::cerr << extent.MinX << ", " << extent.MinY << "  " << extent.MaxX << ", " << extent.MaxY << std::endl;
+        m_envelope = std::shared_ptr<OGREnvelope>(new OGREnvelope(envelope));
       }
     }
     else
@@ -31,9 +49,9 @@ void GDALDeleter(GDALDataset* ds)
   GDALClose(ds);
 }
 
-bool S57Dataset::valid() const
+std::string const &S57Dataset::filePath() const
 {
-  return bool(m_dataset);
+  return m_file_path;
 }
 
 } // namespace s57_layer
