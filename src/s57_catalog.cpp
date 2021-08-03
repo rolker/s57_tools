@@ -75,10 +75,28 @@ S57Catalog::S57Catalog(std::string enc_root)
   std::cerr << "found " << m_datasets.size() << " charts" << std::endl;
 }
 
-std::pair<double, double> S57Catalog::ecefToLatLong(double x, double y, double z)
+bool S57Catalog::ecefToLatLong(double x, double y, double z, double &lat, double &lon)
 {
-  m_ECEFToWGS84_transformation->Transform(1, &x, &y, &z);
-  return std::make_pair(x, y);
+  int ret = m_ECEFToWGS84_transformation->Transform(1, &x, &y, &z);
+  if(ret)
+  {
+    lat = x;
+    lon = y;
+  }
+  return ret;
+}
+
+bool S57Catalog::llToECEF(double lat, double lon, double &x, double &y, double &z)
+{
+  double alt = 0.0;
+  int ret = m_WGS84ToECEF_transformation->Transform(1, &lat, &lon, &alt);
+  if(ret)
+  {
+    x = lat;
+    y = lon;
+    z = alt;
+  }
+  return ret;
 }
 
 std::vector<std::shared_ptr<S57Dataset> > S57Catalog::intersectingCharts(double minLat, double minLon, double  maxLat, double maxLon)

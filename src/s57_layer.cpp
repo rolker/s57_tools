@@ -62,25 +62,61 @@ void S57Layer::updateCosts(costmap_2d::Costmap2D& master_grid, int min_i, int mi
   if (!enabled_)
     return;
 
-  geometry_msgs::PoseStamped world_min, world_max;
-  master_grid.mapToWorld(min_i, min_j, world_min.pose.position.x, world_min.pose.position.y);
-  master_grid.mapToWorld(max_i, max_j, world_max.pose.position.x, world_max.pose.position.y);
-  if(tf_->canTransform("earth", m_global_frame_id, ros::Time()))
+  double  world_min_x, world_min_y, world_max_x, world_max_y;
+  master_grid.mapToWorld(min_i, min_j, world_min_x, world_min_y);
+  master_grid.mapToWorld(max_i, max_j, world_max_x, world_max_y);
+  double minLat, minLon, maxLat, maxLon;
+  if(worldToLatLon(world_min_x, world_min_y, minLat, minLon) && worldToLatLon(world_max_x, world_max_y, maxLat, maxLon))
   {
-    world_min.header.frame_id = m_global_frame_id;
-    world_max.header.frame_id = m_global_frame_id;
-    geometry_msgs::PoseStamped ecef_min, ecef_max;
-    tf_->transform(world_min, ecef_min, "earth");
-    tf_->transform(world_max, ecef_max, "earth");
-    auto min_ll = m_s57Catalog->ecefToLatLong(ecef_min.pose.position.x, ecef_min.pose.position.y, ecef_min.pose.position.z);
-    auto max_ll = m_s57Catalog->ecefToLatLong(ecef_max.pose.position.x, ecef_max.pose.position.y, ecef_max.pose.position.z);
-    std::cerr << min_ll.first << ", " << min_ll.second << "  " << max_ll.first << ", " << max_ll.second << std::endl;
-    auto charts = m_s57Catalog->intersectingCharts(min_ll.first, min_ll.second, max_ll.first, max_ll.second);
+    auto charts = m_s57Catalog->intersectingCharts(minLat, minLon, maxLat, maxLon);
     std::cerr << charts.size() << " charts" << std::endl;
+    std::map<std::pair<double, std::string>, std::shared_ptr<costmap_2d::Costmap2D> > costmaps;
     for(auto c: charts)
-      std::cerr << "  " << c->filePath() << std::endl;
-
+    {
+      //std::cerr << "  " << c->filePath() << std::endl;
+      auto costmap = c->getCosts(minLat, minLon, maxLat, maxLon, *this);
+      if(costmap)
+      {
+        costmap->saveMap(c->label()+".pgm");
+        costmaps[std::make_pair(costmap->getResolution(), c->label())] = costmap;
+      }
+    }
+    for(auto cm: costmaps)
+      std::cerr << cm.first.second << " " << cm.first.first << std::endl;
   }
+}
+
+bool S57Layer::worldToLatLon(double x, double y, double &lat, double &lon)
+{
+  if(tf_->canTransform("earth", m_global_frame_id, ros::Time()))
+  { 
+    geometry_msgs::PoseStamped world;
+    world.pose.position.x = x;
+    world.pose.position.y = y;
+    world.header.frame_id = m_global_frame_id;
+    geometry_msgs::PoseStamped ecef;
+    tf_->transform(world, ecef, "earth");
+    return m_s57Catalog->ecefToLatLong(ecef.pose.position.x, ecef.pose.position.y, ecef.pose.position.z, lat, lon);
+  }
+  return false;
+}
+
+bool S57Layer::llToWorld(double lat, double lon, double &x, double &y)
+{
+  if(tf_->canTransform(m_global_frame_id, "earth", ros::Time()))
+  {
+    geometry_msgs::PoseStamped ecef;
+    ecef.header.frame_id = "earth";
+    if(m_s57Catalog->llToECEF(lat, lon, ecef.pose.position.x, ecef.pose.position.y, ecef.pose.position.z))
+    {
+      geometry_msgs::PoseStamped world;
+      tf_->transform(ecef, world, m_global_frame_id);
+      x = world.pose.position.x;
+      y = world.pose.position.y;
+      return true;
+    }
+  }
+  return false;
 }
 
 } // namespace s57_layer

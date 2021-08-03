@@ -18,7 +18,8 @@ class S57Catalog
 public:
   S57Catalog(std::string enc_root);
   std::vector<std::shared_ptr<S57Dataset> > intersectingCharts(double minLat, double minLon, double maxLat, double maxLon);
-  std::pair<double, double> ecefToLatLong(double x, double y, double z);
+  bool ecefToLatLong(double x, double y, double z, double &lat, double &lon);
+  bool llToECEF(double lat, double lon, double &x, double &y, double &z);
 
 private:
   std::vector<std::shared_ptr<S57Dataset> > m_datasets;
