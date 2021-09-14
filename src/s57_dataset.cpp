@@ -96,6 +96,40 @@ std::string const &S57Dataset::label() const
   return m_label;
 }
 
+double S57Dataset::minimumPixelSize()
+{
+  if(!m_dataset)
+    open();
+  return m_minimum_pixel_size;
+}
+
+double S57Dataset::distanceTo(double x, double y, S57Layer &layer) const
+{
+  double minX, minY, maxX, maxY;
+  if(m_envelope && layer.llToWorld(m_envelope->MinY, m_envelope->MinX, minX, minY) && layer.llToWorld(m_envelope->MaxY, m_envelope->MaxX, maxX, maxY))
+  {
+    double dx, dy;
+    if(x >= minX && x <= maxX)
+      dx = 0.0;
+    else
+      if (x < minX)
+        dx = minX - x;
+      else
+        dx = x - maxX;
+    if(y >= minY && y <= maxY)
+      dy = 0.0;
+    else
+      if (y < minY)
+        dy = minY - y;
+      else
+        dy = y - maxY;
+    if(dx == 0.0 && dy == 0.0)
+      return 0.0;
+    return sqrt(dx*dx+dy*dy);
+  }
+  return std::nan("");
+}
+
 std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(double minLat, double minLon, double maxLat, double maxLon, S57Layer &layer)
 {
   std::shared_ptr<costmap_2d::Costmap2D> ret;
@@ -103,58 +137,169 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(double minLat, doubl
     open();
   if(m_dataset && m_minimum_pixel_size > 0.0)
   {
-    OGREnvelope envelope;
-    envelope.Merge(minLon, minLat);
-    envelope.Merge(maxLon, maxLat);
-    envelope.Intersect(*m_envelope);
+    // OGREnvelope envelope;
+    // envelope.Merge(minLon, minLat);
+    // envelope.Merge(maxLon, maxLat);
+    // envelope.Intersect(*m_envelope);
+    OGREnvelope envelope(*m_envelope);
 
     double minX, minY, maxX, maxY;
     if(layer.llToWorld(envelope.MinY, envelope.MinX, minX, minY) && layer.llToWorld(envelope.MaxY, envelope.MaxX, maxX, maxY))
     {
-      http://www.cs.cmu.edu/~quake/triangle.html
+      // http://www.cs.cmu.edu/~quake/triangle.html
       std::cerr << " " << m_label << std::endl;
       std::cerr << "  world: " << minX << ", " << minY << " to " << maxX << ", " << maxY << std::endl;
-      ret = std::shared_ptr<costmap_2d::Costmap2D>(new costmap_2d::Costmap2D(std::ceil((maxX-minX)/m_minimum_pixel_size), std::ceil((maxY-minY)/m_minimum_pixel_size), m_minimum_pixel_size, minX, minY, costmap_2d::NO_INFORMATION));
+      ret = std::shared_ptr<costmap_2d::Costmap2D>(new costmap_2d::Costmap2D(std::ceil((maxX-minX)/m_minimum_pixel_size), std::ceil((maxY-minY)/m_minimum_pixel_size), m_minimum_pixel_size, minX, minY,  costmap_2d::NO_INFORMATION));
       std::cerr << "  cell size: " << m_minimum_pixel_size << std::endl;
       std::cerr << "  map size: " << ret->getSizeInCellsX() << ", " << ret->getSizeInCellsY() << std::endl;
-      std::map<std::pair<int, int>, std::shared_ptr<OGRPoint> > latlonMap;
-      for(int i = 0; i < ret->getSizeInCellsX(); i++)
-        for(int j = 0; j < ret->getSizeInCellsY(); j++)
-        {
-          double wx, wy;
-          ret->mapToWorld(i, j, wx, wy);
-          double cellLat, cellLon;
-          if (layer.worldToLatLon(wx, wy, cellLat, cellLon))
-            latlonMap[std::make_pair(i,j)] = std::shared_ptr<OGRPoint>(new OGRPoint(cellLon, cellLat));
-        }
+
+      // std::map<std::pair<int, int>, std::shared_ptr<OGRPoint> > latlonMap;
+      // for(int i = 0; i < ret->getSizeInCellsX(); i++)
+      //   for(int j = 0; j < ret->getSizeInCellsY(); j++)
+      //   {
+      //     double wx, wy;
+      //     ret->mapToWorld(i, j, wx, wy);
+      //     double cellLat, cellLon;
+      //     if (layer.worldToLatLon(wx, wy, cellLat, cellLon))
+      //       latlonMap[std::make_pair(i,j)] = std::shared_ptr<OGRPoint>(new OGRPoint(cellLon, cellLat));
+      //   }
       
+      OGRLayer* sea_area = m_dataset->GetLayerByName("SEAARE");
+      if(sea_area)
+      {
+        //sea_area->SetSpatialFilterRect(minLon, minLat, maxLon, maxLat);
+        std::cerr << "  sea area with " << sea_area->GetFeatureCount() << " features" << std::endl;
+        sea_area->ResetReading();
+        OGRFeature* feature;
+        while(feature = sea_area->GetNextFeature())
+        {
+          auto geometry = feature->GetGeometryRef();
+          rasterize(*ret, *geometry, layer, costmap_2d::FREE_SPACE);
+        }
+      }
+
+
       OGRLayer* land_area = m_dataset->GetLayerByName("LNDARE");
       if(land_area)
       {
-        land_area->SetSpatialFilterRect(minLon, minLat, maxLon, maxLat);
+        //land_area->SetSpatialFilterRect(minLon, minLat, maxLon, maxLat);
         std::cerr << "  land area with " << land_area->GetFeatureCount() << " features" << std::endl;
         land_area->ResetReading();
         OGRFeature* feature;
         while(feature = land_area->GetNextFeature())
         {
           auto geometry = feature->GetGeometryRef();
-          std::cerr << "   geom type: " << geometry->getGeometryType() << std::endl;
-          if(geometry->getGeometryType() == wkbPolygon)
-          {
-            OGRPolygon* polygon = geometry->toPolygon();
-            OGRPoint p;
-            polygon->getExteriorRing()->getPoint(0, &p);
-            std::cerr << "    first point of exterior ring: " << p.getX() << ", " << p.getY() << std::endl;
-            std::cerr << "    first cell of ret costmap: " << latlonMap.begin()->second->getX() << ", " << latlonMap.begin()->second->getY() << std::endl;
-          }
-          for(auto cell: latlonMap)
-            if(geometry->Contains( cell.second.get()))
-              ret->setCost(cell.first.first, cell.first.second, costmap_2d::LETHAL_OBSTACLE);
+          rasterize(*ret, *geometry, layer, costmap_2d::LETHAL_OBSTACLE);
         }
       }
     }
   }
   return ret;
+}
+
+void S57Dataset::rasterize(costmap_2d::Costmap2D& map, OGRGeometry& geometry, S57Layer &layer, unsigned char value)
+{
+  // http://alienryderflex.com/polygon_fill/
+  if(geometry.getGeometryType() == wkbPolygon)
+  {
+    OGRPolygon* polygon = geometry.toPolygon();
+    struct WorldPoint
+    {
+      double x,y;
+    };
+
+    std::vector<std::vector<WorldPoint> > rings;
+    rings.push_back(std::vector<WorldPoint>());
+
+    for(auto p: polygon->getExteriorRing())
+    {
+      WorldPoint wp;
+      if(layer.llToWorld(p.getY(), p.getX(), wp.x, wp.y))
+        rings.back().push_back(wp);
+    }
+    if(!polygon->getExteriorRing()->get_IsClosed())
+      rings.back().push_back(rings.back().front()); // close the ring if necessary
+    for(int i = 0; i < polygon->getNumInteriorRings(); i++)
+    {
+      rings.push_back(std::vector<WorldPoint>());
+      for(auto p: polygon->getInteriorRing(i))
+      {
+        WorldPoint wp;
+        if(layer.llToWorld(p.getX(), p.getY(), wp.x, wp.y))
+          rings.back().push_back(wp);
+      }
+      if(!polygon->getInteriorRing(i)->get_IsClosed())
+        rings.back().push_back(rings.back().front()); // close the ring if necessary
+
+    }
+
+    // std::cerr << "      polygon with " << rings.size() << " rings" << std::endl;
+    // for(auto ring: rings)
+    // {
+    //   std::cerr << "        ring with " << ring.size() << " verticies" << std::endl;
+    //   for(auto p: ring)
+    //     std::cerr << "          " << p.x << ", " << p.y << std::endl;
+    // }
+
+    for(int row = 0; row < map.getSizeInCellsY(); row++)
+    {
+      double wx, wy;
+      map.mapToWorld(0, row, wx, wy);
+
+
+      std::set<double> nodes;
+
+      for(auto ring: rings)
+      {
+        for(int i = 0; i < ring.size()-1; i++)
+        {
+          if(   ring[i].y < wy && ring[i+1].y >= wy 
+             || ring[i+1].y < wy && ring[i].y >= wy)
+          {
+            // (int) (polyX[i]+(pixelY-polyY[i])/(polyY[j]-polyY[i]) *(polyX[j]-polyX[i]))
+            nodes.insert(ring[i].x+(wy-ring[i].y)/(ring[i+1].y-ring[i].y)*(ring[i+1].x-ring[i].x));
+          }
+        }
+      }
+
+      // if(!nodes.empty())
+      // {
+      //   std::cerr << "        wy: " << wy << std::endl;
+      //   std::cerr << "        " << nodes.size() << " nodes" << std::endl;
+      // }
+
+
+      auto node = nodes.begin();
+      while(node != nodes.end())
+      {
+        auto next_node = node;
+        next_node++;
+        if(next_node == nodes.end())
+          break;
+
+        if(*node > map.getOriginX() + map.getSizeInMetersX())
+          break;
+
+        if(*next_node > map.getOriginX())
+        {
+          unsigned int y, x1, x2;
+          if(*node < map.getOriginX())
+            x1 = 0;
+          else
+            map.worldToMap(*node, wy, x1, y);
+          if(!map.worldToMap(*next_node, wy, x2, y))
+            x2 = map.getSizeInCellsX()-1;
+
+          // std::cerr << "          " << *node << " to " << *next_node << " map: " << x1 << " to " << x2 << std::endl;
+          for(unsigned x = x1; x <= x2; x++)
+            map.setCost(x, row, value);
+        }
+        node = next_node;
+        node++;
+      }
+    }
+  }
+
 }
 
 } // namespace s57_layer

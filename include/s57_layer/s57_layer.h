@@ -33,6 +33,13 @@ private:
 
   std::string m_global_frame_id;
 
+  // Distance from center to use requested resolution
+  double m_full_resolution_distance;
+
+  double m_center_x = 0.0;
+  double m_center_y = 0.0;
+
+  std::map<std::string, std::shared_ptr<costmap_2d::Costmap2D> > m_costmap_cache;
 };
 
 } // namespace s57_layer

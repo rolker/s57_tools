@@ -6,6 +6,7 @@
 
 class GDALDataset;
 class OGREnvelope;
+class OGRGeometry;
 
 namespace costmap_2d
 {
@@ -28,8 +29,11 @@ public:
   std::string const &filePath() const;
   std::string const &label() const;
   std::shared_ptr<costmap_2d::Costmap2D> getCosts(double minLat, double minLon, double maxLat, double maxLon, S57Layer &layer);
+  double minimumPixelSize();
+  double distanceTo(double x, double y, S57Layer &layer) const;
 private:
   void open();
+  void rasterize(costmap_2d::Costmap2D& map, OGRGeometry& geometry, S57Layer &layer, unsigned char value);
 
 private:
   std::string m_file_path;
