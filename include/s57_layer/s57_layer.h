@@ -24,6 +24,12 @@ public:
   bool llToWorld(double lat, double lon, double &x, double &y);
   bool worldToLatLon(double x, double y, double &lat, double &lon);
 
+  double minimumDepth() const;
+  double maximumCautionDepth() const;
+  double overheadClearance() const;
+  unsigned char maximumCautionCost() const;
+  unsigned char unsurveyedCost() const;
+
 private:
   void reconfigureCallback(S57LayerConfig &config, uint32_t level);
 
@@ -35,6 +41,19 @@ private:
 
   // Distance from center to use requested resolution
   double m_full_resolution_distance;
+
+  // minimum depth considered considered not lethal and start of caution area
+  double m_minimum_depth;
+
+  // maximum depth used for caution area
+  double m_maximum_caution_depth;
+
+  // cost assigned at shallowest end of caution area
+  unsigned char m_maximum_caution_cost;
+
+  unsigned char m_unsurveyed_cost;
+
+  double m_overhead_clearance;
 
   double m_center_x = 0.0;
   double m_center_y = 0.0;

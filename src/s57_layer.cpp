@@ -21,6 +21,17 @@ void S57Layer::onInitialize()
   ros::NodeHandle nh("~/" + name_);
   current_ = false;
 
+  nh.param("minimum_depth", m_minimum_depth, 0.0);
+  nh.param("maximum_caution_depth", m_maximum_caution_depth, 5.0);
+  nh.param("overhead_clearance", m_overhead_clearance, 10.0);
+  
+  int cost;
+  nh.param("maximum_caution_cost", cost, 100);
+  m_maximum_caution_cost = cost;
+
+  nh.param("unsurveyed_cost", cost, 128);
+  m_unsurveyed_cost = cost;
+
   std::string enc_root = ros::package::getPath("s57_layer")+"/data/ENC_ROOT";
   nh.param("enc_root", enc_root, enc_root);
   nh.param("full_resolution_distance", m_full_resolution_distance, 100.0);
@@ -163,6 +174,31 @@ bool S57Layer::llToWorld(double lat, double lon, double &x, double &y)
     }
   }
   return false;
+}
+
+double S57Layer::minimumDepth() const
+{
+  return m_minimum_depth;
+}
+
+double S57Layer::maximumCautionDepth() const
+{
+  return m_maximum_caution_depth;
+}
+
+unsigned char S57Layer::maximumCautionCost() const
+{
+  return m_maximum_caution_cost;
+}
+
+unsigned char S57Layer::unsurveyedCost() const
+{
+  return m_unsurveyed_cost;
+}
+
+double S57Layer::overheadClearance() const
+{
+  return m_overhead_clearance;
 }
 
 } // namespace s57_layer

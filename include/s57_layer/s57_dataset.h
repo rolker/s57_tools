@@ -34,7 +34,8 @@ public:
 private:
   void open();
   void rasterize(costmap_2d::Costmap2D& map, OGRGeometry& geometry, S57Layer &layer, unsigned char value);
-
+  void updateCost(costmap_2d::Costmap2D& map, unsigned int mx, unsigned int my,  unsigned char value);
+  
 private:
   std::string m_file_path;
   std::string m_label;
