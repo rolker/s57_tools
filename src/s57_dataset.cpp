@@ -53,28 +53,25 @@ void S57Dataset::open()
       // 864/270 = 3.2 lines/mm
       // pixel size = 1/3.2 = 0.3125 mm -> 0.0003125 meters
       // symbols should be at least 12 pixels: 3.75 mm or 0.00375 meters
-      int minSCAMIN = -1;
-      for(auto l: m_dataset->GetLayers())
+      
+      OGRLayer* dsid = m_dataset->GetLayerByName("DSID");
+      if(dsid)
       {
-        l->ResetReading();
-        OGRFeature* feature;
-        while(feature = l->GetNextFeature())
+        dsid->ResetReading();
+        OGRFeature* feature = dsid->GetNextFeature();
+        if(feature)
         {
-          int i = feature->GetFieldIndex("SCAMIN");
-          if(i>-1) 
+          int i = feature->GetFieldIndex("DSPM_CSCL");
+          if(feature->IsFieldSetAndNotNull(i))
           {
-            int scamin = feature->GetFieldAsInteger(i);
-            if(scamin != 0)
-            {
-              if(minSCAMIN == -1)
-                minSCAMIN = scamin;
-              else
-                minSCAMIN = std::min(minSCAMIN, scamin);
-            }
+            m_chart_scale = feature->GetFieldAsDouble(i);
+            //m_minimum_pixel_size = 0.0003125*chart_scale;
           }
+          OGRFeature::DestroyFeature(feature);
         }
+
       }
-      m_minimum_pixel_size = 0.0003125*minSCAMIN;
+
     }
     else
       m_dataset.reset();
@@ -96,11 +93,11 @@ std::string const &S57Dataset::label() const
   return m_label;
 }
 
-double S57Dataset::minimumPixelSize()
+double S57Dataset::chartScale()
 {
   if(!m_dataset)
     open();
-  return m_minimum_pixel_size;
+  return m_chart_scale;
 }
 
 double S57Dataset::distanceTo(double x, double y, S57Layer &layer) const
@@ -130,17 +127,13 @@ double S57Dataset::distanceTo(double x, double y, S57Layer &layer) const
   return std::nan("");
 }
 
-std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(double minLat, double minLon, double maxLat, double maxLon, S57Layer &layer)
+std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, double resolution)
 {
   std::shared_ptr<costmap_2d::Costmap2D> ret;
   if(!m_dataset)
     open();
-  if(m_dataset && m_minimum_pixel_size > 0.0)
+  if(m_dataset)
   {
-    // OGREnvelope envelope;
-    // envelope.Merge(minLon, minLat);
-    // envelope.Merge(maxLon, maxLat);
-    // envelope.Intersect(*m_envelope);
     OGREnvelope envelope(*m_envelope);
 
     double minX, minY, maxX, maxY;
@@ -148,11 +141,11 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(double minLat, doubl
     {
       // http://www.cs.cmu.edu/~quake/triangle.html
 
-      ret = std::shared_ptr<costmap_2d::Costmap2D>(new costmap_2d::Costmap2D(std::ceil((maxX-minX)/m_minimum_pixel_size), std::ceil((maxY-minY)/m_minimum_pixel_size), m_minimum_pixel_size, minX, minY,  costmap_2d::NO_INFORMATION));
+      ret = std::shared_ptr<costmap_2d::Costmap2D>(new costmap_2d::Costmap2D(std::ceil((maxX-minX)/resolution), std::ceil((maxY-minY)/resolution), resolution, minX, minY,  costmap_2d::NO_INFORMATION));
 
       ROS_DEBUG_STREAM(m_label);
       ROS_DEBUG_STREAM("world: " << minX << ", " << minY << " to " << maxX << ", " << maxY);
-      ROS_DEBUG_STREAM("cell size: " << m_minimum_pixel_size);
+      ROS_DEBUG_STREAM("cell size: " << resolution);
       ROS_DEBUG_STREAM("map size: " << ret->getSizeInCellsX() << ", " << ret->getSizeInCellsY());
 
       for(auto&& featurePair: m_dataset->GetFeatures())
@@ -394,7 +387,7 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(double minLat, doubl
           case 150: // TSEZNE Traffice separation zone
           case 152: // TWRTPT Two-way route part
           case 156: // WATTUR Water trubulence
-          case 301: // M_CSCL Compilation scale of data
+          case 301: // M_CSCL Compilation scale of data    *if the scale differs from base chart scale, we we generate different grids
           case 302: // M_COVR Coverage
           case 305: // M_NPUB Nautical publication information
           case 306: // M_NSYS Navigational system of marks

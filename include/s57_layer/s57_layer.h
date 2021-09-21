@@ -6,6 +6,7 @@
 #include <costmap_2d/layered_costmap.h>
 #include <s57_layer/S57LayerConfig.h>
 #include <dynamic_reconfigure/server.h>
+#include <unordered_set>
 
 namespace s57_layer
 {
@@ -20,6 +21,8 @@ public:
   virtual void onInitialize() override;
   virtual void updateBounds(double robot_x, double robot_y, double robot_yaw, double* min_x, double* min_y, double* max_x, double* max_y) override;
   virtual void updateCosts(costmap_2d::Costmap2D& master_grid, int min_i, int min_j, int max_i, int max_j)  override;  
+
+  virtual void matchSize() override;
 
   bool llToWorld(double lat, double lon, double &x, double &y);
   bool worldToLatLon(double x, double y, double &lat, double &lon);
@@ -39,9 +42,6 @@ private:
 
   std::string m_global_frame_id;
 
-  // Distance from center to use requested resolution
-  double m_full_resolution_distance;
-
   // minimum depth considered considered not lethal and start of caution area
   double m_minimum_depth;
 
@@ -55,10 +55,21 @@ private:
 
   double m_overhead_clearance;
 
-  double m_center_x = 0.0;
-  double m_center_y = 0.0;
-
   std::map<std::string, std::shared_ptr<costmap_2d::Costmap2D> > m_costmap_cache;
+
+  double m_origin_x = 0.0;
+  double m_origin_y = 0.0;
+  double m_resolution = 1.0;
+
+  int m_tile_size = 100;
+
+  typedef std::pair<int, int> TileID;
+
+  std::map<TileID, std::shared_ptr<costmap_2d::Costmap2D>> m_tiles;
+
+  TileID worldToTile(double x, double y);
+  void generateTile(TileID id);
+
 };
 
 } // namespace s57_layer

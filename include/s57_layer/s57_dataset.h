@@ -28,8 +28,8 @@ public:
   std::shared_ptr<OGREnvelope> getEnvelope();
   std::string const &filePath() const;
   std::string const &label() const;
-  std::shared_ptr<costmap_2d::Costmap2D> getCosts(double minLat, double minLon, double maxLat, double maxLon, S57Layer &layer);
-  double minimumPixelSize();
+  std::shared_ptr<costmap_2d::Costmap2D> getCosts(S57Layer &layer, double resolution);
+  double chartScale();
   double distanceTo(double x, double y, S57Layer &layer) const;
 private:
   void open();
@@ -41,7 +41,7 @@ private:
   std::string m_label;
   std::shared_ptr<GDALDataset> m_dataset;
   std::shared_ptr<OGREnvelope> m_envelope;
-  double m_minimum_pixel_size = 0.0;
+  double m_chart_scale = 0.0;
 };
 
 } // namespace s57_layer
