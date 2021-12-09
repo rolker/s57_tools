@@ -7,6 +7,7 @@
 #include <s57_layer/S57LayerConfig.h>
 #include <dynamic_reconfigure/server.h>
 #include <unordered_set>
+#include <future>
 
 namespace s57_layer
 {
@@ -56,6 +57,7 @@ private:
   double m_overhead_clearance;
 
   std::map<std::string, std::shared_ptr<costmap_2d::Costmap2D> > m_costmap_cache;
+  std::map<std::string, std::future<std::shared_ptr<costmap_2d::Costmap2D> > > m_pending_costmaps;
 
   double m_origin_x = 0.0;
   double m_origin_y = 0.0;
@@ -63,9 +65,19 @@ private:
 
   int m_tile_size = 100;
 
+  double m_update_timeout = 0.5;
+
   typedef std::pair<int, int> TileID;
 
-  std::map<TileID, std::shared_ptr<costmap_2d::Costmap2D>> m_tiles;
+  struct TileInfo
+  {
+    std::shared_ptr<costmap_2d::Costmap2D> costmap;
+    bool complete = false;
+    int chart_count = 0;
+    bool needs_update = false;
+  };
+
+  std::map<TileID, TileInfo> m_tiles;
 
   TileID worldToTile(double x, double y);
   void generateTile(TileID id);

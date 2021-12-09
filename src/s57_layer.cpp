@@ -32,6 +32,8 @@ void S57Layer::onInitialize()
   nh.param("unsurveyed_cost", cost, 128);
   m_unsurveyed_cost = cost;
 
+  nh.param("update_timeout", m_update_timeout, m_update_timeout);
+
   std::string enc_root = ros::package::getPath("s57_layer")+"/data/ENC_ROOT";
   nh.param("enc_root", enc_root, enc_root);
   m_s57Catalog = std::shared_ptr<S57Catalog>(new S57Catalog(enc_root));
@@ -48,8 +50,10 @@ void S57Layer::onInitialize()
 void S57Layer::matchSize()
 {
   costmap_2d::Costmap2D* master = layered_costmap_->getCostmap();
+  ROS_INFO_STREAM("old origin:" << m_origin_x << ", " << m_origin_y);
   m_origin_x = master->getOriginX();
   m_origin_y = master->getOriginY();
+  ROS_INFO_STREAM("new origin:" << m_origin_x << ", " << m_origin_y);
   m_resolution = master->getResolution();
   m_tiles.clear();
 }
@@ -76,6 +80,8 @@ void S57Layer::updateBounds(double robot_x, double robot_y, double robot_yaw, do
   if (!enabled_)
     return;
 
+  ros::Time start_time = ros::Time::now();
+
   costmap_2d::Costmap2D* master = layered_costmap_->getCostmap();
 
   double  world_min_x, world_min_y, world_max_x, world_max_y;
@@ -87,26 +93,51 @@ void S57Layer::updateBounds(double robot_x, double robot_y, double robot_yaw, do
   TileID start_tile = worldToTile(world_min_x, world_min_y);
   TileID end_tile = worldToTile(world_max_x, world_max_y);
 
-  std::cerr << "start_tile: " << start_tile.first << ", " << start_tile.second << std::endl;
-  std::cerr << "end_tile: " << end_tile.first << ", " << end_tile.second << std::endl;
+  //std::cerr << "start_tile: " << start_tile.first << ", " << start_tile.second << std::endl;
+  //std::cerr << "end_tile: " << end_tile.first << ", " << end_tile.second << std::endl;
 
-  for(int i = start_tile.first; i <= end_tile.first; i++)
-    for(int j = start_tile.second; j <= end_tile.second; j++)
-      if(m_tiles.find(std::make_pair(i,j)) == m_tiles.end())
-        generateTile(std::make_pair(i,j));
+  //ROS_INFO_STREAM("in: " << *min_x << ", " << *min_y << " to " << *max_x << ", " << *max_y);
 
+  bool done = false;
+  int tiles_needing_update = 0;
+  for(int i = start_tile.first; i <= end_tile.first && !done; i++)
+    for(int j = start_tile.second; j <= end_tile.second && !done; j++)
+    {
+      auto id = std::make_pair(i,j);
+      if(!m_tiles[id].complete)
+        generateTile(id);
+      if(m_tiles[id].needs_update)
+      {
+        tiles_needing_update += 1;
+        double tile_min_x = m_origin_x+id.first*m_resolution*m_tile_size;
+        double tile_max_x = tile_min_x + m_resolution*m_tile_size;
+        double tile_min_y = m_origin_y+id.second*m_resolution*m_tile_size;
+        double tile_max_y = tile_min_y + m_resolution*m_tile_size;
 
-  *min_x = std::min(*min_x, world_min_x);
-  *max_x = std::max(*max_x, world_max_x);
-  *min_y = std::min(*min_y, world_min_y);
-  *max_y = std::max(*max_y, world_max_y);
-  std::cerr << "updateBounds: " << *min_x << ", " << *min_y << " to " << *max_x << ", " << *max_y << std::endl;
+        *min_x = std::min(*min_x, tile_min_x-m_resolution);
+        *max_x = std::max(*max_x, tile_max_x+m_resolution);
+        *min_y = std::min(*min_y, tile_min_y-m_resolution);
+        *max_y = std::max(*max_y, tile_max_y+m_resolution);
+      }
+      if(ros::Time::now() - start_time > ros::Duration(m_update_timeout))
+        done = true;
+    }
+
+  if(tiles_needing_update > 0)
+  {
+    *min_x = std::min(*min_x, world_min_x);
+    *max_x = std::max(*max_x, world_max_x);
+    *min_y = std::min(*min_y, world_min_y);
+    *max_y = std::max(*max_y, world_max_y);
+  }
+
+  //ROS_INFO_STREAM("out: " << *min_x << ", " << *min_y << " to " << *max_x << ", " << *max_y);
 }
 
 
 void S57Layer::generateTile(TileID id)
 {
-  std::cerr << "Generate tile: " << id.first << ", " << id.second << std::endl;
+  //std::cerr << "Generate tile: " << id.first << ", " << id.second << std::endl;
 
   double world_min_x = m_origin_x+id.first*m_resolution*m_tile_size;
   double world_max_x = world_min_x + m_resolution*m_tile_size;
@@ -117,58 +148,79 @@ void S57Layer::generateTile(TileID id)
   if(worldToLatLon(world_min_x, world_min_y, minLat, minLon) && worldToLatLon(world_max_x, world_max_y, maxLat, maxLon))
   {
     auto charts = m_s57Catalog->intersectingCharts(minLat, minLon, maxLat, maxLon);
-    std::cerr << charts.size() << " charts" << std::endl;
+    //std::cerr << charts.size() << " charts" << std::endl;
     std::map<std::pair<double, std::string>, std::shared_ptr<costmap_2d::Costmap2D> > costmaps;
+    bool all_charts_avaiable = true;
     for(auto c: charts)
     {
-      std::cerr << "  " << c->label() << std::endl;
-      std::cerr << "    chart scale: " << c->chartScale() << std::endl;
+      //std::cerr << "  " << c->label() << std::endl;
+      //std::cerr << "    chart scale: " << c->chartScale() << std::endl;
       double resolution = 0.5*c->chartScale()*0.0003125;
-      std::cerr << "    resolution: " << resolution << std::endl;
+      //std::cerr << "    resolution: " << resolution << std::endl;
       if(resolution >= m_resolution)
       {
-        if(m_costmap_cache.find(c->label()) == m_costmap_cache.end())
-          m_costmap_cache[c->label()] = c->getCosts(*this, resolution);
-        auto costmap = m_costmap_cache[c->label()];
+        std::string chart = c->label();
+        auto costmap = m_costmap_cache[chart];
+        if(!costmap)
+        {
+          if(m_pending_costmaps.count(chart) == 0)
+          {
+            ROS_INFO_STREAM("async call to getCosts for " << chart);
+            m_pending_costmaps[chart] = std::async(&S57Dataset::getCosts, c.get(), std::ref(*this), resolution);
+          }
+          auto status = m_pending_costmaps[chart].wait_for(std::chrono::milliseconds(10));
+          if(status == std::future_status::ready)
+          {
+            ROS_INFO_STREAM("got results from getCosts for " << chart);
+            costmap = m_pending_costmaps[chart].get();
+            m_costmap_cache[chart] = costmap;
+          }
+        }
         if(costmap)
         {
           //costmap->saveMap(c->label()+".pgm");
           costmaps[std::make_pair(costmap->getResolution(), c->label())] = costmap;
         }
+        else
+          all_charts_avaiable = false;
       }
     }
-
-    std::shared_ptr<costmap_2d::Costmap2D> tile(new costmap_2d::Costmap2D(m_tile_size, m_tile_size, m_resolution, world_min_x, world_min_y, costmap_2d::NO_INFORMATION ));
-
-    for(auto cm: costmaps)
+    m_tiles[id].complete = all_charts_avaiable;
+    if(costmaps.size() > m_tiles[id].chart_count)
     {
-      std::cerr << cm.first.second << " " << cm.first.first << std::endl;
-      double source_res = cm.second->getResolution();
-      double half_res = source_res/2.0;
-      int minx, miny, maxx, maxy;
-      cm.second->worldToMapEnforceBounds(world_min_x, world_min_y, minx, miny);
-      cm.second->worldToMapEnforceBounds(world_max_x+source_res, world_max_y+source_res, maxx, maxy);
-      for(unsigned int row = miny; row < maxy; row++)
-        for(unsigned int col = minx; col < maxx; col++)
-        {
-          if( cm.second->getCost(col, row) == costmap_2d::NO_INFORMATION)
-            continue;
-          double wx, wy;
-          cm.second->mapToWorld(col, row, wx, wy);
-          int mx1, my1, mx2, my2;
-          tile->worldToMapEnforceBounds(wx-half_res, wy-half_res, mx1, my1);
-          tile->worldToMapEnforceBounds(wx+half_res, wy+half_res, mx2, my2);
+      std::shared_ptr<costmap_2d::Costmap2D> tile(new costmap_2d::Costmap2D(m_tile_size, m_tile_size, m_resolution, world_min_x, world_min_y, costmap_2d::NO_INFORMATION ));
 
-          for(int my = my1; my <= my2; my++)
-            for(int mx = mx1; mx <= mx2; mx++)
-              if(tile->getCost(mx, my) == costmap_2d::NO_INFORMATION)
-                tile->setCost(mx, my, cm.second->getCost(col, row));
-        }
-    }
+      for(auto cm: costmaps)
+      {
+        //std::cerr << cm.first.second << " " << cm.first.first << std::endl;
+        double source_res = cm.second->getResolution();
+        double half_res = source_res/2.0;
+        int minx, miny, maxx, maxy;
+        cm.second->worldToMapEnforceBounds(world_min_x, world_min_y, minx, miny);
+        cm.second->worldToMapEnforceBounds(world_max_x+source_res, world_max_y+source_res, maxx, maxy);
+        for(unsigned int row = miny; row < maxy; row++)
+          for(unsigned int col = minx; col < maxx; col++)
+          {
+            if( cm.second->getCost(col, row) == costmap_2d::NO_INFORMATION)
+              continue;
+            double wx, wy;
+            cm.second->mapToWorld(col, row, wx, wy);
+            int mx1, my1, mx2, my2;
+            tile->worldToMapEnforceBounds(wx-half_res, wy-half_res, mx1, my1);
+            tile->worldToMapEnforceBounds(wx+half_res, wy+half_res, mx2, my2);
+
+            for(int my = my1; my <= my2; my++)
+              for(int mx = mx1; mx <= mx2; mx++)
+                if(tile->getCost(mx, my) == costmap_2d::NO_INFORMATION)
+                  tile->setCost(mx, my, cm.second->getCost(col, row));
+          }
+      }
 
     //tile->saveMap(std::to_string(id.first)+"_"+std::to_string(id.second)+".pgm");
  
-    m_tiles[id] = tile;
+      m_tiles[id].costmap = tile;
+      m_tiles[id].needs_update = true;
+    }
   }
 }
 
@@ -184,22 +236,26 @@ void S57Layer::updateCosts(costmap_2d::Costmap2D& master_grid, int min_i, int mi
   TileID start_tile = worldToTile(world_min_x, world_min_y);
   TileID end_tile = worldToTile(world_max_x, world_max_y);
 
-  for(int i = start_tile.first; i <= end_tile.first; i++)
-    for(int j = start_tile.second; j <= end_tile.second; j++)
+  for(int ti = start_tile.first; ti <= end_tile.first; ti++)
+  {
+    int tile_offset_x = -ti*m_tile_size + (master_grid.getOriginX()-m_origin_x)/m_resolution;
+    int start_i = std::max(min_i, -tile_offset_x);
+    int i_count = std::min(max_i, m_tile_size-tile_offset_x)-start_i;
+    // if(i_count < m_tile_size && i_count > 0)
+    //   ROS_INFO_STREAM("min_i: " << min_i << " max_i: " << max_i << " start_i: " << start_i << " i_count: " << i_count << " tile start: " << start_i+tile_offset_x << " ( tile size:" << m_tile_size << ")");
+    for(int tj = start_tile.second; tj <= end_tile.second; tj++)
     {
-      TileID tile = std::make_pair(i,j);
+      int tile_offset_y = -tj*m_tile_size + (master_grid.getOriginY()-m_origin_y)/m_resolution;
+
+      TileID tile = std::make_pair(ti,tj);
       //std::cerr << "updateCosts: tile: " << tile.first << ", " << tile.second << std::endl;
-      if(m_tiles.find(tile) != m_tiles.end())
+      auto current_tile = m_tiles[tile].costmap;
+      for(int j = std::max(min_j, -tile_offset_y); j < max_j && j+tile_offset_y < m_tile_size; j++)
       {
-        auto current_tile = m_tiles[tile];
-        int tile_offset_x = -tile.first*m_tile_size + (master_grid.getOriginX()-m_origin_x)/m_resolution;
-        int tile_offset_y = -tile.second*m_tile_size + (master_grid.getOriginY()-m_origin_y)/m_resolution;
-        int start_i = std::max(min_i, min_i-tile_offset_x);
-        int i_count = std::min(max_i-start_i, m_tile_size);
-        for(int j = std::max(min_j, min_j-tile_offset_y); j < max_j && j+tile_offset_y < m_tile_size; j++)
+        unsigned int target_index = master_grid.getIndex(start_i, j);
+        if(current_tile)
         {
           unsigned int source_index = current_tile->getIndex(start_i+tile_offset_x, j+tile_offset_y);
-          unsigned int target_index = master_grid.getIndex(start_i, j);
           for(int i = 0; i < i_count; i++)
           {
             unsigned char cost = current_tile->getCharMap()[source_index+i];
@@ -207,8 +263,17 @@ void S57Layer::updateCosts(costmap_2d::Costmap2D& master_grid, int min_i, int mi
               master_grid.getCharMap()[target_index+i]=cost;
           }
         }
+        else
+        {
+          for(int i = 0; i < i_count; i++)
+            master_grid.getCharMap()[target_index+i]=costmap_2d::NO_INFORMATION;
+
+        }
       }
+      m_tiles[tile].needs_update = false;
+      //ROS_INFO_STREAM("Updated tile " << tile.first << "," << tile.second);
     }
+  }
 }
 
 bool S57Layer::worldToLatLon(double x, double y, double &lat, double &lon)
