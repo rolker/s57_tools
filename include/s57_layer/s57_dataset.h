@@ -33,7 +33,7 @@ public:
   double distanceTo(double x, double y, S57Layer &layer) const;
 private:
   void open();
-  void rasterize(costmap_2d::Costmap2D& map, OGRGeometry& geometry, S57Layer &layer, unsigned char value);
+  void rasterize(costmap_2d::Costmap2D& map, OGRGeometry* geometry, S57Layer &layer, unsigned char value);
   void updateCost(costmap_2d::Costmap2D& map, unsigned int mx, unsigned int my,  unsigned char value);
   
 private:

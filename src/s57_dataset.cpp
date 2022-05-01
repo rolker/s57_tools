@@ -169,16 +169,16 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
               double min_depth = featurePair.feature->GetFieldAsDouble(i);
               double min_caution_depth = layer.minimumDepth();
               if(min_depth <= min_caution_depth)
-                rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, layer.maximumCautionCost());
+                rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, layer.maximumCautionCost());
               else
               {
                 double max_caution_depth = layer.maximumCautionDepth();
                 if(min_depth >= max_caution_depth)
-                  rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, costmap_2d::FREE_SPACE);
+                  rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, costmap_2d::FREE_SPACE);
                 else
                 {
                   unsigned char cost = layer.maximumCautionCost()*(1.0 - ((min_depth-min_caution_depth)/(max_caution_depth-min_caution_depth)));
-                  rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, cost);
+                  rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, cost);
                 }
               }
             }
@@ -187,14 +187,14 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
 
           // unknown depth
           case 154: // UNSARE
-            rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, layer.unsurveyedCost());
+            rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, layer.unsurveyedCost());
             break;
 
           // no min depth values, so lethal
           case 65:  // HULKES Hulk
           case 71:  // LNDARE Land area
           case 95:  // PONTON Pontoon
-            rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, costmap_2d::LETHAL_OBSTACLE);
+            rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, costmap_2d::LETHAL_OBSTACLE);
             break;
 
           // Group 2 (Everything else not in Group 1)
@@ -209,7 +209,7 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
           case 90:  // PILPNT Pile
           case 98:  // PYLONS Pylon/bridge support
           case 122: // SLCONS Shoreline construction
-            rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, costmap_2d::LETHAL_OBSTACLE);
+            rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, costmap_2d::LETHAL_OBSTACLE);
             break;
 
           // Overhead obstructions
@@ -231,7 +231,7 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
               if(featurePair.feature->IsFieldSetAndNotNull(i))
                 clearance = featurePair.feature->GetFieldAsDouble(i);
             if(clearance <= layer.overheadClearance())
-              rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, costmap_2d::LETHAL_OBSTACLE);
+              rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, costmap_2d::LETHAL_OBSTACLE);
             break;
           }
 
@@ -242,7 +242,7 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
           case 96:  // PRCARE Precautionary area
           case 158: // WEDKLP Weed/Kelp
             // TODO make caution cost  a parameter
-            rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, 50);
+            rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, 50);
             break;
 
           // Restricted area
@@ -254,9 +254,9 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
               {
                 int restriction_type = featurePair.feature->GetFieldAsInteger(i);
                 if(restriction_type == 7 || restriction_type == 8)
-                  rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, costmap_2d::LETHAL_OBSTACLE);
+                  rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, costmap_2d::LETHAL_OBSTACLE);
                 if(restriction_type == 14) // area to be avoided
-                  rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, layer.maximumCautionCost());
+                  rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, layer.maximumCautionCost());
               }
 
             break;
@@ -271,16 +271,16 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
               double min_depth = featurePair.feature->GetFieldAsDouble(i);
               double min_caution_depth = layer.minimumDepth();
               if(min_depth <= min_caution_depth)
-                rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, layer.maximumCautionCost());
+                rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, layer.maximumCautionCost());
               else
               {
                 double max_caution_depth = layer.maximumCautionDepth();
                 if(min_depth >= max_caution_depth)
-                  rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, costmap_2d::FREE_SPACE);
+                  rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, costmap_2d::FREE_SPACE);
                 else
                 {
                   unsigned char cost = layer.maximumCautionCost()*(1.0 - ((min_depth-min_caution_depth)/(max_caution_depth-min_caution_depth)));
-                  rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, cost);
+                  rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, cost);
                 }
               }
             }
@@ -299,16 +299,16 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
                 double sounding = featurePair.feature->GetFieldAsDouble(i);
                 double min_caution_depth = layer.minimumDepth();
                 if(sounding <= min_caution_depth)
-                  rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, layer.maximumCautionCost());
+                  rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, layer.maximumCautionCost());
                 else
                 {
                   double max_caution_depth = layer.maximumCautionDepth();
                   if(sounding >= max_caution_depth)
-                    rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, costmap_2d::FREE_SPACE);
+                    rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, costmap_2d::FREE_SPACE);
                   else
                   {
                     unsigned char cost = layer.maximumCautionCost()*(1.0 - ((sounding-min_caution_depth)/(max_caution_depth-min_caution_depth)));
-                    rasterize(*ret, *(featurePair.feature->GetGeometryRef()), layer, cost);
+                    rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, cost);
                   }
                 }
               }
@@ -414,18 +414,24 @@ void S57Dataset::updateCost(costmap_2d::Costmap2D& map, unsigned int mx, unsigne
     map.setCost(mx, my, value);
 }
 
-void S57Dataset::rasterize(costmap_2d::Costmap2D& map, OGRGeometry& geometry, S57Layer &layer, unsigned char value)
+void S57Dataset::rasterize(costmap_2d::Costmap2D& map, OGRGeometry* geometry, S57Layer &layer, unsigned char value)
 {
   struct WorldPoint
   {
     double x,y;
   };
 
-  switch(geometry.getGeometryType())
+  if(!geometry)
+  {
+    ROS_WARN_STREAM("null geometry in rasterize");
+    return;
+  }
+
+  switch(geometry->getGeometryType())
   {
     case wkbPoint:
     {
-      OGRPoint* point = geometry.toPoint();
+      OGRPoint* point = geometry->toPoint();
       WorldPoint wp;
       unsigned int mx, my;
       if(layer.llToWorld(point->getY(), point->getX(), wp.x, wp.y))
@@ -435,7 +441,7 @@ void S57Dataset::rasterize(costmap_2d::Costmap2D& map, OGRGeometry& geometry, S5
     }
     case wkbLineString:
     {
-      OGRLineString* lineString = geometry.toLineString();
+      OGRLineString* lineString = geometry->toLineString();
       std::vector<WorldPoint> lines;
       for(auto p: *lineString)
       {
@@ -484,31 +490,37 @@ void S57Dataset::rasterize(costmap_2d::Costmap2D& map, OGRGeometry& geometry, S5
     case wkbPolygon:
     // http://alienryderflex.com/polygon_fill/
     {
-      OGRPolygon* polygon = geometry.toPolygon();
+      OGRPolygon* polygon = geometry->toPolygon();
 
       std::vector<std::vector<WorldPoint> > rings;
       rings.push_back(std::vector<WorldPoint>());
 
-      for(auto p: polygon->getExteriorRing())
+      auto er = polygon->getExteriorRing();
+      if(!er)
+        ROS_WARN_STREAM("null exterior ring");
+      else
       {
-        WorldPoint wp;
-        if(layer.llToWorld(p.getY(), p.getX(), wp.x, wp.y))
-          rings.back().push_back(wp);
-      }
-      if(!polygon->getExteriorRing()->get_IsClosed())
-        rings.back().push_back(rings.back().front()); // close the ring if necessary
-      for(int i = 0; i < polygon->getNumInteriorRings(); i++)
-      {
-        rings.push_back(std::vector<WorldPoint>());
-        for(auto p: polygon->getInteriorRing(i))
+        for(auto p: er)
         {
           WorldPoint wp;
-          if(layer.llToWorld(p.getX(), p.getY(), wp.x, wp.y))
+          if(layer.llToWorld(p.getY(), p.getX(), wp.x, wp.y))
             rings.back().push_back(wp);
         }
-        if(!polygon->getInteriorRing(i)->get_IsClosed())
+        if(!er->get_IsClosed())
           rings.back().push_back(rings.back().front()); // close the ring if necessary
+        for(int i = 0; i < polygon->getNumInteriorRings(); i++)
+        {
+          rings.push_back(std::vector<WorldPoint>());
+          for(auto p: polygon->getInteriorRing(i))
+          {
+            WorldPoint wp;
+            if(layer.llToWorld(p.getX(), p.getY(), wp.x, wp.y))
+              rings.back().push_back(wp);
+          }
+          if(!polygon->getInteriorRing(i)->get_IsClosed())
+            rings.back().push_back(rings.back().front()); // close the ring if necessary
 
+        }
       }
 
       // std::cerr << "      polygon with " << rings.size() << " rings" << std::endl;
@@ -579,7 +591,7 @@ void S57Dataset::rasterize(costmap_2d::Costmap2D& map, OGRGeometry& geometry, S5
       break;
     }
     default:
-      ROS_WARN_STREAM("geometry type not handled: " << geometry.getGeometryType());
+      ROS_WARN_STREAM("geometry type not handled: " << geometry->getGeometryType());
   }
 
 }
