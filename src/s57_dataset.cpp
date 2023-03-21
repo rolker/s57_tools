@@ -148,13 +148,17 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
       ROS_DEBUG_STREAM("cell size: " << resolution);
       ROS_DEBUG_STREAM("map size: " << ret->getSizeInCellsX() << ", " << ret->getSizeInCellsY());
 
+      int last_debug_objl = 0;
+      costmap_2d::Costmap2D debug_map;
+      bool debug_map_updated = false;
+
       for(auto&& featurePair: m_dataset->GetFeatures())
       {
         int i = featurePair.feature->GetFieldIndex("OBJL");
         if(i == -1) // no field index found
           continue;
         int objl = featurePair.feature->GetFieldAsInteger(i);
-        
+        auto drawn = true;
         switch(objl)
         {
           // Group 1 (skin of the earth)
@@ -254,7 +258,7 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
               {
                 int restriction_type = featurePair.feature->GetFieldAsInteger(i);
                 if(restriction_type == 7 || restriction_type == 8)
-                  rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, costmap_2d::LETHAL_OBSTACLE);
+                  rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, layer.maximumCautionCost()); //costmap_2d::LETHAL_OBSTACLE);
                 if(restriction_type == 14) // area to be avoided
                   rasterize(*ret, featurePair.feature->GetGeometryRef(), layer, layer.maximumCautionCost());
               }
@@ -394,13 +398,56 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
           case 308: // M_QUAL Quality of data
           case 400: // C_AGGR Aggregation
           case 401: // C_ASSO Association
+            drawn = false;
             break; 
 
           default:
+            drawn = false;
             ROS_INFO_STREAM("Not handled: objl: " << objl << " name " << featurePair.layer->GetName());
+        }
+
+        if(!layer.debugPath().empty() && m_label == layer.debugLabel())
+        {
+          if (objl != last_debug_objl && debug_map_updated)
+          {
+            std::stringstream fname;
+            fname << layer.debugPath() << "/" << m_label << "_" << std::setfill('0') << std::setw(3) <<  last_debug_objl << ".pgm";
+            costmap_2d::Costmap2D cm = debug_map;
+            for(int i = 0; i < cm.getSizeInCellsX(); i++)
+              for(int j = 0; j < cm.getSizeInCellsY(); j++)
+              {
+                auto val = debug_map.getCost(i,j);
+                if(val == costmap_2d::NO_INFORMATION)
+                  val = 25;
+                cm.setCost(i,cm.getSizeInCellsY()-1-j, val);
+              }
+            cm.saveMap(fname.str());
+            debug_map_updated = false;
+          }
+          if (drawn)
+          {
+            debug_map = *ret;
+            debug_map_updated = true;
+            last_debug_objl = objl;
+          }
         }
       }
 
+      if(!layer.debugPath().empty())
+      {
+        std::stringstream fname;
+        fname << layer.debugPath() << "/" << m_label << ".pgm";
+        costmap_2d::Costmap2D cm = *ret;
+        for(int i = 0; i < cm.getSizeInCellsX(); i++)
+          for(int j = 0; j < cm.getSizeInCellsY(); j++)
+          {
+            auto val = ret->getCost(i,j);
+            if(val == costmap_2d::NO_INFORMATION)
+              val = 25;
+            cm.setCost(i,cm.getSizeInCellsY()-1-j, val);
+          }
+        cm.saveMap(fname.str());
+      }
     }
   }
   return ret;

@@ -34,6 +34,8 @@ public:
   unsigned char maximumCautionCost() const;
   unsigned char unsurveyedCost() const;
 
+  const std::string &debugPath() const;
+  const std::string &debugLabel() const;
 private:
   void reconfigureCallback(S57LayerConfig &config, uint32_t level);
 
@@ -82,6 +84,8 @@ private:
   TileID worldToTile(double x, double y);
   void generateTile(TileID id);
 
+  std::string m_debug_path = "";
+  std::string m_debug_label = "";
 };
 
 } // namespace s57_layer

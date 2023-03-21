@@ -38,6 +38,9 @@ void S57Layer::onInitialize()
   nh.param("enc_root", enc_root, enc_root);
   m_s57Catalog = std::shared_ptr<S57Catalog>(new S57Catalog(enc_root));
 
+  nh.param("debug_path", m_debug_path, m_debug_path);
+  nh.param("debug_label", m_debug_label, m_debug_label);
+
   m_reconfigureServer = std::shared_ptr<dynamic_reconfigure::Server<S57LayerConfig> >(new dynamic_reconfigure::Server<S57LayerConfig>(nh));
   m_reconfigureServer->setCallback(std::bind(&S57Layer::reconfigureCallback, this, std::placeholders::_1, std::placeholders::_2));
 
@@ -333,5 +336,16 @@ double S57Layer::overheadClearance() const
 {
   return m_overhead_clearance;
 }
+
+const std::string& S57Layer::debugPath() const
+{
+  return m_debug_path;
+}
+
+const std::string& S57Layer::debugLabel() const
+{
+  return m_debug_label;
+}
+
 
 } // namespace s57_layer
