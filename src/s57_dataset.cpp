@@ -159,6 +159,7 @@ std::shared_ptr<costmap_2d::Costmap2D> S57Dataset::getCosts(S57Layer &layer, dou
           continue;
         int objl = featurePair.feature->GetFieldAsInteger(i);
         auto drawn = true;
+
         switch(objl)
         {
           // Group 1 (skin of the earth)
@@ -512,15 +513,19 @@ void S57Dataset::rasterize(costmap_2d::Costmap2D& map, OGRGeometry* geometry, S5
             if (fabs(dx) > fabs(dy))
             {
               stepx = map.getResolution();
-              stepy = stepx * dy/dx;
+              stepy = stepx * fabs(dy/dx);
               stepCount = abs(dx/stepx);
             }
             else
             {
               stepy = map.getResolution();
-              stepx = stepy * dx/dy;
+              stepx = stepy * fabs(dx/dy);
               stepCount = abs(dy/stepy);
             }
+            if(dx < 0)
+              stepx = -stepx;
+            if(dy < 0)
+              stepy = -stepy;
             for(int i = 0; i <= stepCount; i++)
             {
               unsigned int mx, my;

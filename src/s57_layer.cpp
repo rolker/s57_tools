@@ -151,15 +151,11 @@ void S57Layer::generateTile(TileID id)
   if(worldToLatLon(world_min_x, world_min_y, minLat, minLon) && worldToLatLon(world_max_x, world_max_y, maxLat, maxLon))
   {
     auto charts = m_s57Catalog->intersectingCharts(minLat, minLon, maxLat, maxLon);
-    //std::cerr << charts.size() << " charts" << std::endl;
     std::map<std::pair<double, std::string>, std::shared_ptr<costmap_2d::Costmap2D> > costmaps;
     bool all_charts_avaiable = true;
     for(auto c: charts)
     {
-      //std::cerr << "  " << c->label() << std::endl;
-      //std::cerr << "    chart scale: " << c->chartScale() << std::endl;
       double resolution = 0.5*c->chartScale()*0.0003125;
-      //std::cerr << "    resolution: " << resolution << std::endl;
       if(resolution >= m_resolution)
       {
         std::string chart = c->label();
@@ -168,7 +164,7 @@ void S57Layer::generateTile(TileID id)
         {
           if(m_pending_costmaps.count(chart) == 0)
           {
-            ROS_INFO_STREAM("async call to getCosts for " << chart);
+            ROS_INFO_STREAM("async call to getCosts for " << chart << " scale: " << c->chartScale() << " resolution: " << 0.5*c->chartScale()*0.0003125);
             m_pending_costmaps[chart] = std::async(&S57Dataset::getCosts, c.get(), std::ref(*this), resolution);
           }
           auto status = m_pending_costmaps[chart].wait_for(std::chrono::milliseconds(10));
@@ -181,12 +177,13 @@ void S57Layer::generateTile(TileID id)
         }
         if(costmap)
         {
-          //costmap->saveMap(c->label()+".pgm");
           costmaps[std::make_pair(costmap->getResolution(), c->label())] = costmap;
         }
         else
           all_charts_avaiable = false;
       }
+      else
+        ROS_INFO_STREAM_ONCE_NAMED(c->label(), "Skipping chart: " << c->label() << " scale: " << c->chartScale() << " resolution: " << 0.5*c->chartScale()*0.0003125);
     }
     m_tiles[id].complete = all_charts_avaiable;
     if(costmaps.size() > m_tiles[id].chart_count)
@@ -195,7 +192,6 @@ void S57Layer::generateTile(TileID id)
 
       for(auto cm: costmaps)
       {
-        //std::cerr << cm.first.second << " " << cm.first.first << std::endl;
         double source_res = cm.second->getResolution();
         double half_res = source_res/2.0;
         int minx, miny, maxx, maxy;
@@ -218,9 +214,6 @@ void S57Layer::generateTile(TileID id)
                   tile->setCost(mx, my, cm.second->getCost(col, row));
           }
       }
-
-    //tile->saveMap(std::to_string(id.first)+"_"+std::to_string(id.second)+".pgm");
- 
       m_tiles[id].costmap = tile;
       m_tiles[id].needs_update = true;
     }
