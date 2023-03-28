@@ -21,15 +21,15 @@ void S57Layer::onInitialize()
   ros::NodeHandle nh("~/" + name_);
   current_ = false;
 
-  nh.param("minimum_depth", m_minimum_depth, 0.0);
-  nh.param("maximum_caution_depth", m_maximum_caution_depth, 5.0);
-  nh.param("overhead_clearance", m_overhead_clearance, 10.0);
+  nh.param("minimum_depth", m_minimum_depth, m_minimum_depth);
+  nh.param("maximum_caution_depth", m_maximum_caution_depth, m_maximum_caution_depth);
+  nh.param("overhead_clearance", m_overhead_clearance, m_overhead_clearance);
   
   int cost;
-  nh.param("maximum_caution_cost", cost, 100);
+  nh.param("maximum_caution_cost", cost, int(m_maximum_caution_cost));
   m_maximum_caution_cost = cost;
 
-  nh.param("unsurveyed_cost", cost, 128);
+  nh.param("unsurveyed_cost", cost, int(m_unsurveyed_cost));
   m_unsurveyed_cost = cost;
 
   nh.param("update_timeout", m_update_timeout, m_update_timeout);

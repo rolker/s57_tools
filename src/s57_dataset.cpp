@@ -529,7 +529,14 @@ void S57Dataset::rasterize(costmap_2d::Costmap2D& map, OGRGeometry* geometry, S5
             for(int i = 0; i <= stepCount; i++)
             {
               unsigned int mx, my;
-              if(map.worldToMap(p1->x+i*stepx, p1->y+i*stepy, mx, my))
+              double half_res = map.getResolution()/2.0;
+              if(map.worldToMap(p1->x+i*stepx-half_res, p1->y+i*stepy, mx, my))
+                updateCost(map, mx, my, value);
+              if(map.worldToMap(p1->x+i*stepx+half_res, p1->y+i*stepy, mx, my))
+                updateCost(map, mx, my, value);
+              if(map.worldToMap(p1->x+i*stepx, p1->y+i*stepy-half_res, mx, my))
+                updateCost(map, mx, my, value);
+              if(map.worldToMap(p1->x+i*stepx, p1->y+i*stepy+half_res, mx, my))
                 updateCost(map, mx, my, value);
             }
           }

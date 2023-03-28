@@ -46,17 +46,19 @@ private:
   std::string m_global_frame_id;
 
   // minimum depth considered considered not lethal and start of caution area
-  double m_minimum_depth;
+  double m_minimum_depth = 0.0;
 
   // maximum depth used for caution area
-  double m_maximum_caution_depth;
+  double m_maximum_caution_depth = 5.0;
 
   // cost assigned at shallowest end of caution area
-  unsigned char m_maximum_caution_cost;
+  unsigned char m_maximum_caution_cost = 200;
 
-  unsigned char m_unsurveyed_cost;
+  // cost assigned to unsurveyed areas
+  unsigned char m_unsurveyed_cost = 100;
 
-  double m_overhead_clearance;
+  // minimum height required (meters)
+  double m_overhead_clearance = 10.0;
 
   std::map<std::string, std::shared_ptr<costmap_2d::Costmap2D> > m_costmap_cache;
   std::map<std::string, std::future<std::shared_ptr<costmap_2d::Costmap2D> > > m_pending_costmaps;
