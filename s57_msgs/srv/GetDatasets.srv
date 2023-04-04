@@ -1,0 +1,8 @@
+# Used to request datasets within given extents
+
+geographic_msgs/BoundingBox bounds
+float32                     minimum_scale
+
+---
+
+DatasetInfo[]               datasets

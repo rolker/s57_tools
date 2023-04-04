@@ -6,6 +6,9 @@
 #include "s57_layer/s57_dataset.h"
 #include <tf2/utils.h>
 
+#include "s57_msgs/GetDatasets.h"
+
+
 PLUGINLIB_EXPORT_CLASS(s57_layer::S57Layer, costmap_2d::Layer)
 
 namespace s57_layer
@@ -151,6 +154,19 @@ void S57Layer::generateTile(TileID id)
   if(worldToLatLon(world_min_x, world_min_y, minLat, minLon) && worldToLatLon(world_max_x, world_max_y, maxLat, maxLon))
   {
     auto charts = m_s57Catalog->intersectingCharts(minLat, minLon, maxLat, maxLon);
+
+    // s57_msgs::GetDatasets req;
+    // req.request.bounds.max_pt.latitude = maxLat;
+    // req.request.bounds.max_pt.longitude = maxLon;
+    // req.request.bounds.min_pt.latitude = minLat;
+    // req.request.bounds.min_pt.longitude = minLon;
+    // ros::ServiceClient client = ros::NodeHandle().serviceClient<s57_msgs::GetDatasets>("/s57_grids/get_datasets");
+    // if(client.call(req))
+    //   ROS_INFO_STREAM("got " << req.response.datasets.size() << " charts");
+    // else
+    //   ROS_WARN_STREAM("get_datasets service call failed");
+    
+
     std::map<std::pair<double, std::string>, std::shared_ptr<costmap_2d::Costmap2D> > costmaps;
     bool all_charts_avaiable = true;
     for(auto c: charts)
