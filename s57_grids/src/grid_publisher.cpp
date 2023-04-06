@@ -17,6 +17,7 @@ GridPublisher::GridPublisher()
 
   resolution_factor_ = ros::param::param("~resolution_factor", resolution_factor_);
   map_frame_ = ros::param::param("~map_frame", map_frame_);
+  buffer_radius_ = ros::param::param("~buffer_radius", buffer_radius_);
 
   robot_.frame_id = ros::param::param("~robot/frame_id", robot_.frame_id);
   robot_.minimum_depth = ros::param::param("~robot/minimum_depth", robot_.minimum_depth);
@@ -139,7 +140,7 @@ void GridPublisher::checkForNewGrids(const ros::TimerEvent& event)
     for(auto r: requested_grids_)
     {
       auto ds = catalog_->dataset(r);
-      if(grid_publishers_.count(ds->label()) == 0 && pending_dataset_grids_.count(ds->label()) == 0)
+      if(grid_publishers_.count(ds->label()) == 0 && pending_dataset_grids_.count(ds->label()) == 0 && pending_buffered_grids_.count(ds->label()) == 0)
       {
         pending_dataset_grids_[ds->label()] = std::async(&S57Dataset::getGrid, ds, GridCreationContext(map_frame_, tf_buffer_, resolution_factor_) );
       }
@@ -155,6 +156,22 @@ void GridPublisher::checkForNewGrids(const ros::TimerEvent& event)
       if(pg.second.wait_for(std::chrono::milliseconds(10)) == std::future_status::ready)
       {
         auto grid = pg.second.get();
+        pending_buffered_grids_[pg.first] = std::async(&GridPublisher::bufferGrid, this, grid);
+        done_grids.push_back(pg.first);
+      }
+  }
+  for(auto d: done_grids)
+    pending_dataset_grids_.erase(d);
+
+  done_grids.clear();
+
+  for(auto& pg: pending_buffered_grids_)
+  {
+    if(pg.second.valid())
+      if(pg.second.wait_for(std::chrono::milliseconds(10)) == std::future_status::ready)
+      {
+        auto grid = pg.second.get();
+
         auto ds = catalog_->dataset(pg.first);
         grid_publishers_[pg.first] = n.advertise<grid_map_msgs::GridMap>("datasets/"+ds->topic(), 1, true);
         grid_map_msgs::GridMap message;
@@ -163,13 +180,102 @@ void GridPublisher::checkForNewGrids(const ros::TimerEvent& event)
         grid_publishers_[pg.first].publish(message);
         done_grids.push_back(pg.first);
 
+        std::lock_guard<std::mutex> lock(dataset_grids_mutex_);
         dataset_grids_[pg.first] = grid;
       }
   }
   for(auto d: done_grids)
-    pending_dataset_grids_.erase(d);
+    pending_buffered_grids_.erase(d);
 }
 
+std::shared_ptr<grid_map::GridMap> GridPublisher::bufferGrid(std::shared_ptr<grid_map::GridMap> grid)
+{
+  grid->add("speed");
+  for(grid_map::GridMapIterator i(*grid); !i.isPastEnd(); ++i)
+  {
+    {
+      // Check if we need to quit
+      std::lock_guard<std::mutex> abort_lock(abort_flag_mutex_);
+      if(abort_flag_)
+        return std::shared_ptr<grid_map::GridMap>();
+    }
+
+    auto speed = std::nan("");
+    if(!isnan(grid->at("restricted", *i)))
+      speed = -1.0;
+    else
+    {
+      auto overhead = grid->at("overhead", *i);
+      if(!isnan(overhead) && overhead <= robot_.overhead_clearance)
+      {
+        speed = -1.0;
+      }
+      else
+      {
+        auto elevation = grid->at("elevation", *i);
+        if(!isnan(elevation))
+        {
+          auto depth = -elevation;
+          if (depth < 0.0)
+            speed = -1.0;
+          else if (depth <= robot_.minimum_depth)
+            speed = 0.0;
+          else if(depth > robot_.maximum_caution_depth)
+            speed = robot_.maximum_speed;
+          else
+            speed = robot_.minimum_speed+(robot_.maximum_speed-robot_.minimum_speed)*(depth-robot_.minimum_depth)/(robot_.maximum_caution_depth-robot_.minimum_depth);
+          if(!isnan(grid->at("unsurveyed", *i)) || !isnan(grid->at("caution", *i)))
+            if(isnan(speed))
+              speed = robot_.minimum_speed;
+            else
+              speed = std::max(robot_.minimum_speed, 0.5*speed);
+        }
+      }
+    } 
+    if(!isnan(speed))
+      grid->at("speed", *i) = speed;
+  }
+
+  grid->add("buffered_speed", grid->get("speed"));
+  for(grid_map::GridMapIterator i(*grid); !i.isPastEnd(); ++i)
+  {
+    {
+      // Check if we need to quit
+      std::lock_guard<std::mutex> abort_lock(abort_flag_mutex_);
+      if(abort_flag_)
+        return std::shared_ptr<grid_map::GridMap>();
+    }
+    auto speed = grid->at("speed", *i);
+    if(isnan(speed))
+    {
+      grid_map::Position center;
+      if (grid->getPosition(*i, center))
+      {
+        bool need_buffering = false;
+        for(grid_map::CircleIterator ci(*grid, center, grid->getResolution()); !ci.isPastEnd(); ++ci)
+          if(!isnan(grid->at("speed", *ci)))
+          {
+            need_buffering = true;
+            break;
+          }
+        if(need_buffering)
+          for(grid_map::CircleIterator ci(*grid, center, buffer_radius_); !ci.isPastEnd(); ++ci)
+          {
+            if(!isnan(grid->at("speed", *ci)))
+            {
+              grid_map::Position position;
+              if(grid->getPosition(*ci, position))
+              {
+                auto distance_factor = (position-center).norm()/buffer_radius_;
+                grid->at("buffered_speed", *ci) = std::min(double(grid->at("buffered_speed", *ci)), distance_factor*robot_.maximum_speed);
+              }
+            }
+          }
+      }
+    }    
+  }
+  return grid;
+}
 
 void GridPublisher::updateGrid(GridOutput& output_grid)
 {
@@ -178,14 +284,15 @@ void GridPublisher::updateGrid(GridOutput& output_grid)
   ecef.importFromEPSG(4978);
   auto earth_to_ll = std::shared_ptr<OGRCoordinateTransformation>(OGRCreateCoordinateTransformation(&ecef, &wgs84), OCTDestroyCoordinateTransformation);
 
-  // double alt = 0.0;
-  // if(ll_to_earth->Tr Transform(1, &lat, &lon, &alt))
-  // {
-  //   return ecefToMap(lat, lon, alt, x, y);
-  // }
+  ros::Time next_publish_time = ros::Time::now();
 
   grid_map::GridMap grid;
   grid.setGeometry(grid_map::Length(output_grid.length, output_grid.length), output_grid.resolution);
+
+  grid.add("speed");
+  grid.add("source_resolution");
+
+  grid.setFrameId(map_frame_);
 
   while(true)
   {
@@ -243,10 +350,52 @@ void GridPublisher::updateGrid(GridOutput& output_grid)
         }
       }
 
-      std::vector<std::shared_ptr<grid_map::GridMap> > grids;
+      std::map<double, std::vector<std::shared_ptr<grid_map::GridMap> > > grids_by_resolution;
       
+      for(auto dl: dataset_labels)
+      {
+        std::lock_guard<std::mutex> lock(dataset_grids_mutex_);
+        if (dataset_grids_.count(dl))
+          grids_by_resolution[dataset_grids_[dl]->getResolution()] .push_back(dataset_grids_[dl]);
+      }
 
+      for(grid_map::GridMapIterator i(grid); !i.isPastEnd(); ++i)
+      {
+        grid_map::Position position;
+        if(grid.getPosition(*i, position))
+        {
+          auto source_resolution = grid.at("source_resolution", *i);
+          for(auto& gr: grids_by_resolution)
+          {
+            if(!isnan(source_resolution) && gr.first >= source_resolution)
+              break;
+            for(auto g: gr.second)
+            {
+              grid_map::Index from_index;
+              if(g->getIndex(position, from_index))
+              {
+                auto speed = g->at("buffered_speed", from_index);
+                if(!isnan(speed))
+                {
+                  grid.at("speed", *i) = speed;
+                  grid.at("source_resolution", *i) = gr.first;
+                  source_resolution = gr.first;
+                }
 
+              }
+            }
+          }
+        }
+      }
+
+      if(ros::Time::now() >= next_publish_time)
+      {
+        grid.setTimestamp(ros::Time::now().toNSec());
+        grid_map_msgs::GridMap message;
+        grid_map::GridMapRosConverter::toMessage(grid, message);
+        output_grid.publisher.publish(message);
+        next_publish_time += ros::Duration(output_grid.period);
+      }
     }
     catch(const std::exception& e)
     {

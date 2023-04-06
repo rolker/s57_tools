@@ -22,15 +22,24 @@ private:
   bool getDatasets(s57_msgs::GetDatasets::Request &req, s57_msgs::GetDatasets::Response &res);
   void checkForNewGrids(const ros::TimerEvent& event);
 
+  std::shared_ptr<grid_map::GridMap> bufferGrid(std::shared_ptr<grid_map::GridMap> grid);
+
   std::shared_ptr<s57_grids::S57Catalog> catalog_;
   ros::ServiceServer list_service_;
   ros::ServiceServer get_service_;
 
   double resolution_factor_ = 1.0;  
 
+  double buffer_radius_ = 50.0;
+
   std::map<std::string, ros::Publisher> grid_publishers_;
+  
   std::map<std::string, std::shared_ptr<grid_map::GridMap> > dataset_grids_;
+  std::mutex dataset_grids_mutex_;
+  
   std::map<std::string, std::future<std::shared_ptr<grid_map::GridMap> > > pending_dataset_grids_;
+
+  std::map<std::string, std::future<std::shared_ptr<grid_map::GridMap> > > pending_buffered_grids_;
 
   ros::Timer new_grids_timer_;
 

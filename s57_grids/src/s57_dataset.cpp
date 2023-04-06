@@ -489,11 +489,16 @@ void GridCreationContext::rasterize(grid_map::GridMap& grid_map, OGRGeometry* ge
         p2++;
         while(p2 != lines.end())
         {
-          grid_map::Index start, end;
-          if(grid_map.getIndex(grid_map::Position(p1->x, p1->y), start) &&
-             grid_map.getIndex(grid_map::Position(p2->x, p2->y), end))
-            for (grid_map::LineIterator iterator(grid_map, start, end); !iterator.isPastEnd(); ++iterator)
-              updateCost(grid_map, *iterator, value, layer, lower);
+          double half_res = grid_map.getResolution()/2.0;
+          for(int xtweak = -1; xtweak <= 1; ++xtweak)
+            for(int ytweak = -1; ytweak <= 1; ++ytweak)
+            {
+              grid_map::Index start, end;
+              if(grid_map.getIndex(grid_map::Position(p1->x+xtweak*half_res, p1->y+ytweak*half_res), start) &&
+                grid_map.getIndex(grid_map::Position(p2->x+xtweak*half_res, p2->y+ytweak*half_res), end))
+                for (grid_map::LineIterator iterator(grid_map, start, end); !iterator.isPastEnd(); ++iterator)
+                  updateCost(grid_map, *iterator, value, layer, lower);
+            }
           p1 = p2;
           p2++;
         }
