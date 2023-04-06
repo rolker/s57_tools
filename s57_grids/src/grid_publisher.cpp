@@ -312,7 +312,7 @@ void GridPublisher::updateGrid(GridOutput& output_grid)
     center.header.stamp = ros::Time::now();
     try
     {
-      auto center_map = tf_buffer_.transform(center, map_frame_);
+      auto center_map = tf_buffer_.transform(center, map_frame_, ros::Duration(1.0));
       auto lower_left = center_map;
       double half_length = output_grid.length/2.0;
       lower_left.point.x -= half_length;
@@ -321,8 +321,8 @@ void GridPublisher::updateGrid(GridOutput& output_grid)
       upper_right.point.x += half_length;
       upper_right.point.y += half_length;
       
-      auto ll_earth = tf_buffer_.transform(lower_left, "earth");
-      auto ur_earth = tf_buffer_.transform(upper_right, "earth");
+      auto ll_earth = tf_buffer_.transform(lower_left, "earth", ros::Duration(1.0));
+      auto ur_earth = tf_buffer_.transform(upper_right, "earth", ros::Duration(1.0));
       if(earth_to_ll->Transform(1, &ll_earth.point.x, &ll_earth.point.y, &ll_earth.point.z) &&
          earth_to_ll->Transform(1, &ur_earth.point.x, &ur_earth.point.y, &ur_earth.point.z))
       {
