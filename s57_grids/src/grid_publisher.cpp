@@ -218,7 +218,7 @@ std::shared_ptr<grid_map::GridMap> GridPublisher::bufferGrid(std::shared_ptr<gri
           auto depth = -elevation;
           if (depth < 0.0)
             speed = -1.0;
-          else if (depth <= robot_.minimum_depth)
+          else if (depth < robot_.minimum_depth)
             speed = 0.0;
           else if(depth > robot_.maximum_caution_depth)
             speed = robot_.maximum_speed;
@@ -235,6 +235,8 @@ std::shared_ptr<grid_map::GridMap> GridPublisher::bufferGrid(std::shared_ptr<gri
     if(!isnan(speed))
       grid->at("speed", *i) = speed;
   }
+
+  return grid;
 
   grid->add("buffered_speed", grid->get("speed"));
   for(grid_map::GridMapIterator i(*grid); !i.isPastEnd(); ++i)
@@ -374,7 +376,7 @@ void GridPublisher::updateGrid(GridOutput& output_grid)
               grid_map::Index from_index;
               if(g->getIndex(position, from_index))
               {
-                auto speed = g->at("buffered_speed", from_index);
+                auto speed = g->at("speed", from_index);
                 if(!isnan(speed))
                 {
                   grid.at("speed", *i) = speed;
