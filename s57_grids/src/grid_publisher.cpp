@@ -128,7 +128,10 @@ bool GridPublisher::getDatasets(s57_msgs::GetDatasets::Request &req, s57_msgs::G
   {
     std::lock_guard<std::mutex> lock(requested_grids_mutex);
     for(auto d: res.datasets)
+    {
       requested_grids_.push_back(d.label);
+      requested_grids_to_publish_.push_back(d.label);
+    }
   }
   return ret;
 }
@@ -172,12 +175,21 @@ void GridPublisher::checkForNewGrids(const ros::TimerEvent& event)
       {
         auto grid = pg.second.get();
 
-        auto ds = catalog_->dataset(pg.first);
-        grid_publishers_[pg.first] = n.advertise<grid_map_msgs::GridMap>("datasets/"+ds->topic(), 1, true);
-        grid_map_msgs::GridMap message;
-        grid_map::GridMapRosConverter::toMessage(*grid, message);
-        ROS_INFO_STREAM("Publishing grid to " << "datasets/" << pg.first);
-        grid_publishers_[pg.first].publish(message);
+        {
+          std::lock_guard<std::mutex> lock(requested_grids_mutex);
+          if(std::find(requested_grids_to_publish_.begin(), requested_grids_to_publish_.end(), pg.first) != requested_grids_to_publish_.end())
+          {
+            auto ds = catalog_->dataset(pg.first);
+            grid_publishers_[pg.first] = n.advertise<grid_map_msgs::GridMap>("datasets/"+ds->topic(), 1, true);
+            grid_map_msgs::GridMap message;
+            grid_map::GridMapRosConverter::toMessage(*grid, message);
+            ROS_INFO_STREAM("Publishing grid to " << "datasets/" << pg.first);
+            grid_publishers_[pg.first].publish(message);
+          }
+          else
+            grid_publishers_[pg.first]; // create the entry in the map so above check to see if we need to generate a grid works.
+        }
+
         done_grids.push_back(pg.first);
 
         std::lock_guard<std::mutex> lock(dataset_grids_mutex_);
