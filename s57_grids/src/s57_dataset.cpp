@@ -569,7 +569,7 @@ void GridCreationContext::rasterize(grid_map::GridMap& grid_map, OGRGeometry* ge
 
         for(auto ring: rings)
         {
-          for(int i = 0; i < ring.size()-1; i++)
+          for(int i = 0; i+1 < ring.size(); i++)
           {
             if(   ring[i].y < wy && ring[i+1].y >= wy 
               || ring[i+1].y < wy && ring[i].y >= wy)
