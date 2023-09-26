@@ -69,10 +69,10 @@ S57Catalog::S57Catalog(std::string enc_root)
     }
     else
     {
-      std::cerr << "Unable to open derectory: " << enc_root << std::endl;
+      std::cerr << "Unable to open directory: " << enc_root << std::endl;
     }
   }
-  std::cerr << "found " << datasets_.size() << " charts" << std::endl;
+  std::cout << "found " << datasets_.size() << " charts" << std::endl;
 }
 
 bool S57Catalog::ecefToLatLong(double x, double y, double z, double &lat, double &lon)

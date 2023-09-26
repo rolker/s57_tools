@@ -183,7 +183,7 @@ void GridPublisher::checkForNewGrids(const ros::TimerEvent& event)
             grid_publishers_[pg.first] = n.advertise<grid_map_msgs::GridMap>("datasets/"+ds->topic(), 1, true);
             grid_map_msgs::GridMap message;
             grid_map::GridMapRosConverter::toMessage(*grid, message);
-            ROS_INFO_STREAM("Publishing grid to " << "datasets/" << pg.first);
+            ROS_DEBUG_STREAM("Publishing grid to " << "datasets/" << pg.first);
             grid_publishers_[pg.first].publish(message);
           }
           else

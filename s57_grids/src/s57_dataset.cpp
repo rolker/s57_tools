@@ -156,7 +156,7 @@ double S57Dataset::recommendedResolution()
 std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext context)
 {
   ros::Time start_time = ros::Time::now();
-  ROS_INFO_STREAM("Generating grid for " << topic());
+  ROS_DEBUG_STREAM("Generating grid for " << topic());
   std::shared_ptr<grid_map::GridMap> ret;
   auto dataset = open();
   if(dataset)
@@ -169,7 +169,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
       ret = std::make_shared<grid_map::GridMap>();
       ret->setGeometry(grid_map::Length(maxX-minX, maxY-minY), recommendedResolution()*context.resolution_factor);
       auto s = ret->getSize();
-      ROS_INFO_STREAM(topic() << " grid size: " << s[0] << " x " << s[1]);
+      ROS_DEBUG_STREAM(topic() << " grid size: " << s[0] << " x " << s[1]);
       ret->setPosition(grid_map::Position(minX+(maxX-minX)/2.0,minY+(maxY-minY)/2.0));
       ret->setFrameId(context.earth_to_map.header.frame_id);
       ret->add("elevation");
@@ -396,13 +396,13 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
             break; 
 
           default:
-            ROS_INFO_STREAM("Not handled: objl: " << objl << " name " << featurePair.layer->GetName());
+            ROS_DEBUG_STREAM("Not handled: objl: " << objl << " name " << featurePair.layer->GetName());
         }
       }
     }
   }
   auto elapsed = ros::Time::now() - start_time;
-  ROS_INFO_STREAM(topic() << " done. Elapsed time: " << elapsed);
+  ROS_DEBUG_STREAM(topic() << " done. Elapsed time: " << elapsed);
   return ret;
 }
 
@@ -452,7 +452,7 @@ void GridCreationContext::rasterize(grid_map::GridMap& grid_map, OGRGeometry* ge
 {
   if(!geometry)
   {
-    ROS_WARN_STREAM("null geometry in rasterize");
+    ROS_DEBUG_STREAM("null geometry in rasterize");
     return;
   }
 
@@ -515,7 +515,7 @@ void GridCreationContext::rasterize(grid_map::GridMap& grid_map, OGRGeometry* ge
 
       auto er = polygon->getExteriorRing();
       if(!er)
-        ROS_WARN_STREAM("null exterior ring");
+        ROS_DEBUG_STREAM("null exterior ring");
       else
       {
         //grid_map.add("temp");
@@ -607,7 +607,7 @@ void GridCreationContext::rasterize(grid_map::GridMap& grid_map, OGRGeometry* ge
       break;
     }
     default:
-      ROS_WARN_STREAM("geometry type not handled: " << geometry->getGeometryType());
+      ROS_DEBUG_STREAM("geometry type not handled: " << geometry->getGeometryType());
   }
 
 }
