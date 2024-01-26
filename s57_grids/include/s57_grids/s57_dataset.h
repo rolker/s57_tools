@@ -26,7 +26,7 @@ struct GridCreationContext
   bool llToMap(double lat, double lon, double &x, double &y);
   void rasterize(grid_map::GridMap& grid_map, OGRGeometry* geometry, double value, std::string layer, bool lower=false);
 
-  // compares existing value and only updates if greater when lower is false or lower wehn lower is true
+  // compares existing value and only updates if greater when lower is false or lower when lower is true
   void updateCost(grid_map::GridMap& grid_map, const grid_map::Index& index,  double value, std::string layer, bool lower=false);
 };
 

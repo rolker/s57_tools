@@ -73,11 +73,12 @@ private:
     double period; // time between checks if grid needs updating (seconds)
 
     ros::Publisher publisher;
+    ros::Publisher costmap_publisher; // Used for debugging in rviz, which struggles to display grid_maps.
     ros::Time last_publish_time;
     std::thread thread;
   };
 
-  // Continoulsy updates a grid based on the robot's position.
+  // Continuously updates a grid based on the robot's position.
   // This is meant to be run in its own thread and will only return
   // when the abort flag is set.
   void updateGrid(GridOutput& output_grid);

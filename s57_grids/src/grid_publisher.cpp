@@ -4,6 +4,7 @@
 #include <xmlrpcpp/XmlRpcException.h>
 #include <geometry_msgs/PointStamped.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <nav_msgs/OccupancyGrid.h>
 #include "ogrsf_frmts.h"
 
 namespace s57_grids
@@ -84,6 +85,7 @@ GridPublisher::GridPublisher()
   for(auto& g: output_grids_)
   {
     g.second.publisher = n.advertise<grid_map_msgs::GridMap>("grids/"+g.first, 1, true);
+    g.second.costmap_publisher = n.advertise<nav_msgs::OccupancyGrid>("occupancy_grids/"+g.first, 1, true);
     g.second.thread = std::thread(&GridPublisher::updateGrid, this, std::ref(g.second));
   }
 
@@ -408,6 +410,9 @@ void GridPublisher::updateGrid(GridOutput& output_grid)
         grid_map_msgs::GridMap message;
         grid_map::GridMapRosConverter::toMessage(grid, message);
         output_grid.publisher.publish(message);
+        nav_msgs::OccupancyGrid occupancy_grid;
+        grid_map::GridMapRosConverter::toOccupancyGrid(grid, "speed", robot_.maximum_speed, 0.0, occupancy_grid);
+        output_grid.costmap_publisher.publish(occupancy_grid);
         next_publish_time += ros::Duration(output_grid.period);
       }
     }
