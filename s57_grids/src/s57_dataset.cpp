@@ -518,45 +518,27 @@ void GridCreationContext::rasterize(grid_map::GridMap& grid_map, OGRGeometry* ge
         ROS_DEBUG_STREAM("null exterior ring");
       else
       {
-        //grid_map.add("temp");
-        //grid_map::Polygon gpolygon;
         for(auto p: er)
         {
           MapPoint wp;
           if(llToMap(p.getY(), p.getX(), wp.x, wp.y))
             rings.back().push_back(wp);
-            //gpolygon.addVertex(grid_map::Position(wp.x, wp.y));
         }
         if(!er->get_IsClosed())
           rings.back().push_back(rings.back().front()); // close the ring if necessary
-          //gpolygon.addVertex(gpolygon.getVertex(0));
-
-        // for(grid_map::PolygonIterator iterator(grid_map, gpolygon); !iterator.isPastEnd(); ++iterator)
-        //   grid_map.at("temp", *iterator) = 1.0;
-
 
         for(int i = 0; i < polygon->getNumInteriorRings(); i++)
         {
           rings.push_back(std::vector<MapPoint>());
-          //gpolygon = grid_map::Polygon();
           for(auto p: polygon->getInteriorRing(i))
           {
             MapPoint wp;
             if(llToMap(p.getX(), p.getY(), wp.x, wp.y))
               rings.back().push_back(wp);
-              //gpolygon.addVertex(grid_map::Position(wp.x, wp.y));
           }
           if(!polygon->getInteriorRing(i)->get_IsClosed())
             rings.back().push_back(rings.back().front()); // close the ring if necessary
-            //gpolygon.addVertex(gpolygon.getVertex(0));
-          //for(grid_map::PolygonIterator iterator(grid_map, gpolygon); !iterator.isPastEnd(); ++iterator)
-            //grid_map.at("temp", *iterator) = -1.0;
         }
-
-        // for (grid_map::GridMapIterator iterator(grid_map); !iterator.isPastEnd(); ++iterator)
-        //   if(grid_map.at("temp", *iterator) == 1.0)
-        //     updateCost(grid_map, *iterator, value, layer, lower);
-        // grid_map.erase("temp");
       }
 
       for(int row = 0; row < grid_map.getSize()[1]; row++)
