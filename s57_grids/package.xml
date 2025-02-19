@@ -10,14 +10,14 @@
 
   <license>BSD</license>
 
-
-  <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>libgdal-dev</build_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
   <depend>grid_map_ros</depend>
-  <depend>roscpp</depend>
-  <depend>roslib</depend>
+  <depend>marine_charts</depend>
+  <depend>rclcpp</depend>
   <depend>s57_msgs</depend>
-  <depend>tf2_geometry_msgs</depend>
+  <depend>tf2_ros</depend>
+
   <export>
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

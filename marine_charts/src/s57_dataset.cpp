@@ -1,11 +1,10 @@
-#include "s57_grids/s57_dataset.h"
+#include "marine_charts/s57_dataset.h"
 
 #include "ogrsf_frmts.h"
 #include <iostream>
-#include <costmap_2d/costmap_2d.h>
-#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
-namespace s57_grids
+namespace marine_charts
 {
 
 void GDALDeleter(GDALDataset* ds)
@@ -46,7 +45,7 @@ bool S57Dataset::intersects(double minLat, double minLon, double  maxLat, double
   return false;
 }
 
-const geographic_msgs::BoundingBox& S57Dataset::getBounds()
+const geographic_msgs::msg::BoundingBox& S57Dataset::getBounds()
 {
   if(!hasValidBounds())  
     open();
@@ -155,8 +154,6 @@ double S57Dataset::recommendedResolution()
 
 std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext context)
 {
-  ros::Time start_time = ros::Time::now();
-  ROS_DEBUG_STREAM("Generating grid for " << topic());
   std::shared_ptr<grid_map::GridMap> ret;
   auto dataset = open();
   if(dataset)
@@ -167,17 +164,15 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
        context.llToMap(bounds_.min_pt.latitude, bounds_.min_pt.longitude, minX, minY))
     {
       ret = std::make_shared<grid_map::GridMap>();
-      ret->setGeometry(grid_map::Length(maxX-minX, maxY-minY), recommendedResolution()*context.resolution_factor);
-      auto s = ret->getSize();
-      ROS_DEBUG_STREAM(topic() << " grid size: " << s[0] << " x " << s[1]);
+      ret->setGeometry(grid_map::Length(maxX-minX, maxY-minY), recommendedResolution()*context.resolution_factor());
       ret->setPosition(grid_map::Position(minX+(maxX-minX)/2.0,minY+(maxY-minY)/2.0));
-      ret->setFrameId(context.earth_to_map.header.frame_id);
+      ret->setFrameId(context.earth_to_map().header.frame_id);
       ret->add("elevation");
       ret->add("overhead");
       ret->add("unsurveyed");
       ret->add("caution");
       ret->add("restricted");
-      ret->setTimestamp(context.earth_to_map.header.stamp.toNSec());
+      ret->setTimestamp(rclcpp::Time(context.earth_to_map().header.stamp).nanoseconds());
 
       for(auto&& featurePair: dataset->GetFeatures())
       {
@@ -271,6 +266,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
             break;
 
           // Restricted area
+          case 88: // OSPARE Offshore production area
           case 112: // RESARE Restricted area
           {
             int i = featurePair.feature->GetFieldIndex("RESTRN");
@@ -311,6 +307,24 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
                 double sounding = featurePair.feature->GetFieldAsDouble(i);
                 context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -sounding, "elevation");
               }
+            break;
+          }
+
+          case 163: // NEWOBJ New object
+          {
+            std::cerr << "NEWOBJ" << std::endl;
+            int i = featurePair.feature->GetFieldIndex("CLSNAM");
+            if(i>0)
+            {
+              std::string class_name = featurePair.feature->GetFieldAsString(i);
+              std::cerr << "  CLSNAM: " << class_name << std::endl;
+            }
+            i = featurePair.feature->GetFieldIndex("CLSDEF");
+            if(i>0)
+            {
+              std::string class_def = featurePair.feature->GetFieldAsString(i);
+              std::cerr << "  CLSDEF: " << class_def << std::endl;
+            }
             break;
           }
 
@@ -380,6 +394,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
           case 127: // SLOGRD Sloping ground
           case 128: // SMCFAC Small craft facility
           case 129: // SOUNDG Sounding              *should we look at individual soundings?
+          case 135: // TESARE Territorial sea area
           case 144: // TOPMAR Topmark
           case 146: // TSSBND Traffic separation scheme boundary
           case 148: // TSSLPT Traffic separation scheme lane part
@@ -396,209 +411,12 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
             break; 
 
           default:
-            ROS_DEBUG_STREAM("Not handled: objl: " << objl << " name " << featurePair.layer->GetName());
+            std::cerr << "Not handled: objl: " << objl << " name " << featurePair.layer->GetName() << std::endl;
         }
       }
     }
   }
-  auto elapsed = ros::Time::now() - start_time;
-  ROS_DEBUG_STREAM(topic() << " done. Elapsed time: " << elapsed);
   return ret;
 }
 
-GridCreationContext::GridCreationContext(std::string map_frame, tf2_ros::Buffer &tf_buffer, double res_factor): resolution_factor(res_factor)
-{
-  earth_to_map = tf_buffer.lookupTransform(map_frame, "earth", ros::Time());
-}
-
-bool GridCreationContext::ecefToMap(double x, double y, double z, double &mx, double &my)
-{
-  geometry_msgs::Point ecef;
-  ecef.x = x;
-  ecef.y = y;
-  ecef.z = z;
-  geometry_msgs::Point map;
-  tf2::doTransform(ecef, map, earth_to_map);
-  mx = map.x;
-  my = map.y;
-  return true;
-}
-
-bool GridCreationContext::llToMap(double lat, double lon, double &x, double &y)
-{
-  // delay creation to make sure it gets created in thread where it
-  // will be used
-  if(!ll_to_earth)
-  {
-    OGRSpatialReference wgs84, ecef;
-    wgs84.SetWellKnownGeogCS("WGS84");
-    ecef.importFromEPSG(4978);
-    ll_to_earth = std::shared_ptr<OGRCoordinateTransformation>(OGRCreateCoordinateTransformation(&wgs84, &ecef), OCTDestroyCoordinateTransformation);
-  }
-  double alt = 0.0;
-  if(ll_to_earth->Transform(1, &lat, &lon, &alt))
-  {
-    return ecefToMap(lat, lon, alt, x, y);
-  }
-  return false;
-}
-
-struct MapPoint
-{
-  double x,y;
-};
-
-void GridCreationContext::rasterize(grid_map::GridMap& grid_map, OGRGeometry* geometry, double value, std::string layer, bool lower)
-{
-  if(!geometry)
-  {
-    ROS_DEBUG_STREAM("null geometry in rasterize");
-    return;
-  }
-
-  switch(geometry->getGeometryType())
-  {
-    case wkbPoint:
-    {
-      OGRPoint* point = geometry->toPoint();
-      MapPoint mp;
-      if(llToMap(point->getY(), point->getX(), mp.x, mp.y))
-      {
-        grid_map::Index i;
-        if(grid_map.getIndex(grid_map::Position(mp.x, mp.y), i))
-          updateCost(grid_map, i, value, layer, lower);
-      }
-      break;
-    }
-    case wkbLineString:
-    {
-      OGRLineString* lineString = geometry->toLineString();
-      std::vector<MapPoint> lines;
-      for(auto& p: *lineString)
-      {
-        MapPoint mp;
-        if(llToMap(p.getY(), p.getX(), mp.x, mp.y))
-        {
-          lines.push_back(mp);
-        }
-      }
-      if(lines.size() >1)
-      {
-        auto p1 = lines.begin();
-        auto p2 = p1;
-        p2++;
-        while(p2 != lines.end())
-        {
-          double half_res = grid_map.getResolution()/2.0;
-          for(int xtweak = -1; xtweak <= 1; ++xtweak)
-            for(int ytweak = -1; ytweak <= 1; ++ytweak)
-            {
-              grid_map::Index start, end;
-              if(grid_map.getIndex(grid_map::Position(p1->x+xtweak*half_res, p1->y+ytweak*half_res), start) &&
-                grid_map.getIndex(grid_map::Position(p2->x+xtweak*half_res, p2->y+ytweak*half_res), end))
-                for (grid_map::LineIterator iterator(grid_map, start, end); !iterator.isPastEnd(); ++iterator)
-                  updateCost(grid_map, *iterator, value, layer, lower);
-            }
-          p1 = p2;
-          p2++;
-        }
-      }
-      break;
-    }
-    case wkbPolygon:
-    // http://alienryderflex.com/polygon_fill/
-    {
-      OGRPolygon* polygon = geometry->toPolygon();
-
-      std::vector<std::vector<MapPoint> > rings;
-      rings.push_back(std::vector<MapPoint>());
-
-      auto er = polygon->getExteriorRing();
-      if(!er)
-        ROS_DEBUG_STREAM("null exterior ring");
-      else
-      {
-        for(auto& p: er)
-        {
-          MapPoint wp;
-          if(llToMap(p.getY(), p.getX(), wp.x, wp.y))
-            rings.back().push_back(wp);
-        }
-        if(!er->get_IsClosed())
-          rings.back().push_back(rings.back().front()); // close the ring if necessary
-
-        for(int i = 0; i < polygon->getNumInteriorRings(); i++)
-        {
-          rings.push_back(std::vector<MapPoint>());
-          for(auto& p: polygon->getInteriorRing(i))
-          {
-            MapPoint wp;
-            if(llToMap(p.getX(), p.getY(), wp.x, wp.y))
-              rings.back().push_back(wp);
-          }
-          if(!polygon->getInteriorRing(i)->get_IsClosed())
-            rings.back().push_back(rings.back().front()); // close the ring if necessary
-        }
-      }
-
-      for(int row = 0; row < grid_map.getSize()[1]; row++)
-      {
-        double wy;
-        wy = grid_map.getPosition().y()-grid_map.getLength().y()/2.0;
-        wy += grid_map.getResolution()*row;
-
-        std::set<double> nodes;
-
-        for(auto ring: rings)
-        {
-          for(int i = 0; i+1 < ring.size(); i++)
-          {
-            if(   ring[i].y < wy && ring[i+1].y >= wy 
-              || ring[i+1].y < wy && ring[i].y >= wy)
-            {
-              nodes.insert(ring[i].x+(wy-ring[i].y)/(ring[i+1].y-ring[i].y)*(ring[i+1].x-ring[i].x));
-            }
-          }
-        }
-
-        auto node = nodes.begin();
-        while(node != nodes.end())
-        {
-          auto next_node = node;
-          next_node++;
-          if(next_node == nodes.end())
-            break;
-
-          if(*node > grid_map.getPosition().x() + grid_map.getLength().x()/2.0)
-            break;
-
-          if(*next_node > grid_map.getPosition().x() - grid_map.getLength().x()/2.0)
-          {
-            for(auto x = *node; x <= *next_node; x += grid_map.getResolution())
-            {
-              grid_map::Index i;
-              if(grid_map.getIndex(grid_map::Position(x, wy),i))
-                updateCost(grid_map, i, value, layer, lower);
-            }
-          }
-          node = next_node;
-          node++;
-        }
-      }
-
-      break;
-    }
-    default:
-      ROS_DEBUG_STREAM("geometry type not handled: " << geometry->getGeometryType());
-  }
-
-}
-
-void GridCreationContext::updateCost(grid_map::GridMap& grid_map, const grid_map::Index& index,  double value, std::string layer, bool lower)
-{
-  auto existing_cost = grid_map.at(layer, index);
-  if(isnan(existing_cost) || ( (!lower && value > existing_cost) || (lower && value < existing_cost)))
-    grid_map.at(layer, index) = value;
-}
-
-} // namespace s57_grids
+} // namespace marine_charts

@@ -11,18 +11,16 @@
   <license>BSD</license>
 
 
-  <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>libgdal-dev</build_depend>
-  <depend>costmap_2d</depend>
-  <depend>dynamic_reconfigure</depend>
-  <depend>pluginlib</depend>
-  <depend>roscpp</depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
   <depend>geometry_msgs</depend>
-  <depend>s57_grids</depend> <!--For iso8211 lib-->
+  <depend>marine_charts</depend>
+  <depend>nav2_costmap_2d</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
   <depend>s57_msgs</depend>
   <depend>tf2_geometry_msgs</depend>
 
   <export>
-    <costmap_2d plugin="${prefix}/costmap_plugins.xml"/>
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

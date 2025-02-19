@@ -1,22 +1,19 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(s57_msgs)
-find_package(catkin REQUIRED roscpp std_msgs message_generation geographic_msgs)
 
-add_message_files(
-  FILES
-  DatasetInfo.msg
+set(CMAKE_CXX_STANDARD 17)
+
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(geographic_msgs REQUIRED)
+
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/DatasetInfo.msg"
+  "srv/GetDatasets.srv"
+  DEPENDENCIES geographic_msgs
 )
 
-add_service_files(
-  FILES
-  GetDatasets.srv
-)
+ament_export_dependencies(rosidl_default_runtime geographic_msgs)
 
-
-generate_messages(
-  DEPENDENCIES
-  std_msgs
-  geographic_msgs
-)
-
-catkin_package(CATKIN_DEPENDS message_runtime geographic_msgs)
+ament_package()

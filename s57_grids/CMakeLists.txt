@@ -1,46 +1,41 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.14.4)
 project(s57_grids)
 
-find_package(catkin REQUIRED COMPONENTS
-    grid_map_ros
-    roscpp
-    roslib
-    s57_msgs
-    tf2_geometry_msgs
-)
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 
-catkin_package(
-    CATKIN_DEPENDS
-        grid_map_ros
-        roscpp
-        roslib
-        s57_msgs
-        tf2_geometry_msgs
-    INCLUDE_DIRS include
-    #LIBRARIES ${PROJECT_NAME}
-)
+find_package(ament_cmake REQUIRED)
+find_package(grid_map_ros REQUIRED)
+find_package(marine_charts REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(s57_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 
-include_directories(include ${catkin_INCLUDE_DIRS})
-
-find_package(GDAL REQUIRED)
-include_directories(${GDAL_INCLUDE_DIR})
-
-add_subdirectory(src/iso8211)
-
-add_executable(${PROJECT_NAME} src/main.cpp src/s57_catalog.cpp src/s57_dataset.cpp src/grid_publisher.cpp)
-add_dependencies(${PROJECT_NAME} ${s57_grids_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(${PROJECT_NAME} ${GDAL_LIBRARY} ${catkin_LIBRARIES} iso8211)
-
-install(TARGETS ${PROJECT_NAME}
-        LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-        ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-        RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
-)
-
-# install(FILES costmap_plugins.xml
-#         DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+# add_executable(${PROJECT_NAME}
+#     src/main.cpp
+#     src/grid_publisher.cpp
+# )
+# target_include_directories(${PROJECT_NAME}
+#   PUBLIC
+#   ${grid_map_ros_INCLUDE_DIRS}
 # )
 
-install(DIRECTORY include/${PROJECT_NAME}/
-        DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-)
+# target_link_libraries(${PROJECT_NAME} PRIVATE
+#     ${grid_map_ros_LIBRARIES}
+#     marine_charts::marine_charts
+#     rclcpp::rclcpp
+#     ${s57_msgs_TARGETS}
+#     ${tf2_geometry_msgs_TARGETS}
+#     tf2_ros::tf2_ros
+# )
+
+# install (TARGETS ${PROJECT_NAME}
+#     DESTINATION lib/${PROJECT_NAME}
+# )
+
+ament_package()

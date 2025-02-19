@@ -1,54 +1,49 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.14.4)
 project(s57_layer)
 
-find_package(catkin REQUIRED COMPONENTS
-    costmap_2d
-    dynamic_reconfigure
-    pluginlib
-    roscpp
-    geometry_msgs
-    s57_grids
-    s57_msgs
-    tf2_geometry_msgs
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+find_package(ament_cmake REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(marine_charts REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(pluginlib REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(s57_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+
+
+add_library(${PROJECT_NAME} SHARED
+  src/s57_layer.cpp
+)
+add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
+
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    ${geometry_msgs_TARGETS}
+    marine_charts::marine_charts
+    nav2_costmap_2d::nav2_costmap_2d_core
+    rclcpp::rclcpp
+    ${s57_msgs_TARGETS}
+    tf2_geometry_msgs::tf2_geometry_msgs
 )
 
-generate_dynamic_reconfigure_options(cfg/S57Layer.cfg)
-
-catkin_package(
-    CATKIN_DEPENDS
-        costmap_2d
-        dynamic_reconfigure
-        pluginlib
-        roscpp
-        geometry_msgs
-        s57_grids
-        s57_msgs
-        tf2_geometry_msgs
-    INCLUDE_DIRS include
-    LIBRARIES ${PROJECT_NAME}
+install(
+  TARGETS ${PROJECT_NAME}
+  EXPORT export_${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
 )
 
-include_directories(include ${catkin_INCLUDE_DIRS})
+pluginlib_export_plugin_description_file(nav2_costmap_2d costmap_plugins.xml)
 
-find_package(GDAL REQUIRED)
-include_directories(${GDAL_INCLUDE_DIR})
+ament_export_targets(export_${PROJECT_NAME})
+ament_export_libraries(${PROJECT_NAME})
+ament_export_dependencies(marine_charts nav2_costmap_2d pluginlib rclcpp s57_msgs)
 
-# add_subdirectory(src/iso8211)
-
-add_library(${PROJECT_NAME} src/s57_layer.cpp src/s57_catalog.cpp src/s57_dataset.cpp)
-add_dependencies(${PROJECT_NAME} ${s57_layer_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(${PROJECT_NAME} ${GDAL_LIBRARY} ${catkin_LIBRARIES} iso8211)
-
-install(TARGETS ${PROJECT_NAME}
-        LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-        ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-        RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
-)
-
-install(FILES costmap_plugins.xml
-        DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-)
-
-install(DIRECTORY include/${PROJECT_NAME}/
-        DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-)
+ament_package()
