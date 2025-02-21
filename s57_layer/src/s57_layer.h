@@ -46,7 +46,6 @@ public:
   double minimumDepth() const;
   double maximumCautionDepth() const;
   double overheadClearance() const;
-  unsigned char maximumCautionCost() const;
   unsigned char unsurveyedCost() const;
 
 private:
@@ -56,7 +55,7 @@ private:
 
   std::string m_global_frame_id;
 
-  // minimum depth considered considered not lethal and start of caution area
+  // minimum depth considered not lethal and start of caution area
   double m_minimum_depth = 0.0;
 
   // maximum depth used for caution area

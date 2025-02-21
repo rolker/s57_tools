@@ -68,9 +68,12 @@ void S57Layer::onInitialize()
 
 void S57Layer::reset()
 {
-  pending_grids_.clear();
-  grids_.clear();
-  m_tiles.clear();
+  //pending_grids_.clear();
+  //grids_.clear();
+  //m_tiles.clear();
+  current_ = false;
+  for(auto& t: m_tiles)
+    t.second.needs_update = true;
 }
 
 void S57Layer::matchSize()
@@ -81,6 +84,7 @@ void S57Layer::matchSize()
   m_origin_y = parent->getOriginY();
   m_resolution = parent->getResolution();
   m_tiles.clear();
+  current_ = false;
 }
 
 
@@ -141,6 +145,7 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
     *max_x = std::max(*max_x, world_max_x);
     *min_y = std::min(*min_y, world_min_y);
     *max_y = std::max(*max_y, world_max_y);
+    
   }
 
 }
@@ -263,6 +268,8 @@ void S57Layer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int min_i, i
   TileID start_tile = worldToTile(world_min_x, world_min_y);
   TileID end_tile = worldToTile(world_max_x, world_max_y);
 
+  bool complete = true;
+
   for(int ti = start_tile.first; ti <= end_tile.first; ti++)
   {
     int tile_offset_x = -ti*m_tile_size + (master_grid.getOriginX()-m_origin_x)/m_resolution;
@@ -274,6 +281,7 @@ void S57Layer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int min_i, i
 
       TileID tile = std::make_pair(ti,tj);
       auto current_tile = m_tiles[tile].costmap;
+      complete = complete && m_tiles[tile].complete;
       for(int j = std::max(min_j, -tile_offset_y); j < max_j && j+tile_offset_y < m_tile_size; j++)
       {
         unsigned int target_index = master_grid.getIndex(start_i, j);
@@ -297,6 +305,7 @@ void S57Layer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int min_i, i
       m_tiles[tile].needs_update = false;
     }
   }
+  current_ = complete;
 }
 
 unsigned char S57Layer::get_cost_from_grid(grid_map::GridMap &grid, const grid_map::Index &index)
@@ -314,7 +323,7 @@ unsigned char S57Layer::get_cost_from_grid(grid_map::GridMap &grid, const grid_m
       return nav2_costmap_2d::LETHAL_OBSTACLE;
     unsigned char cost = nav2_costmap_2d::FREE_SPACE;
     if(depth < m_maximum_caution_depth)
-      cost = nav2_costmap_2d::MAX_NON_OBSTACLE*(depth- m_minimum_depth)/(m_maximum_caution_depth-m_minimum_depth);
+      cost = nav2_costmap_2d::MAX_NON_OBSTACLE*(1.0-((depth-m_minimum_depth)/(m_maximum_caution_depth-m_minimum_depth)));
     if(!std::isnan(grid.at("unsurveyed", index)) || !std::isnan(grid.at("caution", index)))
       cost = std::max(cost, m_unsurveyed_cost);
     return cost;
