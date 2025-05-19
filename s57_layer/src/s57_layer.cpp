@@ -20,6 +20,11 @@ S57Layer::S57Layer()
 
 }
 
+S57Layer::~S57Layer()
+{
+  abort_flag_ = true;
+}
+
 void S57Layer::onInitialize()
 {
   auto node = node_.lock();
@@ -180,7 +185,7 @@ void S57Layer::generateTile(TileID id)
           {
             RCLCPP_INFO_STREAM(logger_, "async call to getGrid for " << chart << " scale: " << c->chartScale() << " resolution: " << 0.5*c->chartScale()*0.0003125);
             auto context = marine_charts::GridCreationContext(m_global_frame_id, *tf_, 1.0, logger_);
-            pending_grids_[chart] = std::async(&marine_charts::S57Dataset::getGrid, c.get(), context);
+            pending_grids_[chart] = std::async(&marine_charts::S57Dataset::getGrid, c.get(), context, std::ref(abort_flag_));
           }
           auto status = pending_grids_[chart].wait_for(std::chrono::milliseconds(10));
           if(status == std::future_status::ready)

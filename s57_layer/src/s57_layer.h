@@ -22,6 +22,7 @@ class S57Layer: public nav2_costmap_2d::Layer
 {
 public:
   S57Layer();
+  ~S57Layer();
 
   void onInitialize() override;
 
@@ -95,6 +96,8 @@ private:
 
   TileID worldToTile(double x, double y);
   void generateTile(TileID id);
+
+  std::atomic<bool> abort_flag_ = false;
 };
 
 } // namespace s57_layer

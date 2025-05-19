@@ -21,12 +21,6 @@ S57Dataset::S57Dataset(std::string path):file_path_(path)
     label_ = path;
 }
 
-S57Dataset::~S57Dataset()
-{
-  std::lock_guard<std::mutex> lock(abort_flag_mutex_);
-  abort_flag_ = true; 
-}
-
 void S57Dataset::setBounds(double minLat, double minLon, double maxLat, double maxLon)
 {
   bounds_.max_pt.latitude = maxLat;
@@ -152,7 +146,7 @@ double S57Dataset::recommendedResolution()
   return chartScale()*0.0003125;
 }
 
-std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext context)
+std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext context, std::atomic<bool>& abort_flag)
 {
   std::shared_ptr<grid_map::GridMap> ret;
   auto dataset = open();
@@ -176,12 +170,8 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
 
       for(auto&& featurePair: dataset->GetFeatures())
       {
-        {
-          // Check if we need to quit
-          std::lock_guard<std::mutex> abort_lock(abort_flag_mutex_);
-          if(abort_flag_)
-            return std::shared_ptr<grid_map::GridMap>();
-        }
+        if(abort_flag)
+          return std::shared_ptr<grid_map::GridMap>();
 
         int i = featurePair.feature->GetFieldIndex("OBJL");
         if(i == -1) // no field index found

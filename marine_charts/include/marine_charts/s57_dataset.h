@@ -20,7 +20,6 @@ class S57Dataset
 {
 public:
   S57Dataset(std::string path);
-  ~S57Dataset();
 
   void setBounds(double minLat, double minLon, double maxLat, double maxLon);
   const geographic_msgs::msg::BoundingBox& getBounds();
@@ -31,7 +30,7 @@ public:
   std::string const &label() const;
   std::string topic() const;
   
-  std::shared_ptr<grid_map::GridMap> getGrid(GridCreationContext context);
+  std::shared_ptr<grid_map::GridMap> getGrid(GridCreationContext context, std::atomic<bool>& abort_flag);
 
   double chartScale();
   double recommendedResolution();
@@ -43,10 +42,6 @@ private:
   std::string label_;
   geographic_msgs::msg::BoundingBox bounds_;
   double chart_scale_ = 0.0;
-
-  bool abort_flag_=false;
-  std::mutex abort_flag_mutex_;
-
 };
 
 } // namespace marine_charts
