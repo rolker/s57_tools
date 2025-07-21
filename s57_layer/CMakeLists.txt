@@ -9,8 +9,10 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(geodesy REQUIRED)
 find_package(geometry_msgs REQUIRED)
-find_package(marine_charts REQUIRED)
+find_package(grid_map_ros REQUIRED)
+find_package(s57_grids REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -23,9 +25,14 @@ add_library(${PROJECT_NAME} SHARED
 )
 add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
 
-target_link_libraries(${PROJECT_NAME} PRIVATE
+ament_target_dependencies(${PROJECT_NAME}
+  geodesy
+  grid_map_ros
+)
+
+target_link_libraries(${PROJECT_NAME} 
     ${geometry_msgs_TARGETS}
-    marine_charts::marine_charts
+    s57_grids::s57_grids
     nav2_costmap_2d::nav2_costmap_2d_core
     rclcpp::rclcpp
     ${s57_msgs_TARGETS}

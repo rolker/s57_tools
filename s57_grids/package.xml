@@ -11,6 +11,7 @@
   <license>BSD</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>geographic_msgs</depend>
   <depend>grid_map_ros</depend>
   <depend>lifecycle_msgs</depend>
   <depend>marine_charts</depend>

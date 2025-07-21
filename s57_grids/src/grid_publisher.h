@@ -1,12 +1,15 @@
 #ifndef S57_GRIDS_S57_GRID_PUBLISHER_H
 #define S57_GRIDS_S57_GRID_PUBLISHER_H
 
+#include <future>
+
+
+#include "grid_map_ros/grid_map_ros.hpp"
+#include "marine_charts/s57_catalog.h"
+#include "nav_msgs/msg/occupancy_grid.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "s57_msgs/srv/get_datasets.hpp"
-#include "marine_charts/s57_catalog.h"
-#include "grid_map_ros/grid_map_ros.hpp"
-#include <future>
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 
@@ -60,6 +63,9 @@ private:
   double resolution_factor_ = 1.0;  
 
   std::map<std::string, rclcpp_lifecycle::LifecyclePublisher<grid_map_msgs::msg::GridMap>::SharedPtr > grid_publishers_;
+
+    std::map<std::string, rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::OccupancyGrid>::SharedPtr > costmap_publishers_;
+
   
   std::map<std::string, std::shared_ptr<grid_map::GridMap> > dataset_grids_;
   std::mutex dataset_grids_mutex_;

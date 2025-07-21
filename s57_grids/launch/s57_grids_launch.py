@@ -13,7 +13,7 @@ def generate_launch_description():
     return LaunchDescription([
         LifecycleNode(
             package='s57_grids',
-            executable='s57_grids',
+            executable='s57_grids_node',
             name='s57_grids',
             namespace='',
             respawn=True,

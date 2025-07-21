@@ -1,4 +1,5 @@
 #include "grid_publisher.h"
+#include "grid_map_ros/GridMapRosConverter.hpp"
 #include "marine_charts/s57_dataset.h"
 #include "geometry_msgs/msg/point_stamped.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
@@ -235,6 +236,14 @@ void GridPublisher::checkForNewGrids()
             auto message = grid_map::GridMapRosConverter::toMessage(*grid);
             RCLCPP_DEBUG_STREAM(get_logger(), "Publishing grid to " << "datasets/" << pg.first);
             grid_publishers_[pg.first]->publish(*message);
+
+            costmap_publishers_[pg.first] = 
+              create_publisher<nav_msgs::msg::OccupancyGrid>(
+                "datasets/occupancy_grids/"+ds->topic(), latched_qos);
+            costmap_publishers_[pg.first]->on_activate();
+            nav_msgs::msg::OccupancyGrid occupancy_grid;
+            grid_map::GridMapRosConverter::toOccupancyGrid(*grid, "elevation", -10.0, 0.0, occupancy_grid);
+            costmap_publishers_[pg.first]->publish(occupancy_grid);
           }
           else
             grid_publishers_[pg.first]; // create the entry in the map so above check to see if we need to generate a grid works.

@@ -4,16 +4,14 @@
 #include <future>
 #include <unordered_set>
 
+#include "geometry_msgs/msg/point_stamped.hpp"
 #include "grid_map_core/GridMap.hpp"
+#include "grid_map_msgs/msg/grid_map.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "nav2_costmap_2d/layer.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
+#include "s57_msgs/srv/get_datasets.hpp"
 
-
-namespace marine_charts
-{
-  class S57Catalog;
-}
 
 namespace s57_layer
 {
@@ -41,18 +39,36 @@ public:
 
   void matchSize() override;
 
-  bool llToWorld(double lat, double lon, double &x, double &y);
-  bool worldToLatLon(double x, double y, double &lat, double &lon);
-
-  double minimumDepth() const;
-  double maximumCautionDepth() const;
-  double overheadClearance() const;
-  unsigned char unsurveyedCost() const;
+  // double minimumDepth() const;
+  // double maximumCautionDepth() const;
+  // double overheadClearance() const;
+  // unsigned char unsurveyedCost() const;
 
 private:
+  using GetDatasetsClient =
+    rclcpp::Client<s57_msgs::srv::GetDatasets>;
+
   unsigned char get_cost_from_grid(grid_map::GridMap &grid, const grid_map::Index &index);
-  
-  std::shared_ptr<marine_charts::S57Catalog> m_s57Catalog;
+
+  geographic_msgs::msg::GeoPoint worldToLatLon(double x, double y);
+  geometry_msgs::msg::Point llToWorld(const geographic_msgs::msg::GeoPoint& geo_point);
+
+  void getDatasetsCallback(GetDatasetsClient::SharedFuture future);
+
+  void mapGridCallback(std::string grid_name, 
+    std::shared_ptr<grid_map_msgs::msg::GridMap> grid_map);
+
+
+  GetDatasetsClient::SharedPtr get_datasets_client_;
+  bool pending_datasets_request_ = false;
+
+  std::string s57_grids_namespace_;
+
+  // Bounds of the costmap with an extra buffer to 
+  // help have the data precached
+  geometry_msgs::msg::PointStamped buffered_min_;
+  geometry_msgs::msg::PointStamped buffered_max_;
+
 
   std::string m_global_frame_id;
 
@@ -68,11 +84,13 @@ private:
   // minimum height required (meters)
   double m_overhead_clearance = 10.0;
 
-  using GridsByName = std::map<std::string, std::shared_ptr<grid_map::GridMap> >;
-  GridsByName grids_;
+  std::vector<s57_msgs::msg::DatasetInfo> current_charts_;
+  std::map<std::string, std::pair<geometry_msgs::msg::Point, geometry_msgs::msg::Point> > chart_bounds_;
 
-  using GridFuturesByName = std::map<std::string, std::future<std::shared_ptr<grid_map::GridMap> > >;
-  GridFuturesByName pending_grids_;
+  std::map<std::string, rclcpp::Subscription<grid_map_msgs::msg::GridMap>::SharedPtr> grid_subscriptions_;
+
+  std::map<std::string, std::shared_ptr<grid_map::GridMap> > grids_;
+
 
   double m_origin_x = 0.0;
   double m_origin_y = 0.0;
@@ -97,7 +115,7 @@ private:
   TileID worldToTile(double x, double y);
   void generateTile(TileID id);
 
-  std::atomic<bool> abort_flag_ = false;
+  // std::atomic<bool> abort_flag_ = false;
 };
 
 } // namespace s57_layer
