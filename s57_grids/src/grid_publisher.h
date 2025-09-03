@@ -55,6 +55,9 @@ private:
   // Called periodically to check for new grids that may be ready to be published or further processed.
   void checkForNewGrids();
 
+  // Called periodically to republish existing grids with fresh timestamps. 
+  void republishGrids();
+
   std::shared_ptr<marine_charts::S57Catalog> catalog_;
   rclcpp::Service<s57_msgs::srv::GetDatasets>::SharedPtr list_service_;
   rclcpp::Service<s57_msgs::srv::GetDatasets>::SharedPtr get_service_;
@@ -64,7 +67,8 @@ private:
 
   std::map<std::string, rclcpp_lifecycle::LifecyclePublisher<grid_map_msgs::msg::GridMap>::SharedPtr > grid_publishers_;
 
-    std::map<std::string, rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::OccupancyGrid>::SharedPtr > costmap_publishers_;
+  bool publish_costmaps_ = false;
+  std::map<std::string, rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::OccupancyGrid>::SharedPtr > costmap_publishers_;
 
   
   std::map<std::string, std::shared_ptr<grid_map::GridMap> > dataset_grids_;
@@ -76,6 +80,9 @@ private:
 
   rclcpp::TimerBase::SharedPtr new_grids_timer_;
 
+  rclcpp::TimerBase::SharedPtr republish_grids_timer_;
+  double grid_republish_period_ = 0.0; // seconds, if <= 0.0, no republishing
+
   std::vector<std::string> requested_grids_;
   std::vector<std::string> requested_grids_to_publish_;
   std::mutex requested_grids_mutex;
@@ -83,39 +90,6 @@ private:
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   std::string map_frame_ = "map";
-
-  // struct GridOutput
-  // {
-  //   std::string name; // name used for output topic
-  //   double resolution; // meters
-  //   double length; // length of the grid sides in meters
-  //   double period; // time between checks if grid needs updating (seconds)
-
-  //   ros::Publisher publisher;
-  //   ros::Publisher costmap_publisher; // Used for debugging in rviz, which struggles to display grid_maps.
-  //   ros::Time last_publish_time;
-  //   std::thread thread;
-  // };
-
-  /// Continuously updates a grid based on the robot's position.
-  /// This is meant to be run in its own thread and will only return
-  /// when the abort flag is set.
-  // void updateGrid(GridOutput& output_grid);
-
-  // std::map<std::string, GridOutput> output_grids_;
-
-  // struct RobotSpecs
-  // {
-  //   std::string frame_id = "base_link";
-  //   double minimum_depth = 1.0;
-  //   double maximum_caution_depth = 3.0;
-  //   double overhead_clearance = 10.0;
-
-  //   double minimum_speed = 0.0;
-  //   double maximum_speed = 1.0;
-  // };
-
-  // RobotSpecs robot_;
 
   std::atomic<bool> abort_flag_ = false;
 };
