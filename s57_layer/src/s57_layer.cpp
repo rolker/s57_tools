@@ -480,7 +480,7 @@ void S57Layer::getDatasetsCallback(GetDatasetsClient::SharedFuture future)
   }
   else
   {
-    RCLCPP_INFO_STREAM(logger_, "Received " << result->datasets.size() << " datasets from service");
+    RCLCPP_DEBUG_STREAM(logger_, "Received " << result->datasets.size() << " datasets from service");
   }
 
   current_charts_ = result->datasets;
