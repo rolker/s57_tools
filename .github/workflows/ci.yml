@@ -33,6 +33,14 @@ jobs:
       - name: Create workspace
         run: mkdir -p ../ws/src && ln -s $GITHUB_WORKSPACE ../ws/src/s57_tools
 
+      # TODO: Remove once geodesy is released to the rosdep index for Jazzy.
+      # geodesy is a build dependency of s57_layer but has no rosdep key yet.
+      - name: Clone geographic_info (unreleased geodesy dependency)
+        run: >
+          git clone --depth 1 -b ros2
+          https://github.com/ros-geographic-info/geographic_info.git
+          ../ws/src/geographic_info
+
       - name: Install ROS dependencies
         working-directory: ../ws
         run: >
