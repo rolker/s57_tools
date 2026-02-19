@@ -6,9 +6,9 @@
     <description>
     This package provides message types for use with S57 nautical chart data.
     </description>
-    
+
     <maintainer email="roland@ccom.unh.edu">Roland Arsenault</maintainer>
-    
+
     <license>BSD</license>
 
     <buildtool_depend>ament_cmake</buildtool_depend>
@@ -16,10 +16,13 @@
     <exec_depend>rosidl_default_runtime</exec_depend>
     <depend>geographic_msgs</depend>
 
+    <test_depend>ament_lint_auto</test_depend>
+    <test_depend>ament_lint_common</test_depend>
+
     <member_of_group>rosidl_interface_packages</member_of_group>
 
     <export>
         <build_type>ament_cmake</build_type>
     </export>
-    
+
 </package>

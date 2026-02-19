@@ -41,7 +41,7 @@ bool S57Dataset::intersects(double minLat, double minLon, double  maxLat, double
 
 const geographic_msgs::msg::BoundingBox& S57Dataset::getBounds()
 {
-  if(!hasValidBounds())  
+  if(!hasValidBounds())
     open();
   return bounds_;
 }
@@ -61,7 +61,7 @@ bool S57Dataset::hasValidBoundsTryOpen()
 std::shared_ptr<GDALDataset> S57Dataset::open()
 {
   auto dataset = std::shared_ptr<GDALDataset>(reinterpret_cast<GDALDataset*>(GDALOpenEx(file_path_.c_str(), GDAL_OF_VECTOR,  nullptr, nullptr, nullptr)),GDALDeleter);
-  
+
   if(dataset)
   {
     OGRLayer* coverage = dataset->GetLayerByName("M_COVR");
@@ -83,7 +83,7 @@ std::shared_ptr<GDALDataset> S57Dataset::open()
       // 864/270 = 3.2 lines/mm
       // pixel size = 1/3.2 = 0.3125 mm -> 0.0003125 meters
       // symbols should be at least 12 pixels: 3.75 mm or 0.00375 meters
-      
+
       OGRLayer* dsid = dataset->GetLayerByName("DSID");
       if(dsid)
       {
@@ -197,7 +197,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
 
           // unknown depth
           case 154: // UNSARE
-        
+
             context.rasterize(*ret, featurePair.feature->GetGeometryRef(), 0.0, "unsurveyed");
             break;
 
@@ -241,7 +241,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
             if(i>0)
               if(featurePair.feature->IsFieldSetAndNotNull(i))
                 clearance = featurePair.feature->GetFieldAsDouble(i);
-            
+
             context.rasterize(*ret, featurePair.feature->GetGeometryRef(), clearance, "overhead", true);
             break;
           }
@@ -398,7 +398,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
           case 308: // M_QUAL Quality of data
           case 400: // C_AGGR Aggregation
           case 401: // C_ASSO Association
-            break; 
+            break;
 
           default:
             std::cerr << "Not handled: objl: " << objl << " name " << featurePair.layer->GetName() << std::endl;

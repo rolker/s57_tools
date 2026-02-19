@@ -35,14 +35,9 @@ public:
 
   void updateCosts(
     nav2_costmap_2d::Costmap2D& master_grid,
-    int min_i, int min_j, int max_i, int max_j)  override;  
+    int min_i, int min_j, int max_i, int max_j)  override;
 
   void matchSize() override;
-
-  // double minimumDepth() const;
-  // double maximumCautionDepth() const;
-  // double overheadClearance() const;
-  // unsigned char unsurveyedCost() const;
 
 private:
   using GetDatasetsClient =
@@ -55,7 +50,7 @@ private:
 
   void getDatasetsCallback(GetDatasetsClient::SharedFuture future);
 
-  void mapGridCallback(std::string grid_name, 
+  void mapGridCallback(std::string grid_name,
     std::shared_ptr<grid_map_msgs::msg::GridMap> grid_map);
 
 
@@ -64,25 +59,25 @@ private:
 
   std::string s57_grids_namespace_;
 
-  // Bounds of the costmap with an extra buffer to 
+  // Bounds of the costmap with an extra buffer to
   // help have the data precached
   geometry_msgs::msg::PointStamped buffered_min_;
   geometry_msgs::msg::PointStamped buffered_max_;
 
 
-  std::string m_global_frame_id;
+  std::string global_frame_id_;
 
   // minimum depth considered not lethal and start of caution area
-  double m_minimum_depth = 0.0;
+  double minimum_depth_ = 0.0;
 
   // maximum depth used for caution area
-  double m_maximum_caution_depth = 5.0;
+  double maximum_caution_depth_ = 5.0;
 
   // cost assigned to unsurveyed areas
-  unsigned char m_unsurveyed_cost = 100;
+  unsigned char unsurveyed_cost_ = 100;
 
   // minimum height required (meters)
-  double m_overhead_clearance = 10.0;
+  double overhead_clearance_ = 10.0;
 
   std::vector<s57_msgs::msg::DatasetInfo> current_charts_;
   std::map<std::string, std::pair<geometry_msgs::msg::Point, geometry_msgs::msg::Point> > chart_bounds_;
@@ -92,13 +87,17 @@ private:
   std::map<std::string, std::shared_ptr<grid_map::GridMap> > grids_;
 
 
-  double m_origin_x = 0.0;
-  double m_origin_y = 0.0;
-  double m_resolution = 1.0;
+  double x_origin_ = 0.0;
+  double y_origin_ = 0.0;
+  double resolution_ = 1.0;
 
-  int m_tile_size = 100;
+  int tile_size_ = 100;
 
-  double m_update_timeout = 0.5;
+  double update_timeout_ = 0.5;
+
+  // When true, allow navigation in areas without ENC chart coverage.
+  // When false, uncharted areas are marked NO_INFORMATION to block planning.
+  bool allow_uncharted_ = true;
 
   typedef std::pair<int, int> TileID;
 
@@ -110,7 +109,7 @@ private:
     bool needs_update = false;
   };
 
-  std::map<TileID, TileInfo> m_tiles;
+  std::map<TileID, TileInfo> tiles_;
 
   TileID worldToTile(double x, double y);
   void generateTile(TileID id);

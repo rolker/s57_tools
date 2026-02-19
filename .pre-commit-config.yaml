@@ -1,0 +1,36 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: ['--unsafe']  # allow ROS YAML tags
+      - id: check-xml
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs
+      - id: mixed-line-ending
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+
+  - repo: https://github.com/cheshirekow/cmake-format-precommit
+    rev: v0.6.13
+    hooks:
+      - id: cmake-lint
+        args: ['--disabled-codes', 'C0103,C0113,C0301']
+
+  # clang-format intentionally omitted — the codebase uses a consistent
+  # but non-default style (Allman braces, compact for-loops). Adopting
+  # clang-format requires a dedicated reformatting pass. See issue #8.
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: ['-d', '{extends: default, rules: {line-length: {max: 120}, document-start: disable, truthy: disable}}']
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: no-commit-to-branch
+        args: ['--branch', 'main', '--branch', 'jazzy', '--branch', 'rolling']

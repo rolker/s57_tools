@@ -30,7 +30,7 @@ ament_target_dependencies(${PROJECT_NAME}
   grid_map_ros
 )
 
-target_link_libraries(${PROJECT_NAME} 
+target_link_libraries(${PROJECT_NAME}
     ${geometry_msgs_TARGETS}
     s57_grids::s57_grids
     nav2_costmap_2d::nav2_costmap_2d_core
@@ -52,5 +52,38 @@ pluginlib_export_plugin_description_file(nav2_costmap_2d costmap_plugins.xml)
 ament_export_targets(export_${PROJECT_NAME})
 ament_export_libraries(${PROJECT_NAME})
 ament_export_dependencies(marine_charts nav2_costmap_2d pluginlib rclcpp s57_msgs)
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(nav2_util REQUIRED)
+
+  ament_add_gtest(test_allow_uncharted test/test_allow_uncharted.cpp)
+  target_include_directories(test_allow_uncharted PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_link_libraries(test_allow_uncharted
+    ${PROJECT_NAME}
+    nav2_costmap_2d::nav2_costmap_2d_core
+    nav2_util::nav2_util_core
+    rclcpp::rclcpp
+    tf2_ros::tf2_ros
+  )
+
+  ament_add_gtest(test_plugin_loading test/test_plugin_loading.cpp)
+  target_link_libraries(test_plugin_loading
+    nav2_costmap_2d::nav2_costmap_2d_core
+    pluginlib::pluginlib
+  )
+
+  find_package(ament_lint_auto REQUIRED)
+  # Skip copyright: existing files lack headers; tracked separately.
+  set(ament_cmake_copyright_FOUND TRUE)
+  # Skip cpplint/uncrustify: pre-existing code style (Allman braces,
+  # compact for-loops) differs from ament defaults. Reformatting the
+  # codebase is out of scope for this change.
+  set(ament_cmake_cpplint_FOUND TRUE)
+  set(ament_cmake_uncrustify_FOUND TRUE)
+  ament_lint_auto_find_test_dependencies()
+endif()
 
 ament_package()

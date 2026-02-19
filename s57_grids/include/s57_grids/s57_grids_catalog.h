@@ -23,7 +23,7 @@ using S57GridsDataset = std::pair<s57_msgs::msg::DatasetInfo, GridMapFuture>;
 /// Implements an interface similar to marine_charts::S57Catalog to access
 /// S57 datasets using the s57_grids package.
 /// This class issues service calls to the s57_grids services and provides
-/// topics the client can us to 
+/// topics the client can us to
 /// subscribe to the GridMap messages published by the
 /// s57_grids package.
 class S57GridsCatalog
@@ -38,7 +38,7 @@ public:
 
   //std::future<std::shared_ptr<S57Dataset> > dataset(std::string label) const;
 private:
-  
+
   rclcpp_lifecycle::LifecycleNode::WeakPtr node_;
 
 

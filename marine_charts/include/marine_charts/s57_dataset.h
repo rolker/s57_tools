@@ -29,14 +29,14 @@ public:
   std::string const &filePath() const;
   std::string const &label() const;
   std::string topic() const;
-  
+
   std::shared_ptr<grid_map::GridMap> getGrid(GridCreationContext context, std::atomic<bool>& abort_flag);
 
   double chartScale();
   double recommendedResolution();
 private:
   std::shared_ptr<GDALDataset> open();
-  
+
 private:
   std::string file_path_;
   std::string label_;
