@@ -15,51 +15,51 @@ jobs:
       image: ros:jazzy-ros-core
 
     steps:
-    - name: Update apt
-      run: apt-get update
+      - name: Update apt
+        run: apt-get update
 
-    - name: Install ros dev tools
-      run: DEBIAN_FRONTEND=noninteractive apt-get -y install ros-dev-tools
+      - name: Install ros dev tools
+        run: DEBIAN_FRONTEND=noninteractive apt-get -y install ros-dev-tools
 
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Init rosdep
-      run: rosdep init
+      - name: Init rosdep
+        run: rosdep init
 
-    - name: Update rosdep
-      run: rosdep update
+      - name: Update rosdep
+        run: rosdep update
 
-    - name: Create workspace
-      run: mkdir -p ../ws/src && ln -s $GITHUB_WORKSPACE ../ws/src/s57_tools
+      - name: Create workspace
+        run: mkdir -p ../ws/src && ln -s $GITHUB_WORKSPACE ../ws/src/s57_tools
 
-    - name: Install ROS dependencies
-      working-directory: ../ws
-      run: >
-        DEBIAN_FRONTEND=noninteractive
-        rosdep install --from-paths src --ignore-src -r -y
+      - name: Install ROS dependencies
+        working-directory: ../ws
+        run: >
+          DEBIAN_FRONTEND=noninteractive
+          rosdep install --from-paths src --ignore-src -r -y
 
-    - name: Build
-      working-directory: ../ws
-      run: >
-        bash -c 'source /opt/ros/jazzy/setup.bash &&
-        colcon build --packages-up-to
-        s57_msgs marine_charts s57_grids s57_layer
-        --cmake-args -DBUILD_TESTING=ON'
+      - name: Build
+        working-directory: ../ws
+        run: >
+          bash -c 'source /opt/ros/jazzy/setup.bash &&
+          colcon build --packages-up-to
+          s57_msgs marine_charts s57_grids s57_layer
+          --cmake-args -DBUILD_TESTING=ON'
 
-    - name: Test
-      working-directory: ../ws
-      run: >
-        bash -c 'source /opt/ros/jazzy/setup.bash &&
-        source install/setup.bash &&
-        colcon test --packages-select
-        s57_msgs marine_charts s57_grids s57_layer
-        --event-handlers console_direct+
-        --return-code-on-test-failure'
+      - name: Test
+        working-directory: ../ws
+        run: >
+          bash -c 'source /opt/ros/jazzy/setup.bash &&
+          source install/setup.bash &&
+          colcon test --packages-select
+          s57_msgs marine_charts s57_grids s57_layer
+          --event-handlers console_direct+
+          --return-code-on-test-failure'
 
-    - name: Test results
-      working-directory: ../ws
-      run: >
-        bash -c 'source /opt/ros/jazzy/setup.bash &&
-        colcon test-result --verbose'
-      if: always()
+      - name: Test results
+        working-directory: ../ws
+        run: >
+          bash -c 'source /opt/ros/jazzy/setup.bash &&
+          colcon test-result --verbose'
+        if: always()

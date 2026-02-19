@@ -55,7 +55,7 @@ private:
   // Called periodically to check for new grids that may be ready to be published or further processed.
   void checkForNewGrids();
 
-  // Called periodically to republish existing grids with fresh timestamps. 
+  // Called periodically to republish existing grids with fresh timestamps.
   void republishGrids();
 
   std::shared_ptr<marine_charts::S57Catalog> catalog_;
@@ -63,17 +63,17 @@ private:
   rclcpp::Service<s57_msgs::srv::GetDatasets>::SharedPtr get_service_;
 
   // Factor applied to a chart's recommended resolution to determine a grid's output resolution.
-  double resolution_factor_ = 1.0;  
+  double resolution_factor_ = 1.0;
 
   std::map<std::string, rclcpp_lifecycle::LifecyclePublisher<grid_map_msgs::msg::GridMap>::SharedPtr > grid_publishers_;
 
   bool publish_costmaps_ = false;
   std::map<std::string, rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::OccupancyGrid>::SharedPtr > costmap_publishers_;
 
-  
+
   std::map<std::string, std::shared_ptr<grid_map::GridMap> > dataset_grids_;
   std::mutex dataset_grids_mutex_;
-  
+
   // Futures waiting for datasets being generated in separate threads
   std::map<std::string, std::future<std::shared_ptr<grid_map::GridMap> > > pending_dataset_grids_;
 

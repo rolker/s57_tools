@@ -14,7 +14,7 @@ namespace marine_charts
 
 class GridCreationContext
 {
-public:  
+public:
   GridCreationContext(std::string map_frame, tf2_ros::Buffer &tf_buffer, double resolution_factor, rclcpp::Logger logger);
   bool ecefToMap(double x, double y, double z, double &mx, double &my);
   bool llToMap(double lat, double lon, double &x, double &y);
@@ -31,7 +31,7 @@ private:
   std::shared_ptr<OGRCoordinateTransformation> ll_to_earth_;
   rclcpp::Logger logger_;
 };
-  
+
 
 } // namespace marine_charts
 

@@ -19,13 +19,9 @@ repos:
       - id: cmake-lint
         args: ['--disabled-codes', 'C0103,C0113,C0301']
 
-  - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v18.1.8
-    hooks:
-      - id: clang-format
-        types_or: [c, c++]
-        # Exclude vendored iso8211 sources (upstream GDAL style)
-        exclude: 'iso8211/'
+  # clang-format intentionally omitted — the codebase uses a consistent
+  # but non-default style (Allman braces, compact for-loops). Adopting
+  # clang-format requires a dedicated reformatting pass. See issue #7.
 
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.35.1

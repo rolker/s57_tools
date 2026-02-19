@@ -101,7 +101,7 @@ GridPublisher::on_cleanup(const rclcpp_lifecycle::State &state)
 
   list_service_.reset();
   get_service_.reset();
-  
+
   new_grids_timer_.reset();
 
   catalog_.reset();
@@ -183,7 +183,7 @@ void GridPublisher::checkForNewGrids()
             latched_qos.transient_local();
             latched_qos.keep_last(1);
 
-            grid_publishers_[pg.first] = 
+            grid_publishers_[pg.first] =
               create_publisher<grid_map_msgs::msg::GridMap>(
                 "datasets/"+ds->topic(), latched_qos);
             grid_publishers_[pg.first]->on_activate();
@@ -194,7 +194,7 @@ void GridPublisher::checkForNewGrids()
 
             if(publish_costmaps_)
             {
-              costmap_publishers_[pg.first] = 
+              costmap_publishers_[pg.first] =
                 create_publisher<nav_msgs::msg::OccupancyGrid>(
                   "datasets/occupancy_grids/"+ds->topic(), latched_qos);
               costmap_publishers_[pg.first]->on_activate();

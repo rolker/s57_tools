@@ -6,9 +6,9 @@
     <description>
     This package provides message types for use with S57 nautical chart data.
     </description>
-    
+
     <maintainer email="roland@ccom.unh.edu">Roland Arsenault</maintainer>
-    
+
     <license>BSD</license>
 
     <buildtool_depend>ament_cmake</buildtool_depend>
@@ -24,5 +24,5 @@
     <export>
         <build_type>ament_cmake</build_type>
     </export>
-    
+
 </package>

@@ -171,7 +171,7 @@ void GridCreationContext::rasterize(grid_map::GridMap& grid_map, OGRGeometry* ge
         {
           for(std::size_t i = 0; i+1 < ring.size(); i++)
           {
-            if(  (ring[i].y < wy && ring[i+1].y >= wy) 
+            if(  (ring[i].y < wy && ring[i+1].y >= wy)
               || (ring[i+1].y < wy && ring[i].y >= wy))
             {
               nodes.insert(ring[i].x+(wy-ring[i].y)/(ring[i+1].y-ring[i].y)*(ring[i+1].x-ring[i].x));
