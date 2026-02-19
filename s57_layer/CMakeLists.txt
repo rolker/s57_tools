@@ -30,7 +30,7 @@ ament_target_dependencies(${PROJECT_NAME}
   grid_map_ros
 )
 
-target_link_libraries(${PROJECT_NAME} 
+target_link_libraries(${PROJECT_NAME}
     ${geometry_msgs_TARGETS}
     s57_grids::s57_grids
     nav2_costmap_2d::nav2_costmap_2d_core
@@ -52,5 +52,13 @@ pluginlib_export_plugin_description_file(nav2_costmap_2d costmap_plugins.xml)
 ament_export_targets(export_${PROJECT_NAME})
 ament_export_libraries(${PROJECT_NAME})
 ament_export_dependencies(marine_charts nav2_costmap_2d pluginlib rclcpp s57_msgs)
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  set(ament_cmake_copyright_FOUND TRUE)
+  set(ament_cmake_cpplint_FOUND TRUE)
+  set(ament_cmake_uncrustify_FOUND TRUE)
+  ament_lint_auto_find_test_dependencies()
+endif()
 
 ament_package()

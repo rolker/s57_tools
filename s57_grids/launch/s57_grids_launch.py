@@ -1,12 +1,11 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch.substitutions import PythonExpression
 from launch_ros.actions import LifecycleNode
 from launch_ros.actions import LifecycleTransition
-from launch_ros.actions import Node
 
 from lifecycle_msgs.msg import Transition
+
 
 def generate_launch_description():
 
@@ -23,9 +22,9 @@ def generate_launch_description():
         LifecycleTransition(
             lifecycle_node_names=(
                 PythonExpression(
-                    expression = [
+                    expression=[
                         '"',
-                        LaunchConfiguration("ros_namespace", default=''),
+                        LaunchConfiguration('ros_namespace', default=''),
                         '" + "/s57_grids"'
                     ],
                 ),
