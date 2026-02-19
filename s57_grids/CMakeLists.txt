@@ -92,8 +92,15 @@ ament_export_dependencies(
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
+  find_package(launch_testing_ament_cmake REQUIRED)
+
+  add_launch_test(test/test_node_launch.py
+    TIMEOUT 30
+  )
+
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
+  # See s57_layer/CMakeLists.txt for rationale on cpplint/uncrustify skips.
   set(ament_cmake_cpplint_FOUND TRUE)
   set(ament_cmake_uncrustify_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()

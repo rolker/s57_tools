@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Roland Arsenault
+// Copyright (c) 2026 Roland Arsenault
 // Licensed under BSD license
 
 #include <gtest/gtest.h>

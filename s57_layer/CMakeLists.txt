@@ -64,13 +64,23 @@ if(BUILD_TESTING)
   target_link_libraries(test_allow_uncharted
     ${PROJECT_NAME}
     nav2_costmap_2d::nav2_costmap_2d_core
+    nav2_util::nav2_util_core
     rclcpp::rclcpp
     tf2_ros::tf2_ros
   )
-  ament_target_dependencies(test_allow_uncharted nav2_util)
+
+  ament_add_gtest(test_plugin_loading test/test_plugin_loading.cpp)
+  target_link_libraries(test_plugin_loading
+    nav2_costmap_2d::nav2_costmap_2d_core
+    pluginlib::pluginlib
+  )
 
   find_package(ament_lint_auto REQUIRED)
+  # Skip copyright: existing files lack headers; tracked separately.
   set(ament_cmake_copyright_FOUND TRUE)
+  # Skip cpplint/uncrustify: pre-existing code style (Allman braces,
+  # compact for-loops) differs from ament defaults. Reformatting the
+  # codebase is out of scope for this change.
   set(ament_cmake_cpplint_FOUND TRUE)
   set(ament_cmake_uncrustify_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
