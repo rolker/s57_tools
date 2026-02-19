@@ -54,6 +54,21 @@ ament_export_libraries(${PROJECT_NAME})
 ament_export_dependencies(marine_charts nav2_costmap_2d pluginlib rclcpp s57_msgs)
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(nav2_util REQUIRED)
+
+  ament_add_gtest(test_allow_uncharted test/test_allow_uncharted.cpp)
+  target_include_directories(test_allow_uncharted PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_link_libraries(test_allow_uncharted
+    ${PROJECT_NAME}
+    nav2_costmap_2d::nav2_costmap_2d_core
+    rclcpp::rclcpp
+    tf2_ros::tf2_ros
+  )
+  ament_target_dependencies(test_allow_uncharted nav2_util)
+
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
