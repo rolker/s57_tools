@@ -1,2 +1,10 @@
+# ROS 2 / colcon build artifacts
+build/
+install/
+log/
+CMakeFiles/
+__pycache__/
+
+# ENC chart data (downloaded at runtime)
 s57_layer/data/ENC_ROOT
 s57_grids/data/ENC_ROOT
