@@ -138,6 +138,7 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
         {
           t.second.complete = false;
           t.second.chart_count = 0;
+          t.second.costmap = nullptr;
           t.second.needs_update = true;
         }
         current_ = false;

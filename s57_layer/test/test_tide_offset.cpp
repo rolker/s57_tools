@@ -30,20 +30,24 @@ protected:
   }
 };
 
-// Helper: publish a static transform for chart_datum -> map with given Z.
+// Helper: publish a dynamic transform for chart_datum -> map with given Z.
+// Uses monotonically increasing timestamps since the transform is updated
+// during tests to simulate tide changes.
 static void publishChartDatumTransform(
   std::shared_ptr<tf2_ros::Buffer> tf_buffer,
   double z_value)
 {
+  static int64_t stamp_ns = 1;
+
   geometry_msgs::msg::TransformStamped t;
-  t.header.stamp = rclcpp::Time(0);
+  t.header.stamp = rclcpp::Time(stamp_ns++);
   t.header.frame_id = "map";
   t.child_frame_id = "chart_datum";
   t.transform.translation.x = 0.0;
   t.transform.translation.y = 0.0;
   t.transform.translation.z = z_value;
   t.transform.rotation.w = 1.0;
-  tf_buffer->setTransform(t, "test_authority", true);
+  tf_buffer->setTransform(t, "test_authority", false);
 }
 
 // When chart_datum_frame is set and a TF transform changes,
