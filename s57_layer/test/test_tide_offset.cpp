@@ -11,7 +11,6 @@
 #include "nav2_costmap_2d/cost_values.hpp"
 #include "nav2_util/lifecycle_node.hpp"
 #include "tf2_ros/buffer.h"
-#include "tf2_ros/static_transform_broadcaster.h"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 
 #include "s57_layer.h"
@@ -30,40 +29,50 @@ protected:
   }
 };
 
-// Helper: publish a dynamic transform for chart_datum -> map with given Z.
-// Uses monotonically increasing timestamps since the transform is updated
-// during tests to simulate tide changes.
-static void publishChartDatumTransform(
+// Helper: publish map → chart_datum and map → map_tide transforms.
+// The layer looks up chart_datum → map_tide to get tide height above MLLW.
+// chart_datum_z: Z of chart datum (MLLW) in map frame
+// map_tide_z: Z of sea surface in map frame
+// tide offset = map_tide_z - chart_datum_z
+static void publishTideTransforms(
   std::shared_ptr<tf2_ros::Buffer> tf_buffer,
-  double z_value)
+  double chart_datum_z,
+  double map_tide_z)
 {
   static int64_t stamp_ns = 1;
+  auto stamp = rclcpp::Time(stamp_ns++);
 
-  geometry_msgs::msg::TransformStamped t;
-  t.header.stamp = rclcpp::Time(stamp_ns++);
-  t.header.frame_id = "map";
-  t.child_frame_id = "chart_datum";
-  t.transform.translation.x = 0.0;
-  t.transform.translation.y = 0.0;
-  t.transform.translation.z = z_value;
-  t.transform.rotation.w = 1.0;
-  tf_buffer->setTransform(t, "test_authority", false);
+  geometry_msgs::msg::TransformStamped cd;
+  cd.header.stamp = stamp;
+  cd.header.frame_id = "map";
+  cd.child_frame_id = "chart_datum";
+  cd.transform.translation.z = chart_datum_z;
+  cd.transform.rotation.w = 1.0;
+  tf_buffer->setTransform(cd, "test_authority", false);
+
+  geometry_msgs::msg::TransformStamped mt;
+  mt.header.stamp = stamp;
+  mt.header.frame_id = "map";
+  mt.child_frame_id = "map_tide";
+  mt.transform.translation.z = map_tide_z;
+  mt.transform.rotation.w = 1.0;
+  tf_buffer->setTransform(mt, "test_authority", false);
 }
 
-// When chart_datum_frame is set and a TF transform changes,
-// the layer should invalidate cached tiles (current_ becomes false).
+// When chart_datum_frame and sea_surface_frame are set and a TF
+// transform changes, the layer should invalidate cached tiles.
 TEST_F(TideOffsetTest, TideChangeInvalidatesTiles)
 {
   auto node = std::make_shared<nav2_util::LifecycleNode>("test_tide_offset");
 
-  // Configure chart_datum_frame parameter
   node->declare_parameter("chart_layer.chart_datum_frame", std::string("chart_datum"));
+  node->declare_parameter("chart_layer.sea_surface_frame", std::string("map_tide"));
 
   auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
 
-  // Publish initial transform: chart datum at Z = -1.0 (1m below global frame)
-  // This means tide_offset_ = -(-1.0) = 1.0 m water above datum
-  publishChartDatumTransform(tf_buffer, -1.0);
+  // Chart datum (MLLW) at -30m in map frame, sea surface at -29m
+  // Tide offset = -29 - (-30) = 1.0 m above MLLW
+  publishTideTransforms(tf_buffer, -30.0, -29.0);
 
   nav2_costmap_2d::LayeredCostmap layered_costmap("map", false, false);
   layered_costmap.resizeMap(10, 10, 1.0, 0.0, 0.0);
@@ -78,11 +87,10 @@ TEST_F(TideOffsetTest, TideChangeInvalidatesTiles)
   layer->updateBounds(5.0, 5.0, 0.0, &minx, &miny, &maxx, &maxy);
   layer->updateCosts(*master, 0, 0, 10, 10);
 
-  // Should be current after processing
   EXPECT_TRUE(layer->isCurrent());
 
-  // Change tide: chart datum at Z = -2.5 (offset changes from 1.0 to 2.5)
-  publishChartDatumTransform(tf_buffer, -2.5);
+  // Change tide: sea surface rises to -27.5m, offset becomes 2.5m
+  publishTideTransforms(tf_buffer, -30.0, -27.5);
 
   // Second cycle: tide change should invalidate tiles
   minx = 1e30; miny = 1e30; maxx = -1e30; maxy = -1e30;
@@ -125,10 +133,11 @@ TEST_F(TideOffsetTest, SmallTideChangeIgnored)
   auto node = std::make_shared<nav2_util::LifecycleNode>("test_small_tide");
 
   node->declare_parameter("chart_layer.chart_datum_frame", std::string("chart_datum"));
+  node->declare_parameter("chart_layer.sea_surface_frame", std::string("map_tide"));
 
   auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
 
-  publishChartDatumTransform(tf_buffer, -1.0);
+  publishTideTransforms(tf_buffer, -30.0, -29.0);
 
   nav2_costmap_2d::LayeredCostmap layered_costmap("map", false, false);
   layered_costmap.resizeMap(10, 10, 1.0, 0.0, 0.0);
@@ -144,7 +153,7 @@ TEST_F(TideOffsetTest, SmallTideChangeIgnored)
   EXPECT_TRUE(layer->isCurrent());
 
   // Change by only 0.005m — below the 0.01m threshold
-  publishChartDatumTransform(tf_buffer, -1.005);
+  publishTideTransforms(tf_buffer, -30.0, -28.995);
 
   minx = 1e30; miny = 1e30; maxx = -1e30; maxy = -1e30;
   layer->updateBounds(5.0, 5.0, 0.0, &minx, &miny, &maxx, &maxy);
