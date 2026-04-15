@@ -30,7 +30,9 @@ protected:
 };
 
 // Helper: publish map → chart_datum and map → map_tide transforms.
-// The layer looks up chart_datum → map_tide to get tide height above MLLW.
+// The layer calls lookupTransform(chart_datum, map_tide) to get the
+// sea surface position expressed in the chart datum frame — i.e., the
+// water height above MLLW.
 // chart_datum_z: Z of chart datum (MLLW) in map frame
 // map_tide_z: Z of sea surface in map frame
 // tide offset = map_tide_z - chart_datum_z

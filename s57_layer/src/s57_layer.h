@@ -100,8 +100,10 @@ private:
   bool allow_uncharted_ = true;
 
   // Optional tide correction via chart datum and sea surface frames.
-  // When both are set, the layer looks up chart_datum_frame → sea_surface_frame
-  // to get the tide offset (water surface height above chart datum/MLLW).
+  // When both are set, the layer calls
+  //   lookupTransform(chart_datum_frame, sea_surface_frame)
+  // to get the sea surface position expressed in the chart datum frame.
+  // The Z component is the water height above MLLW (chart datum).
   std::string chart_datum_frame_;
   std::string sea_surface_frame_ = "map_tide";
   double tide_offset_ = 0.0;
