@@ -69,6 +69,18 @@ if(BUILD_TESTING)
     tf2_ros::tf2_ros
   )
 
+  ament_add_gtest(test_tide_offset test/test_tide_offset.cpp)
+  target_include_directories(test_tide_offset PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_link_libraries(test_tide_offset
+    ${PROJECT_NAME}
+    nav2_costmap_2d::nav2_costmap_2d_core
+    nav2_util::nav2_util_core
+    rclcpp::rclcpp
+    tf2_ros::tf2_ros
+  )
+
   ament_add_gtest(test_plugin_loading test/test_plugin_loading.cpp)
   target_link_libraries(test_plugin_loading
     nav2_costmap_2d::nav2_costmap_2d_core

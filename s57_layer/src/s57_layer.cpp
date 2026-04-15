@@ -1,5 +1,7 @@
 #include "s57_layer.h"
 
+#include <cmath>
+
 #include "geodesy/ecef.h"
 #include "geodesy/wgs84.h"
 #include "geometry_msgs/msg/pose_stamped.hpp"
@@ -133,7 +135,12 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
         tide_offset_ = new_offset;
         RCLCPP_INFO_STREAM(logger_, "Tide offset updated: " << tide_offset_ << " m (water above chart datum)");
         for(auto& t: tiles_)
+        {
           t.second.complete = false;
+          t.second.chart_count = 0;
+          t.second.needs_update = true;
+        }
+        current_ = false;
       }
     }
     catch(const tf2::TransformException& e)
