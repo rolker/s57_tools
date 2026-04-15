@@ -99,6 +99,12 @@ private:
   // When false, uncharted areas are marked NO_INFORMATION to block planning.
   bool allow_uncharted_ = true;
 
+  // Optional chart datum frame for tide correction.
+  // When set, the layer looks up chart_datum_frame → global_frame to get
+  // the tide offset (water surface height above chart datum).
+  std::string chart_datum_frame_;
+  double tide_offset_ = 0.0;
+
   typedef std::pair<int, int> TileID;
 
   struct TileInfo

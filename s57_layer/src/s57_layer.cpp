@@ -1,5 +1,7 @@
 #include "s57_layer.h"
 
+#include <cmath>
+
 #include "geodesy/ecef.h"
 #include "geodesy/wgs84.h"
 #include "geometry_msgs/msg/pose_stamped.hpp"
@@ -54,6 +56,11 @@ void S57Layer::onInitialize()
 
   declareParameter("allow_uncharted", rclcpp::ParameterValue(allow_uncharted_));
   node->get_parameter(name_+".allow_uncharted", allow_uncharted_);
+
+  declareParameter("chart_datum_frame", rclcpp::ParameterValue(chart_datum_frame_));
+  node->get_parameter(name_+".chart_datum_frame", chart_datum_frame_);
+  if(!chart_datum_frame_.empty())
+    RCLCPP_INFO_STREAM(logger_, "Tide correction enabled: chart_datum_frame = " << chart_datum_frame_);
 
   declareParameter("s57_grids_namespace", rclcpp::ParameterValue(s57_grids_namespace_));
   node->get_parameter(name_+".s57_grids_namespace", s57_grids_namespace_);
@@ -116,6 +123,33 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
 {
   if (!enabled_)
     return;
+
+  if(!chart_datum_frame_.empty())
+  {
+    try
+    {
+      auto transform = tf_->lookupTransform(global_frame_id_, chart_datum_frame_, tf2::TimePointZero);
+      double new_offset = -transform.transform.translation.z;
+      if(std::abs(new_offset - tide_offset_) > 0.01)
+      {
+        tide_offset_ = new_offset;
+        RCLCPP_INFO_STREAM(logger_, "Tide offset updated: " << tide_offset_ << " m (water above chart datum)");
+        for(auto& t: tiles_)
+        {
+          t.second.complete = false;
+          t.second.chart_count = 0;
+          t.second.costmap = nullptr;
+          t.second.needs_update = true;
+        }
+        current_ = false;
+      }
+    }
+    catch(const tf2::TransformException& e)
+    {
+      RCLCPP_WARN_THROTTLE(logger_, *clock_, 10000, "Cannot look up tide offset (%s → %s): %s",
+        chart_datum_frame_.c_str(), global_frame_id_.c_str(), e.what());
+    }
+  }
 
   auto start_time = clock_->now();
 
@@ -421,7 +455,7 @@ unsigned char S57Layer::get_cost_from_grid(grid_map::GridMap &grid, const grid_m
   auto elevation = grid.at("elevation", index);
   if(!std::isnan(elevation))
   {
-    auto depth = -elevation;
+    auto depth = -elevation + tide_offset_;
     if (depth < minimum_depth_)
       return nav2_costmap_2d::LETHAL_OBSTACLE;
     unsigned char cost = nav2_costmap_2d::FREE_SPACE;
