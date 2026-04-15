@@ -59,8 +59,13 @@ void S57Layer::onInitialize()
 
   declareParameter("chart_datum_frame", rclcpp::ParameterValue(chart_datum_frame_));
   node->get_parameter(name_+".chart_datum_frame", chart_datum_frame_);
-  if(!chart_datum_frame_.empty())
-    RCLCPP_INFO_STREAM(logger_, "Tide correction enabled: chart_datum_frame = " << chart_datum_frame_);
+
+  declareParameter("sea_surface_frame", rclcpp::ParameterValue(sea_surface_frame_));
+  node->get_parameter(name_+".sea_surface_frame", sea_surface_frame_);
+
+  if(!chart_datum_frame_.empty() && !sea_surface_frame_.empty())
+    RCLCPP_INFO_STREAM(logger_, "Tide correction enabled: sea surface height in chart datum frame ("
+      << sea_surface_frame_ << " expressed in " << chart_datum_frame_ << ")");
 
   declareParameter("s57_grids_namespace", rclcpp::ParameterValue(s57_grids_namespace_));
   node->get_parameter(name_+".s57_grids_namespace", s57_grids_namespace_);
@@ -124,12 +129,12 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
   if (!enabled_)
     return;
 
-  if(!chart_datum_frame_.empty())
+  if(!chart_datum_frame_.empty() && !sea_surface_frame_.empty())
   {
     try
     {
-      auto transform = tf_->lookupTransform(global_frame_id_, chart_datum_frame_, tf2::TimePointZero);
-      double new_offset = -transform.transform.translation.z;
+      auto transform = tf_->lookupTransform(chart_datum_frame_, sea_surface_frame_, tf2::TimePointZero);
+      double new_offset = transform.transform.translation.z;
       if(std::abs(new_offset - tide_offset_) > 0.01)
       {
         tide_offset_ = new_offset;
@@ -146,8 +151,9 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
     }
     catch(const tf2::TransformException& e)
     {
-      RCLCPP_WARN_THROTTLE(logger_, *clock_, 10000, "Cannot look up tide offset (%s → %s): %s",
-        chart_datum_frame_.c_str(), global_frame_id_.c_str(), e.what());
+      RCLCPP_WARN_THROTTLE(logger_, *clock_, 10000,
+        "Cannot look up tide offset (%s expressed in %s): %s",
+        sea_surface_frame_.c_str(), chart_datum_frame_.c_str(), e.what());
     }
   }
 
