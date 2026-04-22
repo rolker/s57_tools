@@ -63,9 +63,13 @@ void S57Layer::onInitialize()
   declareParameter("sea_surface_frame", rclcpp::ParameterValue(sea_surface_frame_));
   node->get_parameter(name_+".sea_surface_frame", sea_surface_frame_);
 
+  declareParameter("tide_invalidate_threshold", rclcpp::ParameterValue(tide_invalidate_threshold_));
+  node->get_parameter(name_+".tide_invalidate_threshold", tide_invalidate_threshold_);
+
   if(!chart_datum_frame_.empty() && !sea_surface_frame_.empty())
     RCLCPP_INFO_STREAM(logger_, "Tide correction enabled: sea surface height in chart datum frame ("
-      << sea_surface_frame_ << " expressed in " << chart_datum_frame_ << ")");
+      << sea_surface_frame_ << " expressed in " << chart_datum_frame_
+      << "), invalidate threshold " << tide_invalidate_threshold_ << " m");
 
   declareParameter("s57_grids_namespace", rclcpp::ParameterValue(s57_grids_namespace_));
   node->get_parameter(name_+".s57_grids_namespace", s57_grids_namespace_);
@@ -135,7 +139,7 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
     {
       auto transform = tf_->lookupTransform(chart_datum_frame_, sea_surface_frame_, tf2::TimePointZero);
       double new_offset = transform.transform.translation.z;
-      if(std::abs(new_offset - tide_offset_) > 0.01)
+      if(std::abs(new_offset - tide_offset_) > tide_invalidate_threshold_)
       {
         tide_offset_ = new_offset;
         RCLCPP_INFO_STREAM(logger_, "Tide offset updated: " << tide_offset_ << " m (water above chart datum)");
