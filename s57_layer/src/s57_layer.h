@@ -108,6 +108,12 @@ private:
   std::string sea_surface_frame_ = "map_tide";
   double tide_offset_ = 0.0;
 
+  // Tide changes smaller than this (in meters) do not invalidate cached
+  // tile state. The default 1 cm matches typical real-world tide rate
+  // (~0.5 m/hr near peak ⇒ 1 cm step every ~72 s). Sim runs with
+  // accelerated tide should override to a larger value.
+  double tide_invalidate_threshold_ = 0.01;
+
   typedef std::pair<int, int> TileID;
 
   struct TileInfo

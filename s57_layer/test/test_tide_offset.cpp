@@ -163,3 +163,89 @@ TEST_F(TideOffsetTest, SmallTideChangeIgnored)
   // Should still be current — change too small
   EXPECT_TRUE(layer->isCurrent());
 }
+
+// A configured tide_invalidate_threshold should override the default,
+// allowing larger tide changes (between default and override) to pass
+// without invalidating cached tiles. Used by sim configs where the
+// accelerated tide_speed_factor would otherwise fire invalidations
+// every few seconds.
+TEST_F(TideOffsetTest, CustomThresholdAcceptsLargerChanges)
+{
+  auto node = std::make_shared<nav2_util::LifecycleNode>("test_custom_threshold");
+
+  node->declare_parameter("chart_layer.chart_datum_frame", std::string("chart_datum"));
+  node->declare_parameter("chart_layer.sea_surface_frame", std::string("map_tide"));
+  node->declare_parameter("chart_layer.tide_invalidate_threshold", 0.05);
+
+  auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+
+  publishTideTransforms(tf_buffer, -30.0, -29.0);
+
+  nav2_costmap_2d::LayeredCostmap layered_costmap("map", false, false);
+  layered_costmap.resizeMap(10, 10, 1.0, 0.0, 0.0);
+
+  auto * master = layered_costmap.getCostmap();
+
+  auto layer = std::make_shared<s57_layer::S57Layer>();
+  layer->initialize(&layered_costmap, "chart_layer", tf_buffer.get(), node, nullptr);
+
+  double minx = 1e30, miny = 1e30, maxx = -1e30, maxy = -1e30;
+  layer->updateBounds(5.0, 5.0, 0.0, &minx, &miny, &maxx, &maxy);
+  layer->updateCosts(*master, 0, 0, 10, 10);
+  EXPECT_TRUE(layer->isCurrent());
+
+  // 3 cm change — above the default 0.01 m but below the configured
+  // 0.05 m — must NOT invalidate.
+  publishTideTransforms(tf_buffer, -30.0, -28.97);
+  minx = 1e30; miny = 1e30; maxx = -1e30; maxy = -1e30;
+  layer->updateBounds(5.0, 5.0, 0.0, &minx, &miny, &maxx, &maxy);
+  EXPECT_TRUE(layer->isCurrent());
+
+  // 6 cm change — above the configured 0.05 m — must invalidate.
+  publishTideTransforms(tf_buffer, -30.0, -28.94);
+  minx = 1e30; miny = 1e30; maxx = -1e30; maxy = -1e30;
+  layer->updateBounds(5.0, 5.0, 0.0, &minx, &miny, &maxx, &maxy);
+  EXPECT_FALSE(layer->isCurrent());
+
+  // After updateCosts, regen completes and tiles are current again.
+  layer->updateCosts(*master, 0, 0, 10, 10);
+  EXPECT_TRUE(layer->isCurrent());
+}
+
+// Invalid threshold values (negative, NaN, inf) should be rejected at
+// onInitialize and the default restored.
+TEST_F(TideOffsetTest, InvalidThresholdFallsBackToDefault)
+{
+  auto node = std::make_shared<nav2_util::LifecycleNode>("test_invalid_threshold");
+
+  node->declare_parameter("chart_layer.chart_datum_frame", std::string("chart_datum"));
+  node->declare_parameter("chart_layer.sea_surface_frame", std::string("map_tide"));
+  // Negative threshold: would otherwise make every tide change pass the
+  // (std::abs(...) > threshold) test and invalidate continuously.
+  node->declare_parameter("chart_layer.tide_invalidate_threshold", -1.0);
+
+  auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+
+  publishTideTransforms(tf_buffer, -30.0, -29.0);
+
+  nav2_costmap_2d::LayeredCostmap layered_costmap("map", false, false);
+  layered_costmap.resizeMap(10, 10, 1.0, 0.0, 0.0);
+
+  auto * master = layered_costmap.getCostmap();
+
+  auto layer = std::make_shared<s57_layer::S57Layer>();
+  layer->initialize(&layered_costmap, "chart_layer", tf_buffer.get(), node, nullptr);
+
+  double minx = 1e30, miny = 1e30, maxx = -1e30, maxy = -1e30;
+  layer->updateBounds(5.0, 5.0, 0.0, &minx, &miny, &maxx, &maxy);
+  layer->updateCosts(*master, 0, 0, 10, 10);
+  EXPECT_TRUE(layer->isCurrent());
+
+  // 0.005 m change — below the restored default 0.01 m — must NOT
+  // invalidate. If validation was skipped, the negative threshold would
+  // cause invalidation here.
+  publishTideTransforms(tf_buffer, -30.0, -28.995);
+  minx = 1e30; miny = 1e30; maxx = -1e30; maxy = -1e30;
+  layer->updateBounds(5.0, 5.0, 0.0, &minx, &miny, &maxx, &maxy);
+  EXPECT_TRUE(layer->isCurrent());
+}

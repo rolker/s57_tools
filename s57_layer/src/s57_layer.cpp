@@ -63,9 +63,24 @@ void S57Layer::onInitialize()
   declareParameter("sea_surface_frame", rclcpp::ParameterValue(sea_surface_frame_));
   node->get_parameter(name_+".sea_surface_frame", sea_surface_frame_);
 
+  const double default_tide_invalidate_threshold = tide_invalidate_threshold_;
+  declareParameter("tide_invalidate_threshold", rclcpp::ParameterValue(tide_invalidate_threshold_));
+  node->get_parameter(name_+".tide_invalidate_threshold", tide_invalidate_threshold_);
+  // ROS 2 parameters are external input — validate. Negative would make
+  // every tide change exceed the threshold (continuous invalidation =
+  // costmap stalls); non-finite would silently disable invalidation.
+  if(!std::isfinite(tide_invalidate_threshold_) || tide_invalidate_threshold_ < 0.0)
+  {
+    RCLCPP_WARN_STREAM(logger_,
+      "Invalid tide_invalidate_threshold value " << tide_invalidate_threshold_
+      << " m; using default " << default_tide_invalidate_threshold << " m instead.");
+    tide_invalidate_threshold_ = default_tide_invalidate_threshold;
+  }
+
   if(!chart_datum_frame_.empty() && !sea_surface_frame_.empty())
     RCLCPP_INFO_STREAM(logger_, "Tide correction enabled: sea surface height in chart datum frame ("
-      << sea_surface_frame_ << " expressed in " << chart_datum_frame_ << ")");
+      << sea_surface_frame_ << " expressed in " << chart_datum_frame_
+      << "), invalidate threshold " << tide_invalidate_threshold_ << " m");
 
   declareParameter("s57_grids_namespace", rclcpp::ParameterValue(s57_grids_namespace_));
   node->get_parameter(name_+".s57_grids_namespace", s57_grids_namespace_);
@@ -135,7 +150,7 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
     {
       auto transform = tf_->lookupTransform(chart_datum_frame_, sea_surface_frame_, tf2::TimePointZero);
       double new_offset = transform.transform.translation.z;
-      if(std::abs(new_offset - tide_offset_) > 0.01)
+      if(std::abs(new_offset - tide_offset_) > tide_invalidate_threshold_)
       {
         tide_offset_ = new_offset;
         RCLCPP_INFO_STREAM(logger_, "Tide offset updated: " << tide_offset_ << " m (water above chart datum)");
