@@ -4,6 +4,7 @@
 #include "geometry_msgs/msg/point_stamped.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
+#include <cmath>
 #include <thread>
 
 namespace s57_grids
@@ -62,6 +63,24 @@ GridPublisher::on_configure(const rclcpp_lifecycle::State &state)
   }
   publish_costmaps_ = get_parameter("publish_costmaps").as_bool();
 
+  if(!has_parameter("check_new_grids_period"))
+  {
+    declare_parameter("check_new_grids_period", rclcpp::ParameterValue(check_new_grids_period_));
+  }
+  check_new_grids_period_ = get_parameter("check_new_grids_period").as_double();
+
+  if(!has_parameter("robot_base_frame"))
+  {
+    declare_parameter("robot_base_frame", rclcpp::ParameterValue(robot_base_frame_));
+  }
+  robot_base_frame_ = get_parameter("robot_base_frame").as_string();
+
+  if(!has_parameter("precompute_radius"))
+  {
+    declare_parameter("precompute_radius", rclcpp::ParameterValue(precompute_radius_));
+  }
+  precompute_radius_ = get_parameter("precompute_radius").as_double();
+
   list_service_ = create_service<s57_msgs::srv::GetDatasets>(
     "list_datasets",
     std::bind(&GridPublisher::listDatasets, this, std::placeholders::_1, std::placeholders::_2)
@@ -76,10 +95,16 @@ GridPublisher::on_configure(const rclcpp_lifecycle::State &state)
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
   new_grids_timer_ = create_wall_timer(
-    std::chrono::milliseconds(1000),
+    std::chrono::milliseconds(int(1000.0 * check_new_grids_period_)),
     std::bind(&GridPublisher::checkForNewGrids, this)
   );
 
+  if(!robot_base_frame_.empty() && precompute_radius_ > 0.0)
+  {
+    RCLCPP_INFO_STREAM(get_logger(),
+      "Precompute enabled: will queue charts within " << precompute_radius_
+      << " m of " << robot_base_frame_ << " when TF first becomes available.");
+  }
 
   return LifecycleNode::on_configure(state);
 
@@ -139,15 +164,27 @@ void GridPublisher::getDatasets(
 {
   listDatasets(request, response);
   std::lock_guard<std::mutex> lock(requested_grids_mutex);
+  auto now = get_clock()->now();
   for(const auto& d: response->datasets)
   {
     requested_grids_.push_back(d.label);
     requested_grids_to_publish_.push_back(d.label);
+    // Only record start time on the first request for this label, so
+    // re-requests don't reset the measurement.
+    grid_request_start_times_.emplace(d.label, now);
   }
 }
 
 void GridPublisher::checkForNewGrids()
 {
+  // Try a one-shot eager-precompute on the first tick where the boat's
+  // pose is known. Cheap when disabled (empty robot_base_frame_) or
+  // already done.
+  if(!did_precompute_ && !robot_base_frame_.empty() && precompute_radius_ > 0.0)
+  {
+    tryPrecompute();
+  }
+
   {
     std::lock_guard<std::mutex> lock(requested_grids_mutex);
     for(auto r: requested_grids_)
@@ -189,7 +226,20 @@ void GridPublisher::checkForNewGrids()
             grid_publishers_[pg.first]->on_activate();
 
             auto message = grid_map::GridMapRosConverter::toMessage(*grid);
-            RCLCPP_DEBUG_STREAM(get_logger(), "Publishing grid to " << "datasets/" << pg.first);
+            // Report time from first request to publish for this chart.
+            // Useful for diagnosing cold-cache behaviour without recompiling.
+            auto start_it = grid_request_start_times_.find(pg.first);
+            if(start_it != grid_request_start_times_.end())
+            {
+              auto elapsed = (get_clock()->now() - start_it->second).seconds();
+              RCLCPP_INFO_STREAM(get_logger(),
+                "Grid ready: " << pg.first << " (" << elapsed << " s from request to publish)");
+              grid_request_start_times_.erase(start_it);
+            }
+            else
+            {
+              RCLCPP_INFO_STREAM(get_logger(), "Grid ready: " << pg.first);
+            }
             grid_publishers_[pg.first]->publish(*message);
 
             if(publish_costmaps_)
@@ -218,6 +268,89 @@ void GridPublisher::checkForNewGrids()
 
   done_grids.clear();
 
+}
+
+void GridPublisher::tryPrecompute()
+{
+  // Look up the boat's current pose in the map frame. If not yet
+  // available (TF tree still bootstrapping), silently retry next tick.
+  geometry_msgs::msg::TransformStamped pose_in_map;
+  try
+  {
+    pose_in_map = tf_buffer_->lookupTransform(
+      map_frame_, robot_base_frame_, tf2::TimePointZero);
+  }
+  catch(const tf2::TransformException&)
+  {
+    return;
+  }
+
+  // Convert (x, y, z) from map frame to ECEF, then to lat/lon. The
+  // catalog needs lat/lon to find intersecting charts.
+  geometry_msgs::msg::PointStamped map_pt;
+  map_pt.header = pose_in_map.header;
+  map_pt.point.x = pose_in_map.transform.translation.x;
+  map_pt.point.y = pose_in_map.transform.translation.y;
+  map_pt.point.z = pose_in_map.transform.translation.z;
+  geometry_msgs::msg::PointStamped ecef_pt;
+  try
+  {
+    tf_buffer_->transform(map_pt, ecef_pt, "earth");
+  }
+  catch(const tf2::TransformException&)
+  {
+    return;
+  }
+  double lat = 0.0, lon = 0.0;
+  if(!catalog_->ecefToLatLong(ecef_pt.point.x, ecef_pt.point.y, ecef_pt.point.z, lat, lon))
+    return;
+
+  // Equirectangular approximation: 1° lat ≈ 111 000 m everywhere;
+  // 1° lon ≈ 111 000 m × cos(lat). Good to <1% for radii up to ~50 km
+  // outside polar regions.
+  const double meters_per_deg_lat = 111000.0;
+  const double meters_per_deg_lon = 111000.0 * std::cos(lat * M_PI / 180.0);
+  geographic_msgs::msg::BoundingBox bounds;
+  bounds.min_pt.latitude  = lat - precompute_radius_ / meters_per_deg_lat;
+  bounds.max_pt.latitude  = lat + precompute_radius_ / meters_per_deg_lat;
+  bounds.min_pt.longitude = lon - precompute_radius_ / meters_per_deg_lon;
+  bounds.max_pt.longitude = lon + precompute_radius_ / meters_per_deg_lon;
+
+  auto charts = catalog_->intersectingCharts(bounds);
+  if(charts.empty())
+  {
+    RCLCPP_WARN_STREAM(get_logger(),
+      "Precompute: no charts intersect " << precompute_radius_ << " m radius around ("
+      << lat << ", " << lon << ").");
+    did_precompute_ = true;
+    return;
+  }
+
+  // Queue the chart labels via the same path getDatasets uses (both
+  // requested_grids_ to trigger generation and requested_grids_to_publish_
+  // so the latched topic message gets published when ready — late-arriving
+  // S57Layer subscribers see the cached message thanks to transient_local
+  // QoS). Labels already in flight (tracked via grid_request_start_times_)
+  // are skipped to avoid double-queuing.
+  std::lock_guard<std::mutex> lock(requested_grids_mutex);
+  auto now = get_clock()->now();
+  size_t queued = 0;
+  for(const auto& chart: charts)
+  {
+    const std::string& label = chart->label();
+    if(grid_request_start_times_.count(label) == 0)
+    {
+      requested_grids_.push_back(label);
+      requested_grids_to_publish_.push_back(label);
+      grid_request_start_times_.emplace(label, now);
+      ++queued;
+    }
+  }
+  RCLCPP_INFO_STREAM(get_logger(),
+    "Precompute: queued " << queued << " of " << charts.size()
+    << " charts within " << precompute_radius_ << " m of ("
+    << lat << ", " << lon << ").");
+  did_precompute_ = true;
 }
 
 void GridPublisher::republishGrids()

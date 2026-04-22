@@ -54,6 +54,15 @@ void S57Layer::onInitialize()
   declareParameter("tile_size", rclcpp::ParameterValue(tile_size_));
   node->get_parameter(name_+".tile_size", tile_size_);
 
+  declareParameter("buffer_fraction", rclcpp::ParameterValue(buffer_fraction_));
+  node->get_parameter(name_+".buffer_fraction", buffer_fraction_);
+  if(buffer_fraction_ < 0.0)
+  {
+    RCLCPP_WARN_STREAM(logger_,
+      "Invalid buffer_fraction value " << buffer_fraction_ << "; using 0.05 instead.");
+    buffer_fraction_ = 0.05;
+  }
+
   declareParameter("allow_uncharted", rclcpp::ParameterValue(allow_uncharted_));
   node->get_parameter(name_+".allow_uncharted", allow_uncharted_);
 
@@ -186,8 +195,9 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
   world_min_y = parent->getOriginY();
   world_max_y = world_min_y + parent->getSizeInMetersY();
 
-  // 5% buffer around the world bounds
-  double buffer = std::max(world_max_x-world_min_x, world_max_y-world_min_y)*0.05;
+  // Buffer around the world bounds, controlled by buffer_fraction_
+  // (default 0.05 = 5%). Larger values pre-load more chart area.
+  double buffer = std::max(world_max_x-world_min_x, world_max_y-world_min_y)*buffer_fraction_;
 
   // use two layers of buffer. inner buffer to make sure data is available
   // and an outer buffer to limit the number of service calls to the get data service
