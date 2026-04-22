@@ -340,6 +340,19 @@ void S57Layer::generateTile(TileID id)
       else
         all_charts_available = false;
   }
+
+  // No chart from current_charts_ overlaps this tile. Treat as uncharted —
+  // same handling as the empty-current_charts_ early return — and clear
+  // any costmap left over from a prior era when this tile had coverage.
+  if(grids.empty() && all_charts_available)
+  {
+    tiles_[id].complete = true;
+    tiles_[id].costmap = nullptr;
+    tiles_[id].chart_count = 0;
+    tiles_[id].needs_update = true;
+    return;
+  }
+
   tiles_[id].complete = all_charts_available;
   if(grids.size() > tiles_[id].chart_count)
   {
@@ -532,19 +545,11 @@ void S57Layer::getDatasetsCallback(GetDatasetsClient::SharedFuture future)
   // runs frequently while the boat moves; in steady-state survey areas the
   // label set rarely changes. If unchanged, skip the per-tile invalidation
   // at the end of this function so the cache survives.
-  bool chart_list_unchanged = result->datasets.size() == current_charts_.size();
-  if(chart_list_unchanged)
-  {
-    for(const auto& d: result->datasets)
-    {
-      bool found = false;
-      for(const auto& c: current_charts_)
-      {
-        if(c.label == d.label) { found = true; break; }
-      }
-      if(!found) { chart_list_unchanged = false; break; }
-    }
-  }
+  std::unordered_set<std::string> new_labels;
+  for(const auto& d: result->datasets) new_labels.insert(d.label);
+  std::unordered_set<std::string> old_labels;
+  for(const auto& c: current_charts_) old_labels.insert(c.label);
+  bool chart_list_unchanged = (new_labels == old_labels);
 
   current_charts_ = result->datasets;
   chart_bounds_.clear();
@@ -619,10 +624,18 @@ void S57Layer::getDatasetsCallback(GetDatasetsClient::SharedFuture future)
   // Mark tiles as needing regeneration only when the chart set actually
   // changed — unchanged callbacks are common while the boat moves and
   // would otherwise force a full re-evaluation of every cached tile.
+  // Also reset chart_count so the rebuild branch in generateTile fires
+  // unconditionally; otherwise a same-count chart swap (one chart removed,
+  // one added) would leave stale tile costmaps because grids.size() would
+  // equal the previous chart_count.
   if(!chart_list_unchanged)
   {
     for(auto& t: tiles_)
+    {
       t.second.complete = false;
+      t.second.chart_count = 0;
+      t.second.needs_update = true;
+    }
   }
 
 }
