@@ -1,6 +1,7 @@
 #ifndef S57_GRIDS_S57_GRID_PUBLISHER_H
 #define S57_GRIDS_S57_GRID_PUBLISHER_H
 
+#include <chrono>
 #include <future>
 #include <unordered_set>
 
@@ -84,9 +85,11 @@ private:
   // Futures waiting for datasets being generated in separate threads
   std::map<std::string, std::future<std::shared_ptr<grid_map::GridMap> > > pending_dataset_grids_;
 
-  // Wall-clock time each chart was first added to requested_grids_ — used
-  // to log per-chart processing latency when the grid is published.
-  std::map<std::string, rclcpp::Time> grid_request_start_times_;
+  // Steady-clock time each chart was first added to requested_grids_ —
+  // used to log per-chart processing latency when the grid is published.
+  // Steady (not ROS) time so that use_sim_time, sim pauses, or NTP step
+  // corrections don't produce negative or inflated latency numbers.
+  std::map<std::string, std::chrono::steady_clock::time_point> grid_request_start_times_;
 
   rclcpp::TimerBase::SharedPtr new_grids_timer_;
   // Period for new_grids_timer_ in seconds. Smaller values reap completed

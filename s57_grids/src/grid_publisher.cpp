@@ -4,7 +4,10 @@
 #include "geometry_msgs/msg/point_stamped.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
+#include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <thread>
 #include <unordered_set>
 
@@ -184,9 +187,17 @@ void GridPublisher::getDatasets(
 {
   listDatasets(request, response);
   std::lock_guard<std::mutex> lock(requested_grids_mutex);
-  auto now = get_clock()->now();
+  const auto now = std::chrono::steady_clock::now();
   for(const auto& d: response->datasets)
   {
+    // Skip labels already published or in flight — otherwise their
+    // entries in requested_grids_to_publish_ / grid_request_start_times_
+    // would never be cleaned up. Cleanup runs only when a pending future
+    // completes, and checkForNewGrids will not start a new future for
+    // labels already in grid_publishers_ or pending_dataset_grids_.
+    if(grid_publishers_.count(d.label) > 0
+       || pending_dataset_grids_.count(d.label) > 0)
+      continue;
     requested_grids_.push_back(d.label);
     requested_grids_to_publish_.insert(d.label);
     // Only record start time on the first request for this label, so
@@ -251,9 +262,10 @@ void GridPublisher::checkForNewGrids()
             auto start_it = grid_request_start_times_.find(pg.first);
             if(start_it != grid_request_start_times_.end())
             {
-              auto elapsed = (get_clock()->now() - start_it->second).seconds();
+              const std::chrono::duration<double> elapsed =
+                std::chrono::steady_clock::now() - start_it->second;
               RCLCPP_INFO_STREAM(get_logger(),
-                "Grid ready: " << pg.first << " (" << elapsed << " s from request to publish)");
+                "Grid ready: " << pg.first << " (" << elapsed.count() << " s from request to publish)");
               grid_request_start_times_.erase(start_it);
             }
             else
@@ -330,8 +342,9 @@ void GridPublisher::tryPrecompute()
   // Equirectangular approximation: 1° lat ≈ 111 000 m everywhere;
   // 1° lon ≈ 111 000 m × cos(lat). Good to <1% for radii up to ~50 km
   // outside polar regions.
+  constexpr double kPi = 3.14159265358979323846;
   const double meters_per_deg_lat = 111000.0;
-  const double meters_per_deg_lon = 111000.0 * std::cos(lat * M_PI / 180.0);
+  const double meters_per_deg_lon = 111000.0 * std::cos(lat * kPi / 180.0);
   const double lat_delta = precompute_radius_ / meters_per_deg_lat;
 
   // Latitude is bounded; clamp to the physically meaningful range.
@@ -430,21 +443,24 @@ void GridPublisher::tryPrecompute()
   // requested_grids_ to trigger generation and requested_grids_to_publish_
   // so the latched topic message gets published when ready — late-arriving
   // S57Layer subscribers see the cached message thanks to transient_local
-  // QoS). Labels already in flight (tracked via grid_request_start_times_)
-  // are skipped to avoid double-queuing.
+  // QoS). Skip labels already published, in flight, or queued — otherwise
+  // their entries in requested_grids_to_publish_ / grid_request_start_times_
+  // would never be cleaned up (cleanup runs only when a pending future
+  // completes).
   std::lock_guard<std::mutex> lock(requested_grids_mutex);
-  auto now = get_clock()->now();
+  const auto now = std::chrono::steady_clock::now();
   size_t queued = 0;
   for(const auto& chart: charts)
   {
     const std::string& label = chart->label();
-    if(grid_request_start_times_.count(label) == 0)
-    {
-      requested_grids_.push_back(label);
-      requested_grids_to_publish_.insert(label);
-      grid_request_start_times_.emplace(label, now);
-      ++queued;
-    }
+    if(grid_publishers_.count(label) > 0
+       || pending_dataset_grids_.count(label) > 0
+       || grid_request_start_times_.count(label) > 0)
+      continue;
+    requested_grids_.push_back(label);
+    requested_grids_to_publish_.insert(label);
+    grid_request_start_times_.emplace(label, now);
+    ++queued;
   }
   RCLCPP_INFO_STREAM(get_logger(),
     "Precompute: queued " << queued << " of " << charts.size()
