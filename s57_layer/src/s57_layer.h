@@ -95,6 +95,15 @@ private:
 
   double update_timeout_ = 0.5;
 
+  // Fraction of the costmap window size to extend the buffered chart
+  // request bounds. The inner ring (1×) acts as a pre-load buffer so
+  // chart data is ready before the rolling window scrolls into it; the
+  // outer ring (2×) limits how often a new get_datasets service call
+  // is sent. A larger value pre-loads more area at the cost of more
+  // memory and processing per request. The 0.05 default preserves the
+  // historical hardcoded value.
+  double buffer_fraction_ = 0.05;
+
   // When true, allow navigation in areas without ENC chart coverage.
   // When false, uncharted areas are marked NO_INFORMATION to block planning.
   bool allow_uncharted_ = true;

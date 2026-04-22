@@ -1,7 +1,9 @@
 #ifndef S57_GRIDS_S57_GRID_PUBLISHER_H
 #define S57_GRIDS_S57_GRID_PUBLISHER_H
 
+#include <chrono>
 #include <future>
+#include <unordered_set>
 
 
 #include "grid_map_ros/grid_map_ros.hpp"
@@ -58,6 +60,12 @@ private:
   // Called periodically to republish existing grids with fresh timestamps.
   void republishGrids();
 
+  // Called once after the boat's pose first becomes known via TF, queues
+  // all charts within precompute_radius_ around that position so the
+  // costmap layer's first get_datasets request finds them already cached
+  // (or close to ready).
+  void tryPrecompute();
+
   std::shared_ptr<marine_charts::S57Catalog> catalog_;
   rclcpp::Service<s57_msgs::srv::GetDatasets>::SharedPtr list_service_;
   rclcpp::Service<s57_msgs::srv::GetDatasets>::SharedPtr get_service_;
@@ -77,19 +85,39 @@ private:
   // Futures waiting for datasets being generated in separate threads
   std::map<std::string, std::future<std::shared_ptr<grid_map::GridMap> > > pending_dataset_grids_;
 
+  // Steady-clock time each chart was first added to requested_grids_ —
+  // used to log per-chart processing latency when the grid is published.
+  // Steady (not ROS) time so that use_sim_time, sim pauses, or NTP step
+  // corrections don't produce negative or inflated latency numbers.
+  std::map<std::string, std::chrono::steady_clock::time_point> grid_request_start_times_;
 
   rclcpp::TimerBase::SharedPtr new_grids_timer_;
+  // Period for new_grids_timer_ in seconds. Smaller values reap completed
+  // std::async futures sooner; the previous hardcoded 1.0 s added up to
+  // 1 s of latency per chart.
+  double check_new_grids_period_ = 0.1;
 
   rclcpp::TimerBase::SharedPtr republish_grids_timer_;
   double grid_republish_period_ = 0.0; // seconds, if <= 0.0, no republishing
 
   std::vector<std::string> requested_grids_;
-  std::vector<std::string> requested_grids_to_publish_;
+  // Labels that have been requested but not yet published. Used to gate
+  // publish-on-ready in checkForNewGrids; entries are erased after publish
+  // so the set stays bounded across long missions.
+  std::unordered_set<std::string> requested_grids_to_publish_;
   std::mutex requested_grids_mutex;
 
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   std::string map_frame_ = "map";
+
+  // Precompute-on-first-TF: when robot_base_frame_ is set and
+  // precompute_radius_ > 0, tryPrecompute polls TF until the boat's
+  // pose is known, then queues all charts within precompute_radius_
+  // (meters) of that position.
+  std::string robot_base_frame_;
+  double precompute_radius_ = 5000.0;
+  bool did_precompute_ = false;
 
   std::atomic<bool> abort_flag_ = false;
 };
