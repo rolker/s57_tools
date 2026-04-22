@@ -54,13 +54,15 @@ void S57Layer::onInitialize()
   declareParameter("tile_size", rclcpp::ParameterValue(tile_size_));
   node->get_parameter(name_+".tile_size", tile_size_);
 
+  const double default_buffer_fraction = buffer_fraction_;
   declareParameter("buffer_fraction", rclcpp::ParameterValue(buffer_fraction_));
   node->get_parameter(name_+".buffer_fraction", buffer_fraction_);
-  if(buffer_fraction_ < 0.0)
+  if(!std::isfinite(buffer_fraction_) || buffer_fraction_ < 0.0)
   {
     RCLCPP_WARN_STREAM(logger_,
-      "Invalid buffer_fraction value " << buffer_fraction_ << "; using 0.05 instead.");
-    buffer_fraction_ = 0.05;
+      "Invalid buffer_fraction value " << buffer_fraction_
+      << "; using " << default_buffer_fraction << " instead.");
+    buffer_fraction_ = default_buffer_fraction;
   }
 
   declareParameter("allow_uncharted", rclcpp::ParameterValue(allow_uncharted_));

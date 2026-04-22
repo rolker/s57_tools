@@ -2,6 +2,7 @@
 #define S57_GRIDS_S57_GRID_PUBLISHER_H
 
 #include <future>
+#include <unordered_set>
 
 
 #include "grid_map_ros/grid_map_ros.hpp"
@@ -97,7 +98,10 @@ private:
   double grid_republish_period_ = 0.0; // seconds, if <= 0.0, no republishing
 
   std::vector<std::string> requested_grids_;
-  std::vector<std::string> requested_grids_to_publish_;
+  // Labels that have been requested but not yet published. Used to gate
+  // publish-on-ready in checkForNewGrids; entries are erased after publish
+  // so the set stays bounded across long missions.
+  std::unordered_set<std::string> requested_grids_to_publish_;
   std::mutex requested_grids_mutex;
 
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;

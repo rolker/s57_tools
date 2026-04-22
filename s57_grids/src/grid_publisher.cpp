@@ -6,6 +6,7 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include <cmath>
 #include <thread>
+#include <unordered_set>
 
 namespace s57_grids
 {
@@ -63,11 +64,19 @@ GridPublisher::on_configure(const rclcpp_lifecycle::State &state)
   }
   publish_costmaps_ = get_parameter("publish_costmaps").as_bool();
 
+  const double default_check_new_grids_period = check_new_grids_period_;
   if(!has_parameter("check_new_grids_period"))
   {
     declare_parameter("check_new_grids_period", rclcpp::ParameterValue(check_new_grids_period_));
   }
   check_new_grids_period_ = get_parameter("check_new_grids_period").as_double();
+  if(!std::isfinite(check_new_grids_period_) || check_new_grids_period_ <= 0.0)
+  {
+    RCLCPP_WARN_STREAM(get_logger(),
+      "Invalid check_new_grids_period value " << check_new_grids_period_
+      << " s; using " << default_check_new_grids_period << " s instead.");
+    check_new_grids_period_ = default_check_new_grids_period;
+  }
 
   if(!has_parameter("robot_base_frame"))
   {
@@ -75,11 +84,19 @@ GridPublisher::on_configure(const rclcpp_lifecycle::State &state)
   }
   robot_base_frame_ = get_parameter("robot_base_frame").as_string();
 
+  const double default_precompute_radius = precompute_radius_;
   if(!has_parameter("precompute_radius"))
   {
     declare_parameter("precompute_radius", rclcpp::ParameterValue(precompute_radius_));
   }
   precompute_radius_ = get_parameter("precompute_radius").as_double();
+  if(!std::isfinite(precompute_radius_) || precompute_radius_ < 0.0)
+  {
+    RCLCPP_WARN_STREAM(get_logger(),
+      "Invalid precompute_radius value " << precompute_radius_
+      << " m; using " << default_precompute_radius << " m instead.");
+    precompute_radius_ = default_precompute_radius;
+  }
 
   list_service_ = create_service<s57_msgs::srv::GetDatasets>(
     "list_datasets",
@@ -94,8 +111,11 @@ GridPublisher::on_configure(const rclcpp_lifecycle::State &state)
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
+  // Clamp to >= 1 ms — a zero-duration wall timer is undefined behaviour
+  // and would also pin a CPU.
+  const int new_grids_timer_ms = std::max(1, int(1000.0 * check_new_grids_period_));
   new_grids_timer_ = create_wall_timer(
-    std::chrono::milliseconds(int(1000.0 * check_new_grids_period_)),
+    std::chrono::milliseconds(new_grids_timer_ms),
     std::bind(&GridPublisher::checkForNewGrids, this)
   );
 
@@ -168,7 +188,7 @@ void GridPublisher::getDatasets(
   for(const auto& d: response->datasets)
   {
     requested_grids_.push_back(d.label);
-    requested_grids_to_publish_.push_back(d.label);
+    requested_grids_to_publish_.insert(d.label);
     // Only record start time on the first request for this label, so
     // re-requests don't reset the measurement.
     grid_request_start_times_.emplace(d.label, now);
@@ -212,7 +232,7 @@ void GridPublisher::checkForNewGrids()
         auto grid = pg.second.get();
         {
           std::lock_guard<std::mutex> lock(requested_grids_mutex);
-          if(std::find(requested_grids_to_publish_.begin(), requested_grids_to_publish_.end(), pg.first) != requested_grids_to_publish_.end())
+          if(requested_grids_to_publish_.count(pg.first) > 0)
           {
             auto ds = catalog_->dataset(pg.first);
 
@@ -252,6 +272,8 @@ void GridPublisher::checkForNewGrids()
               grid_map::GridMapRosConverter::toOccupancyGrid(*grid, "elevation", -10.0, 0.0, occupancy_grid);
               costmap_publishers_[pg.first]->publish(occupancy_grid);
             }
+
+            requested_grids_to_publish_.erase(pg.first);
           }
           else
             grid_publishers_[pg.first]; // create the entry in the map so above check to see if we need to generate a grid works.
@@ -310,13 +332,91 @@ void GridPublisher::tryPrecompute()
   // outside polar regions.
   const double meters_per_deg_lat = 111000.0;
   const double meters_per_deg_lon = 111000.0 * std::cos(lat * M_PI / 180.0);
-  geographic_msgs::msg::BoundingBox bounds;
-  bounds.min_pt.latitude  = lat - precompute_radius_ / meters_per_deg_lat;
-  bounds.max_pt.latitude  = lat + precompute_radius_ / meters_per_deg_lat;
-  bounds.min_pt.longitude = lon - precompute_radius_ / meters_per_deg_lon;
-  bounds.max_pt.longitude = lon + precompute_radius_ / meters_per_deg_lon;
+  const double lat_delta = precompute_radius_ / meters_per_deg_lat;
 
-  auto charts = catalog_->intersectingCharts(bounds);
+  // Latitude is bounded; clamp to the physically meaningful range.
+  const double lat_min = std::max(-90.0, lat - lat_delta);
+  const double lat_max = std::min( 90.0, lat + lat_delta);
+
+  // Longitude wraps. Build one or two query boxes:
+  //   - Polar region (cos(lat) ≈ 0): meters_per_deg_lon → 0 makes the
+  //     equirectangular lon span effectively global; use [-180, 180].
+  //   - Radius spans the globe (lon_delta >= 180): same.
+  //   - Crosses the dateline: split into two boxes, since
+  //     S57Dataset::intersects assumes minLon <= maxLon and does not wrap.
+  std::vector<geographic_msgs::msg::BoundingBox> query_bounds;
+  constexpr double kMinMetersPerDegLon = 1.0;  // ~89.99999° lat
+  if(std::abs(meters_per_deg_lon) <= kMinMetersPerDegLon)
+  {
+    geographic_msgs::msg::BoundingBox b;
+    b.min_pt.latitude = lat_min;
+    b.max_pt.latitude = lat_max;
+    b.min_pt.longitude = -180.0;
+    b.max_pt.longitude =  180.0;
+    query_bounds.push_back(b);
+  }
+  else
+  {
+    const double lon_delta = precompute_radius_ / meters_per_deg_lon;
+    if(lon_delta >= 180.0)
+    {
+      geographic_msgs::msg::BoundingBox b;
+      b.min_pt.latitude = lat_min;
+      b.max_pt.latitude = lat_max;
+      b.min_pt.longitude = -180.0;
+      b.max_pt.longitude =  180.0;
+      query_bounds.push_back(b);
+    }
+    else
+    {
+      const double lon_min = lon - lon_delta;
+      const double lon_max = lon + lon_delta;
+      if(lon_min < -180.0)
+      {
+        geographic_msgs::msg::BoundingBox west, east;
+        west.min_pt.latitude = lat_min; west.max_pt.latitude = lat_max;
+        east.min_pt.latitude = lat_min; east.max_pt.latitude = lat_max;
+        west.min_pt.longitude = lon_min + 360.0;
+        west.max_pt.longitude =  180.0;
+        east.min_pt.longitude = -180.0;
+        east.max_pt.longitude = lon_max;
+        query_bounds.push_back(west);
+        query_bounds.push_back(east);
+      }
+      else if(lon_max > 180.0)
+      {
+        geographic_msgs::msg::BoundingBox west, east;
+        west.min_pt.latitude = lat_min; west.max_pt.latitude = lat_max;
+        east.min_pt.latitude = lat_min; east.max_pt.latitude = lat_max;
+        west.min_pt.longitude = lon_min;
+        west.max_pt.longitude =  180.0;
+        east.min_pt.longitude = -180.0;
+        east.max_pt.longitude = lon_max - 360.0;
+        query_bounds.push_back(west);
+        query_bounds.push_back(east);
+      }
+      else
+      {
+        geographic_msgs::msg::BoundingBox b;
+        b.min_pt.latitude = lat_min;
+        b.max_pt.latitude = lat_max;
+        b.min_pt.longitude = lon_min;
+        b.max_pt.longitude = lon_max;
+        query_bounds.push_back(b);
+      }
+    }
+  }
+
+  std::vector<std::shared_ptr<marine_charts::S57Dataset>> charts;
+  std::unordered_set<std::string> seen_labels;
+  for(const auto& qb: query_bounds)
+  {
+    for(const auto& chart: catalog_->intersectingCharts(qb))
+    {
+      if(seen_labels.insert(chart->label()).second)
+        charts.push_back(chart);
+    }
+  }
   if(charts.empty())
   {
     RCLCPP_WARN_STREAM(get_logger(),
@@ -341,7 +441,7 @@ void GridPublisher::tryPrecompute()
     if(grid_request_start_times_.count(label) == 0)
     {
       requested_grids_.push_back(label);
-      requested_grids_to_publish_.push_back(label);
+      requested_grids_to_publish_.insert(label);
       grid_request_start_times_.emplace(label, now);
       ++queued;
     }
