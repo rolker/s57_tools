@@ -63,8 +63,19 @@ void S57Layer::onInitialize()
   declareParameter("sea_surface_frame", rclcpp::ParameterValue(sea_surface_frame_));
   node->get_parameter(name_+".sea_surface_frame", sea_surface_frame_);
 
+  const double default_tide_invalidate_threshold = tide_invalidate_threshold_;
   declareParameter("tide_invalidate_threshold", rclcpp::ParameterValue(tide_invalidate_threshold_));
   node->get_parameter(name_+".tide_invalidate_threshold", tide_invalidate_threshold_);
+  // ROS 2 parameters are external input — validate. Negative would make
+  // every tide change exceed the threshold (continuous invalidation =
+  // costmap stalls); non-finite would silently disable invalidation.
+  if(!std::isfinite(tide_invalidate_threshold_) || tide_invalidate_threshold_ < 0.0)
+  {
+    RCLCPP_WARN_STREAM(logger_,
+      "Invalid tide_invalidate_threshold value " << tide_invalidate_threshold_
+      << " m; using default " << default_tide_invalidate_threshold << " m instead.");
+    tide_invalidate_threshold_ = default_tide_invalidate_threshold;
+  }
 
   if(!chart_datum_frame_.empty() && !sea_surface_frame_.empty())
     RCLCPP_INFO_STREAM(logger_, "Tide correction enabled: sea surface height in chart datum frame ("
