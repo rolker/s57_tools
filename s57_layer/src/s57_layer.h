@@ -40,10 +40,20 @@ public:
   void matchSize() override;
 
 protected:
+  // Exposed for unit testing (see test/test_tide_offset.cpp).
+  // Subclassed-test access only; not part of the layer's public API.
+  unsigned char get_cost_from_grid(grid_map::GridMap &grid, const grid_map::Index &index);
+
+  // Same as above — declared protected so the test fixture can set
+  // tide_offset_ directly instead of driving it through the full TF
+  // lookup path in updateBounds().  Moved out of the private block
+  // below; the rest of the layer's internal helpers and state stay
+  // private.
+  double tide_offset_ = 0.0;
+
+private:
   using GetDatasetsClient =
     rclcpp::Client<s57_msgs::srv::GetDatasets>;
-
-  unsigned char get_cost_from_grid(grid_map::GridMap &grid, const grid_map::Index &index);
 
   geographic_msgs::msg::GeoPoint worldToLatLon(double x, double y);
   geometry_msgs::msg::Point llToWorld(const geographic_msgs::msg::GeoPoint& geo_point);
@@ -113,9 +123,10 @@ protected:
   //   lookupTransform(chart_datum_frame, sea_surface_frame)
   // to get the sea surface position expressed in the chart datum frame.
   // The Z component is the water height above MLLW (chart datum).
+  // (tide_offset_ itself is declared in the protected section above so
+  // the test fixture can set it directly.)
   std::string chart_datum_frame_;
   std::string sea_surface_frame_ = "map_tide";
-  double tide_offset_ = 0.0;
 
   // Tide changes smaller than this (in meters) do not invalidate cached
   // tile state. The default 1 cm matches typical real-world tide rate

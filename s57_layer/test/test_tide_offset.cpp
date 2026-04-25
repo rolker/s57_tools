@@ -2,6 +2,7 @@
 // Licensed under BSD license
 
 #include <cmath>
+#include <limits>
 
 #include <gtest/gtest.h>
 #include <memory>
