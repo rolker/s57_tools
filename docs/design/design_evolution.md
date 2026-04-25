@@ -204,6 +204,33 @@ Reed's code is essentially frozen since his thesis defense.
   may be a refactor of the other or they may have served different
   demos.
 
+## 2026-04-25 — Round 5: chart-scale planner idea captured as starting point
+
+**Triggered by** the user sharing the seed of a third candidate design,
+distinct from both the clean-room costmap architecture and Reed's
+work, with the explicit caveat that they didn't have time to work it
+out and wanted it noted as a starting point for the next discussion.
+
+### What was added
+
+- **New file**: [`alternative_chart_scale_planner.md`](alternative_chart_scale_planner.md).
+  Captures the user's chart-collection planner idea: assemble a
+  per-voyage working set of ENC cells at varying scales (fine at
+  departure/arrival, coarse during transit), have the planner traverse
+  the collection by jumping to a coarser/finer chart as needed, and
+  consider whether cost can be supplied to nav2 as a plugin
+  (per-chart rasterization) or directly from vectors (skipping
+  rasterization). Lists open questions to pick up next time.
+
+### What this is not
+
+- Not a worked-out design — explicitly a starting-point note.
+- Not analyzed against the other two designs in this repo — the
+  comparison exercise comes later.
+- Not committed-to. Three designs are now on file (costmap
+  architecture, Reed's prior art, chart-scale planner), positioned
+  for the comparison step.
+
 ## How to add a new entry
 
 When the design doc gets meaningful changes (new section, changed
