@@ -425,14 +425,110 @@ fully compensate for.
 | Demonstrated      | Path planning, synthetic-ellipse OA, breakwater OA, pier OA          |
 | Failure mode      | Reactive: local minima at multi-obstacle scenarios. Planner: close approaches to point obstacles in deep water |
 
-## Lineage to this repository
+## Code availability
 
-`s57_tools` (this repo) inherits Reed's research goal: ENC-derived
-environmental awareness for autonomous surface vessels operating in
-charted waters. It moves the concept from MOOS-IvP into ROS 2 and nav2,
-which changes a great deal architecturally — but the core problems
-Reed worked through (depth-area conflict resolution, qualitative-vs-
-quantitative depth, tide-corrected charted depth, vessel-size buffering,
-threat encoding, ENC scale and uncertainty) all recur, and Reed's
-solutions remain a useful reference point for evaluating any subsequent
-design.
+The thesis itself doesn't link to a code repository, but Reed's GitHub
+account [`sji367`](https://github.com/sji367) (registered as "Sam Reed,
+UNH CCOM") hosts the original source for the work, plus his advisor Val
+Schmidt published a C++ reimplementation of the gridding pipeline.
+Most of the code dates from 2016–2017 (the thesis is December 2018) —
+Reed evidently developed the system, then wrote the thesis describing it.
+
+### Reed's own repositories
+
+| Repo | Description | Last code push |
+|------|-------------|----------------|
+| [`sji367/MOOS_ENC`](https://github.com/sji367/MOOS_ENC) | The ENC obstacle-avoidance stack: `BHV_OA.cpp` (point-geometry OA behavior), `BHV_OA_poly.cpp` (polygon-geometry OA behavior — *split into two behaviors* in the published code, where the thesis describes one), `ENC_converter.py` (ENC→shapefile with threat-level annotation), `ENC_Search.py` (sliding-window search posting obstacles for OA), `ENC_Print.py` (pMarineViewer rendering), `ENC_WPT_check.py`, `AOF_Gauss.cpp` (custom IvP utility function with Gaussian falloff), plus example `alpha.moos`/`alpha.bhv` and a launcher. | 2016-09-27 |
+| [`sji367/moos-ivp-reed`](https://github.com/sji367/moos-ivp-reed) | MOOS-IvP `extend`-style scaffolding for "Sam Reed's Nautical Chart Awareness MOOS work" — `bin/`, `lib/`, `missions/`, `scripts/`, `src/` directory layout. | 2022-12-22 |
+| [`sji367/ENC_Mission_Planner`](https://github.com/sji367/ENC_Mission_Planner) | Qt5/QGraphics offline mission planner with chart loading, gridding (`griddingthread`), background raster rendering, and a vehicle-project model (`autonomousvehicleproject`). | 2017-06-23 |
+
+The published code is broadly consistent with the thesis description but
+contains evolutions: the single `BHV_ENC_OA` described in the thesis appears
+as two distinct behaviors in `MOOS_ENC` (`BHV_OA` for point obstacles,
+`BHV_OA_poly` for polygons), and `AOF_Gauss` (a Gaussian objective function)
+exists in code but isn't called out by name in the thesis.
+
+### Val Schmidt's reimplementation
+
+| Repo | Description | Last code push |
+|------|-------------|----------------|
+| [`valschmidt/encgrid`](https://github.com/valschmidt/encgrid) | Standalone C++ tool that converts an ENC into a raster depth GeoTIFF, "based on Sam Reed's Master's Thesis." Built on GDAL+BOOST. CLI: `encgrid -f ENC.000 -b buffer -r resolution`. Produces intermediate per-class shapefiles (polygon, point, depth_area, outline) then `gdal_rasterize`s and grids. Includes a candid `notes_on_encgrid.txt` design log. | 2020-01-24 |
+| [`valschmidt/enc_dump`](https://github.com/valschmidt/enc_dump) | Python tool to dump Layer/Feature/Attribute data from US ENCs (uses GDAL/OGR). Useful as a generic ENC inspection utility. | 2024-05 |
+| [`valschmidt/ReadingENCswithGeopandas`](https://github.com/valschmidt/ReadingENCswithGeopandas) | Tutorial / Colab notebook for reading ENCs with Geopandas. | 2022-01 |
+
+`encgrid` is Val Schmidt's standalone C++ port of Reed's planner-side
+gridding. The included `notes_on_encgrid.txt` is a candid maintainer's
+log — flags that geotiffs are written upside-down, that "MOOS_path was
+hardcoded to Sam's HD," that the A* implementation was bundled but should
+be split out, that internal scaling uses cm (multiply by 100), and walks
+through the per-feature-class handling rules in `layer2XYZ()`.
+
+The notes also surface several implementation choices not explicit in the
+thesis:
+
+- **MULTIPOINT features** (likely `SOUNDG` clusters) are extracted only as
+  X/Y/depth and not pushed into a shapefile — they bypass the buffering
+  pipeline.
+- **`DEPCNT` (depth contour)** handling differs from other linestrings:
+  segmented without buffering, with an unexplained UTM-origin subtraction
+  that the maintainer flags with "WHY?".
+- **`OBSTRN`, `PONTON`, `FLODOC`, `DYKCON`** linestrings are extracted,
+  buffered into polygons, depth-checked (with `WATLEV` fallback) and stored
+  in the polygon shapefile — *not* in the X/Y/depth point set.
+- **`POINT` features** (rocks, wrecks, obstructions, land) are added to
+  *both* the point shapefile and the X/Y/depth point set.
+
+These are exactly the kind of details a re-implementer would want to know
+and that the thesis description glosses over.
+
+## Connections to this workspace
+
+There are two separately documented points of contact between Reed's
+work and this workspace, plus a broader topical overlap that doesn't
+reduce to direct code re-use:
+
+### Reed's `astar.h` is incorporated into `camp`
+
+The file `camp/src/camp/astar.h` (and `astar.cpp`) carries the original
+header:
+
+```
+/*
+ * astar.h
+ *  Created on: Mar 21, 2017
+ *      Author: Sam Reed
+ */
+```
+
+This was added to CAMP on 2020-02-20 in commit
+`f464452 — "Add initial AStar support for Sam Reid's work"`
+(`git log src/camp/astar.h`), about 14 months after Reed's thesis was
+filed. The rest of CAMP is independently authored — CAMP's own first
+commit is 2016-10-25, predating Reed's `ENC_Mission_Planner` (created
+2017-05-16) by seven months. Shared filenames between the two Qt
+projects (`autonomousvehicleproject`, `backgroundraster`,
+`griddingthread`, etc.) exist; the direction of any influence on
+those files is not established here and shouldn't be inferred from
+filename overlap alone.
+
+### `s57_tools` and Reed's gridding share a problem statement
+
+`s57_tools` was first committed on 2021-06-25 by Roland Arsenault, two
+and a half years after Reed's thesis. The history (`git log --reverse
+--pretty=format:'%h %ad %s' --date=short`) shows it is original code
+authored against the ROS 2 / nav2 stack, not a port of `encgrid` or
+`moos-ivp-reed`. There is no commit message indicating an import from
+those repos, and no Reed authorship in the history.
+
+The conceptual overlap is genuine — both `s57_tools` and Reed's
+gridding work convert ENC vector features into a 2D depth surface
+suitable for navigation — but the implementations are independent.
+
+### Topical overlap regardless of code
+
+Many of the problems Reed worked through (depth-area conflict
+resolution, qualitative-vs-quantitative depth via WATLEV,
+tide-corrected charted depth, vessel-size buffering, threat encoding,
+ENC scale and uncertainty) recur in any ENC-driven autonomy system,
+including this one. The thesis remains a useful reference point even
+where the code lineage is independent.

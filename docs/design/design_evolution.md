@@ -121,6 +121,89 @@ depth, vessel-size buffering, ENC scale and uncertainty) recur in any
 ENC-driven autonomy system, and Reed's solutions remain a useful
 reference point.
 
+## 2026-04-25 — Round 4: Reed's code repositories located
+
+**Triggered by** the question "did you find a code repository for Reed's
+work? Can we find it and see if it contains more insight we should know
+about?"
+
+### What changed in `prior_art_reed_2018.md`
+
+- **New "Code availability" section** with three Reed-authored repositories
+  ([`sji367/MOOS_ENC`](https://github.com/sji367/MOOS_ENC),
+  [`sji367/moos-ivp-reed`](https://github.com/sji367/moos-ivp-reed),
+  [`sji367/ENC_Mission_Planner`](https://github.com/sji367/ENC_Mission_Planner))
+  and three Val-Schmidt reimplementation/tooling repos
+  ([`valschmidt/encgrid`](https://github.com/valschmidt/encgrid),
+  [`valschmidt/enc_dump`](https://github.com/valschmidt/enc_dump),
+  [`valschmidt/ReadingENCswithGeopandas`](https://github.com/valschmidt/ReadingENCswithGeopandas)).
+- **Implementation details** lifted from `encgrid`'s `notes_on_encgrid.txt`
+  (MULTIPOINT/SOUNDG bypass, `DEPCNT` linestring oddities, `OBSTRN`/`PONTON`/
+  `FLODOC`/`DYKCON` polygon-conversion path, internal cm-scaling, geotiff
+  upside-down quirk).
+- **Connections to this workspace** documented (verified against git
+  history, not inferred from filename overlap):
+  - `camp/src/camp/astar.h` and `astar.cpp` were imported from Reed on
+    2020-02-20 (commit `f464452 — "Add initial AStar support for Sam
+    Reid's work"`), about 14 months after the thesis. The rest of CAMP
+    is Roland Arsenault's independent work since 2016-10-25. Reed's
+    `ENC_Mission_Planner` was created 2017-05-16 — *after* CAMP — and
+    they share several filenames; the direction of any influence on
+    those files is not established here.
+  - `s57_tools` was first committed 2021-06-25 by Roland, ~2.5 years
+    after Reed's thesis. Its git history shows independent
+    authorship — no port commit from `encgrid` or `moos-ivp-reed`.
+    The conceptual overlap is real (both produce an ENC-derived 2D
+    depth surface), but the implementations are independent.
+
+### What was wrong / missing before
+
+- The Round-3 prior-art summary correctly cited the thesis but assumed
+  the code was unfindable. In fact Reed publishes under `sji367` and
+  his repos are public. Without the code, the prior-art doc had no way
+  to surface implementation choices that the thesis prose glosses
+  over — notably the SOUNDG/MULTIPOINT bypass, the per-feature-class
+  linestring rules, and the existence of an `AOF_Gauss` IvP utility
+  function not named in the thesis.
+- An earlier draft of this Round-4 entry asserted code lineages
+  ("CAMP ← Reed's `ENC_Mission_Planner`", "s57_tools ← encgrid ←
+  Reed's gridding") inferred from shared filenames. Git log
+  contradicted that: CAMP predates Reed's Qt planner by seven months,
+  and `s57_tools` has no import history from `encgrid`. The corrected
+  text states only what git history confirms (specific imported
+  files; independent first-commit dates) and explicitly does not
+  narrate direction of influence beyond what is documented in commits.
+  The user flagged the inference; existing memory feedback
+  ("No causal stories from similarity") was reinforced to add the
+  code-lineage-specific guidance "git log first."
+
+### Reed's repository activity
+
+The "last update" timestamps from GitHub search results (e.g.
+2025-07 on `MOOS_ENC` and `ENC_Mission_Planner`) are repository
+metadata changes, not code commits. Actual final code commits per
+repo:
+
+- `MOOS_ENC` — 2016-09-27 ("Updated the comments")
+- `ENC_Mission_Planner` — 2017-06-23 ("Cleaned up repo")
+- `moos-ivp-reed` — 2018-07-07 (uploading thesis-fieldwork log files
+  from "Pier Ops Day 2")
+
+Reed's code is essentially frozen since his thesis defense.
+
+### What's still open
+
+- The published `MOOS_ENC` code shows a `BHV_OA` / `BHV_OA_poly` split
+  (point vs polygon obstacles) that the thesis describes as a single
+  `BHV_ENC_OA`. Reading the actual code might surface other
+  thesis-vs-code drift worth knowing for the comparison phase. Not done
+  yet — flag for the comparison step if it becomes load-bearing.
+- The relationship between Reed's `moos-ivp-reed` (the moos-ivp-extend
+  scaffolding) and `MOOS_ENC` (the thesis-component code) isn't fully
+  mapped. They're both his work but the directory layouts differ; one
+  may be a refactor of the other or they may have served different
+  demos.
+
 ## How to add a new entry
 
 When the design doc gets meaningful changes (new section, changed
