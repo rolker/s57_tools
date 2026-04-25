@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 
+#include "grid_map_core/GridMap.hpp"
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
 #include "nav2_costmap_2d/cost_values.hpp"
@@ -14,6 +15,21 @@
 #include "geometry_msgs/msg/transform_stamped.hpp"
 
 #include "s57_layer.h"
+
+// Test subclass exposing protected get_cost_from_grid and tide_offset_
+// for direct unit testing of the elevation-cost-mapping logic without
+// going through the full updateBounds/updateCosts pipeline.
+class S57LayerForTest : public s57_layer::S57Layer
+{
+public:
+  using s57_layer::S57Layer::S57Layer;
+  unsigned char testGetCost(grid_map::GridMap & grid,
+                            const grid_map::Index & index)
+  {
+    return get_cost_from_grid(grid, index);
+  }
+  void setTideOffset(double v) { tide_offset_ = v; }
+};
 
 class TideOffsetTest : public ::testing::Test
 {
@@ -248,4 +264,79 @@ TEST_F(TideOffsetTest, InvalidThresholdFallsBackToDefault)
   minx = 1e30; miny = 1e30; maxx = -1e30; maxy = -1e30;
   layer->updateBounds(5.0, 5.0, 0.0, &minx, &miny, &maxx, &maxy);
   EXPECT_TRUE(layer->isCurrent());
+}
+
+// Helper: build a 1x1 grid_map with all S57 channels initialized to NaN.
+// Caller fills in only the channel(s) they want to test.
+static grid_map::GridMap makeEmptyS57Grid()
+{
+  grid_map::GridMap grid({"elevation", "overhead", "restricted",
+                          "unsurveyed", "caution"});
+  grid.setGeometry(grid_map::Length(1.0, 1.0), 1.0,
+                   grid_map::Position(0.0, 0.0));
+  for (const auto & name : grid.getLayers()) {
+    grid[name].setConstant(std::numeric_limits<float>::quiet_NaN());
+  }
+  return grid;
+}
+
+// Land features (LNDARE, COALNE, CAUSWY, HULKES, PONTON, SLCONS, …) are
+// rasterized as elevation = 1.0 with the intent "no min depth values, so
+// lethal" (marine_charts/s57_dataset.cpp).  Before the elevation>0
+// short-circuit, any tide_offset_ above ~minimum_depth_ + 1.0 would
+// convert these cells into "navigable depth" via -elevation + tide_offset_,
+// silently turning every coastline navigable at any tide above ~1 m above
+// MLLW.  Verify land cells stay LETHAL across realistic tide values.
+TEST_F(TideOffsetTest, LandFeatureLethalAcrossAllTides)
+{
+  S57LayerForTest layer;
+
+  auto grid = makeEmptyS57Grid();
+  grid_map::Index idx(0, 0);
+  grid.at("elevation", idx) = 1.0;  // canonical land marker
+
+  for (double tide : {-1.0, 0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0}) {
+    layer.setTideOffset(tide);
+    EXPECT_EQ(
+      layer.testGetCost(grid, idx),
+      nav2_costmap_2d::LETHAL_OBSTACLE)
+      << "Land cell (elevation=1.0) must be LETHAL at tide_offset="
+      << tide << " m, but was not.";
+  }
+}
+
+// Genuinely-submerged cells (negative elevation) must continue to use
+// the depth = -elevation + tide_offset math.  Verify the existing
+// behavior is preserved by the short-circuit fix: a 5 m-deep cell at
+// MLLW (elevation = -5) stays navigable through the full tidal cycle,
+// and goes lethal only when minimum_depth is not satisfied.
+TEST_F(TideOffsetTest, SubmergedCellUsesTideAdjustedDepth)
+{
+  S57LayerForTest layer;
+
+  auto grid = makeEmptyS57Grid();
+  grid_map::Index idx(0, 0);
+
+  // 5 m deep at chart datum (DRVAL1=5 → elevation=-5)
+  grid.at("elevation", idx) = -5.0;
+
+  // Default minimum_depth_ = 0.0, maximum_caution_depth_ = 5.0.
+  // depth = 5 + tide_offset.  At tide_offset = -1 m (below MLLW),
+  // depth = 4 m (still inside caution band, not lethal).  At
+  // tide_offset = 2 m, depth = 7 m (above caution → FREE_SPACE).
+  layer.setTideOffset(-1.0);
+  EXPECT_NE(layer.testGetCost(grid, idx),
+            nav2_costmap_2d::LETHAL_OBSTACLE)
+    << "5m-deep cell at -1m tide must not be LETHAL.";
+  layer.setTideOffset(2.0);
+  EXPECT_EQ(layer.testGetCost(grid, idx),
+            nav2_costmap_2d::FREE_SPACE)
+    << "5m-deep cell at +2m tide should be FREE_SPACE.";
+
+  // A 1 m-deep cell drained dry at low tide must go lethal.
+  grid.at("elevation", idx) = -1.0;
+  layer.setTideOffset(-1.5);  // 1.5 m below MLLW
+  EXPECT_EQ(layer.testGetCost(grid, idx),
+            nav2_costmap_2d::LETHAL_OBSTACLE)
+    << "Cell with depth = -0.5m (drained) must be LETHAL.";
 }

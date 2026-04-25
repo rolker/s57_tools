@@ -39,7 +39,7 @@ public:
 
   void matchSize() override;
 
-private:
+protected:
   using GetDatasetsClient =
     rclcpp::Client<s57_msgs::srv::GetDatasets>;
 

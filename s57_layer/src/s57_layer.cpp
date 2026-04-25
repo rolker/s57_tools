@@ -505,6 +505,15 @@ unsigned char S57Layer::get_cost_from_grid(grid_map::GridMap &grid, const grid_m
   auto elevation = grid.at("elevation", index);
   if(!std::isnan(elevation))
   {
+    // Anything above chart datum is shoreline / intertidal / built feature
+    // (LNDARE, COALNE, CAUSWY, HULKES, PONTON, SLCONS, … rasterized as
+    // elevation = 1.0 in marine_charts/s57_dataset.cpp; see "no min depth
+    // values, so lethal" comment there).  Without this short-circuit the
+    // tide-offset math below would convert positive elevations into
+    // "navigable depth" once tide_offset_ exceeds elevation, silently
+    // turning every coastline navigable at any tide above ~1 m above MLLW.
+    if (elevation > 0.0)
+      return nav2_costmap_2d::LETHAL_OBSTACLE;
     auto depth = -elevation + tide_offset_;
     if (depth < minimum_depth_)
       return nav2_costmap_2d::LETHAL_OBSTACLE;
