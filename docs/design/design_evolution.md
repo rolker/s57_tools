@@ -82,6 +82,45 @@ local at 0.5 m.
   function.** Stated to be smaller than the Depth equivalents but
   specific values not chosen.
 
+## 2026-04-25 — Round 3: prior-art summary added
+
+**Triggered by** the comparison-exercise framing being expanded to include
+an explicit prior-art reference point. Specifically the request to "dig up
+Sam Reed's thesis and prior work to use as an extra point of comparison"
+and to "acknowledge this is the spiritual successor to that work."
+
+### What was added
+
+- **New file**: [`prior_art_reed_2018.md`](prior_art_reed_2018.md), a
+  standalone neutral summary of Reed's 2018 MS thesis "Providing Nautical
+  Chart Awareness to Autonomous Surface Vehicles" (UNH ECE,
+  thesis-director Brian Calder, co-advisor Val Schmidt). Documents Reed's
+  MOOS-IvP-based architecture, Depth-Based A* mission planner with cost
+  function `G(n) = G(n-1) + DP + w·Cost_depth`, threat-level encoding,
+  ENC_DB / ENC_Contact / BHV_ENC_OA reactive stack, MOOSTides tide
+  handling, field test results, and Reed's stated limitations including
+  the "ENC scale and uncertainty" critique (breakwater installed 2006 but
+  omitted from ENC until 2018; "Breakers" label 88 m from actual hazard).
+
+### What this is *not*
+
+- Not a comparison to the alternative architecture in
+  `alternative_costmap_architecture.md` or to the existing
+  implementation in `s57_grids` / `s57_layer` / `marine_charts`. The
+  comparison exercise is a separate planned step.
+- Not a reproduction of the thesis. It captures the architectural
+  decisions and limitations sufficient for using as a reference point;
+  for full detail consult the thesis directly.
+
+### Acknowledgment
+
+The work in this repository is the spiritual successor to Reed's
+research. Many of the problems Reed identified (depth-area conflict
+resolution, qualitative-vs-quantitative depth, tide-corrected charted
+depth, vessel-size buffering, ENC scale and uncertainty) recur in any
+ENC-driven autonomy system, and Reed's solutions remain a useful
+reference point.
+
 ## How to add a new entry
 
 When the design doc gets meaningful changes (new section, changed
