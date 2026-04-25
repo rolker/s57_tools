@@ -28,7 +28,7 @@ it, lightly edited for flow:
    late-breaking case (regional missions covering hundreds of km) and how it
    shaped the design.
 5. [Architecture](#5-architecture) — the actual pipeline, layer breakdown,
-   composition rule, modules, and update model.
+   composition rule, modules, update model, and persistence/lifecycle.
 6. [v1 scope and deferrals](#6-v1-scope-and-deferrals) — what should ship,
    and what is explicitly deferred.
 7. [Where confidence is low](#7-where-confidence-is-low) — places where the
@@ -532,7 +532,7 @@ interesting design choices live in the layer breakdown and the update strategy.
 
 ### 5.2 Layer breakdown
 
-Five logical layers, organized by **update trigger** rather than by feature
+Six logical layers, organized by **update trigger** rather than by feature
 type — that's the cut that actually matters operationally.
 
 | Layer             | Sources                                                  | Cost behavior        | Update trigger                       |
@@ -542,11 +542,13 @@ type — that's the cut that actually matters operationally.
 | **Soft regulatory** | `RESARE` (env / nature / fish), `FAIRWY`, `TSSLPT` / `TSEZNE`, `ACHARE` | Soft (config-driven) | Chart load + vessel-class change |
 | **Coverage**      | `UNSARE`, area outside any feature polygon, area outside loaded ENC cells | 255 unknown | Chart load |
 | **Depth**         | `DEPARE` (`DRVAL1`) + `SOUNDG` override + tide/draft-conditional `UWTROC` / `WRECKS` / `OBSTRN` | Continuous (depth → cost function) | Chart load + tide + draft |
+| **Overhead**      | `BRIDGE`, `CBLOHD`, `CONVYR` (with `VERCLR`)             | Tide-conditional lethal | Chart load + tide + air-draft     |
 
-The cut: 4 of the 5 layers are static after chart load. Only **Depth** needs
-continuous refresh. That asymmetry drives the implementation — static layers
-can be pre-rasterized and held; the depth layer is the only one with
-hot-path complexity.
+The cut: 4 of the 6 layers are static after chart load. **Depth** and
+**Overhead** both need continuous refresh — they share the tide trigger but
+have opposite sign on the clearance computation. Static layers can be
+pre-rasterized and held; the dynamic layers share the tide-driven recompute
+pass.
 
 Each layer is a `nav2_costmap_2d::Layer` plugin. Layered costmaps are
 exactly what nav2's plugin architecture is for; reusing it avoids reinventing
@@ -616,7 +618,56 @@ rates (minutes). At 0.5 m / 160 k cells (local window), trivially fast.
 cost. A tide update then just adds an offset to clearance and re-runs the
 cost function. Faster than re-rasterizing from vectors. v2 work.
 
-### 5.5 Static-layer rasterization
+### 5.5 The Overhead layer in detail
+
+Charted overhead structures (bridges, overhead cables, conveyors) become
+tide-conditional lethal cells, mirroring the Depth layer with **opposite
+sign** on the tide dependency.
+
+**Inputs:**
+
+- `BRIDGE` features (often line/area geometry along bridge centerlines) with
+  `VERCLR` (vertical clearance, typically referenced to MHW or HAT).
+- `CBLOHD` (overhead cable) features.
+- `CONVYR` (overhead conveyor) features.
+- Tide offset (scalar, same source as Depth).
+- Vessel air-draft + safety margin.
+
+**Per cell intersected by an overhead structure:**
+
+```
+charted_clearance   = feature.VERCLR
+                      (referenced to feature's chart datum, typically MHW or HAT)
+effective_clearance = charted_clearance + (reference_level - current_water_level)
+                      # high tide  → effective lower
+                      # low tide   → effective higher
+margin              = effective_clearance - vessel_air_draft - safety_margin
+```
+
+Cost mapping mirrors Depth's clearance-to-cost function:
+
+- `margin < 0`            → lethal (254)
+- `0 ≤ margin < warn`     → high cost, gradient
+- `margin ≥ safe`         → free (0)
+
+`warn` and `safe` thresholds may be smaller than the Depth equivalents
+because air-draft is typically more precisely known than effective bottom
+depth (no equivalent of sounding-density issues). Configurable.
+
+**Update model**: shares the tide-update recompute pass with Depth — at any
+tide change, both layers refresh. Vessel air-draft is configured per vessel
+and rarely changes.
+
+**Out of scope for v1:**
+
+- **Drawbridges / swing bridges / lift bridges** with `VERCCL` (closed
+  clearance) and `VERCOP` (open clearance). Open-state operation requires
+  bridge-tender coordination, not a costmap. v1 should treat the
+  conservative `VERCCL` value when both are present.
+- **Overhead power-line EMI hazards** at distance (compass / electronics
+  effects beyond the contact envelope). Charted clearance is the proxy.
+
+### 5.6 Static-layer rasterization
 
 Land, Hard Regulatory, Soft Regulatory, Coverage are computed once when the
 chart loads, into raster form, and held.
@@ -639,7 +690,7 @@ is tiny (~160 k cells), the spatial index makes the feature query cheap, and
 the result is always fresh. Tile caching is an optimization if profiling
 shows it's needed.
 
-### 5.6 Module breakdown
+### 5.7 Module breakdown
 
 ```
 enc_chart_loader        Library — parses S-57, produces feature stream.
@@ -647,8 +698,9 @@ enc_chart_loader        Library — parses S-57, produces feature stream.
 
 enc_feature_index       Library — R-tree index over features, in map-frame coords.
                         Projection happens at load.
+                        Persistent on-disk cache (see 5.10).
 
-enc_costmap_layers      ROS package — five nav2 costmap layer plugins.
+enc_costmap_layers      ROS package — six nav2 costmap layer plugins.
                         Each plugin holds a reference to the shared feature index
                         and queries it during update.
 
@@ -666,7 +718,7 @@ enc_costmap_diagnostics ROS topics for per-layer grids + a "provenance" overlay
 Plugin model means nav2's existing `costmap_2d` node loads and runs everything
 — no separate node tree, no separate publisher logic.
 
-### 5.7 Coordinate handling
+### 5.8 Coordinate handling
 
 - ENC in WGS84 (geographic).
 - Map frame: UTM, zone defaults to operating-area centroid's zone, configurable.
@@ -678,30 +730,79 @@ Plugin model means nav2's existing `costmap_2d` node loads and runs everything
 - Local ENU origin: not needed — UTM with a sensible local origin offset
   works, and TF chains from `map` are unaffected.
 
-### 5.8 Update model summary
+### 5.9 Update model summary
 
-| Trigger                              | What recomputes                                     |
-|--------------------------------------|----------------------------------------------------|
-| Chart load                           | All five layers, full extent                        |
-| Tide change                          | Depth layer only, full extent (cached-clearance fast path deferred) |
-| Draft / safety-margin change         | Depth layer only                                    |
-| Vessel-class change                  | Soft Regulatory only                                |
-| Boat moves                           | Local window slides, vector-on-demand re-rasterization for local |
-| Operating area change                | Reload (treat as new mission)                       |
+| Trigger                                  | What recomputes                                     |
+|------------------------------------------|----------------------------------------------------|
+| Chart load                               | All six layers, full extent                         |
+| Tide change                              | Depth + Overhead layers, full extent (cached-clearance fast path deferred) |
+| Draft change                             | Depth layer only                                    |
+| Air-draft change                         | Overhead layer only                                 |
+| Safety-margin change                     | Depth + Overhead layers (each uses its own margin)  |
+| Vessel-class change                      | Soft Regulatory only                                |
+| Boat moves                               | Local window slides, vector-on-demand re-rasterization for local |
+| Operating area change                    | Reload (treat as new mission)                       |
+| nav2 restart                             | All six layers reload from feature cache (see 5.10) |
+
+### 5.10 Persistence and lifecycle
+
+Cold-start time is dominated by GDAL S-57 parsing. To make startup and
+restart times reasonable, the parsed/projected/indexed feature store is
+persistent on disk.
+
+**Cache contents** (per ENC cell):
+
+- Parsed feature records (geometry + attributes).
+- Projection target (UTM zone) used at build time.
+- Source file mtime (for invalidation).
+
+**Cache invalidation**: cell mtime changes, projection params change, or
+schema/format version bump. On miss, re-parse and re-index that cell only.
+
+**Cold-start estimates** (with cache present):
+
+| Mission scope                              | Cold start time   |
+|--------------------------------------------|-------------------|
+| Harbor (1 cell, 5×5 km @ 2 m)              | ~2–4 s            |
+| Regional (20–50 cells, 200×100 km @ 16 m)  | ~8–20 s           |
+
+Without the cache, regional missions take 30–90 s due to S-57 parse cost
+alone — so the cache is in v1 scope, not deferred.
+
+**Restart downtime**: the design has the layers as `nav2_costmap_2d::Layer`
+plugins, so the feature store lives inside the `costmap_2d` process and
+dies when nav2 restarts. **Restart time = cold start time.** The cache
+makes that tolerable for regional missions (10–20 s, not 30–90 s).
+
+**Implication for vessel behavior during restart**: the boat needs a
+safe-state behavior (loiter / station-hold) that does not depend on the
+costmap, since the costmap is unavailable for ~10–20 s during regional
+mission restart. This is a vessel-side behavior contract, not a costmap
+concern, but it has to be explicit.
+
+**Alternative architecture (deferred)**: out-of-process ENC service that
+holds the parsed features and rasterized layers, with nav2 plugins
+querying it via service or shared memory. Survives nav2 restart entirely
+(restart downtime drops to ~2–5 s for nav2 lifecycle alone). Adds
+architecture complexity. Worth revisiting if field experience shows the
+~20 s regional restart is a problem.
 
 ## 6. v1 scope and deferrals
 
 ### Ship in v1
 
-- The five layers above, with the feature classes listed.
+- The six layers above, with the feature classes listed.
 - DEPARE + SOUNDG (option b) depth handling.
 - UNSARE → 255.
 - Hard exclusions + soft preferences regulatory, config-driven attribute
   mapping.
+- Overhead layer (`BRIDGE` / `CBLOHD` / `CONVYR`) with `VERCLR` and vessel
+  air-draft.
 - Single-area mission-scoped global, 0.5 m local sliding window.
 - Tide via scalar topic.
 - nav2 layer plugin integration.
 - Per-layer debug topics + provenance overlay.
+- Persistent on-disk cache for parsed feature index (per-cell, mtime-keyed).
 
 ### Explicitly deferred (named, not ignored)
 
@@ -713,6 +814,11 @@ Plugin model means nav2's existing `costmap_2d` node loads and runs everything
 - Multi-UTM-zone operating areas.
 - Spatially varying tide.
 - Time-varying restrictions (military activity periods, seasonal zones).
+- Drawbridge / swing-bridge / lift-bridge state and bridge-tender
+  coordination (use conservative `VERCCL` until then).
+- Overhead power-line EMI hazards beyond charted clearance.
+- Out-of-process ENC service architecture (plugins-only for v1; revisit if
+  ~20 s regional restart proves problematic).
 
 ## 7. Where confidence is low
 

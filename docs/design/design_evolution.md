@@ -1,0 +1,112 @@
+# Design Evolution Log
+
+Companion to [`alternative_costmap_architecture.md`](alternative_costmap_architecture.md).
+Records what was added or changed to the design document over time, what
+prompted each change, and what was wrong with the previous version. Use
+this when reading the design doc to understand which sections were original
+and which came from later questions / reviews — `git log` shows when, but
+not why.
+
+This is a living document. Append-only by convention; don't edit prior
+entries except for typo fixes.
+
+## 2026-04-25 — Initial draft (#23 / PR #24)
+
+First pass at the clean-room design. Walked through inputs and constraints,
+resolution and tiering, four prep questions (`SOUNDG`/`DEPARE`, `UNSARE`,
+regulatory features, operating area), the multi-leg mission scenario, and
+the resulting layered architecture with five layers, an explicit "out of
+scope" list, and a "where confidence is low" section.
+
+749 lines. Architecture had **5 layers** (Land, Hard Regulatory, Soft
+Regulatory, Coverage, Depth). nav2 plugin model. Single global + sliding
+local at 0.5 m.
+
+## 2026-04-25 — Round 2: caching, restart cost, overhead clearance
+
+**Triggered by follow-up questions** after the initial draft was committed:
+
+> "Can you estimate how long this could take to load up and be ready for
+> nav2 to plan? If a nav stack restart happens, what might be the down
+> time? Also, are you accounting for overhead clearance?"
+
+### What changed in `alternative_costmap_architecture.md`
+
+- **Added a sixth layer: Overhead.** Sources are `BRIDGE`, `CBLOHD`,
+  `CONVYR` (with `VERCLR`). Tide-conditional lethal cost, mirroring Depth
+  with **opposite sign** on the tide dependency (high tide → less air
+  clearance). New section 5.5 details the cost computation.
+- **Added section 5.10: Persistence and lifecycle.** Covers persistent
+  on-disk cache for parsed feature index, cold-start time estimates
+  (~2–4 s harbor / ~8–20 s regional with cache; ~30–90 s regional
+  without), restart downtime implications, and the deferred
+  out-of-process ENC service alternative.
+- **Updated the v1 scope** to include the Overhead layer + air-draft and
+  the parsed-feature cache.
+- **Updated the deferrals list** with drawbridge state, overhead-cable
+  EMI hazards, and the out-of-process ENC service architecture.
+- **Updated the update-model summary** (5.9, was 5.8) with rows for
+  Overhead, air-draft, and nav2 restart.
+- Renumbered subsections 5.6–5.9 (was 5.5–5.8) to make room for the new
+  Overhead section.
+
+### What was wrong in the initial draft
+
+- **Overhead clearance was a real gap.** The initial draft listed `BRIDGE`
+  in section 1's feature inventory but never created a layer for it.
+  `CBLOHD` (overhead cable) was not even mentioned — only `CBLSUB`
+  (submarine cable), which was correctly dismissed as "irrelevant for
+  surface navigation," but that dismissal silently dropped the overhead
+  case too. Vessels with significant air-draft (mast, antennas, sensors —
+  larger boats run 5–10 m+) would have hit a charted bridge with no cost
+  signal.
+- **Caching was implicit, not designed.** Cold-start time was never
+  analyzed. The design as written would force a 30–90 s cold start on
+  regional missions, which has direct implications for nav2 restart
+  behavior that should have been explicit. The doc now states the cache
+  contract (per-cell, mtime-keyed) and quantifies the cost trade.
+- **Vessel air-draft** was listed as a static vessel parameter in section
+  1's input list but was never used in any cost computation. With the
+  Overhead layer added, it now is.
+
+### What's still open after Round 2
+
+- **Whether to fold Overhead into Depth** for a single tide-driven
+  recompute, or keep them as separate layers. Kept separate in the
+  current design for cleaner debug provenance and operator understanding,
+  but the implementation could share a recompute pass internally.
+- **Whether the in-process plugin architecture needs revisiting** if
+  field experience shows ~10–20 s regional restart is too long. The
+  out-of-process ENC service alternative is sketched but deferred.
+- **`warn` and `safe` thresholds for the Overhead clearance-to-cost
+  function.** Stated to be smaller than the Depth equivalents but
+  specific values not chosen.
+
+## How to add a new entry
+
+When the design doc gets meaningful changes (new section, changed
+recommendation, dropped feature, scope shift), add an entry here:
+
+```markdown
+## YYYY-MM-DD — Short title
+
+**Triggered by**: <comment, review, field experience, related issue, etc.>
+
+### What changed
+
+- Specific section / decision changed.
+- ...
+
+### What was wrong / missing before
+
+- Honest accounting of the gap.
+- ...
+
+### What's still open
+
+- ...
+```
+
+Don't use this log for typo fixes, formatting, or clarifying rewrites that
+don't change the design. Use it when a future reader of the doc would
+benefit from knowing "this section was added in response to X."
