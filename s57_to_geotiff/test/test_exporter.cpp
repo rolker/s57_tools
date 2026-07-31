@@ -24,9 +24,12 @@ public:
     GDALAllRegister();
     OGRRegisterAll();
     GDALDriver * driver = GetGDALDriverManager()->GetDriverByName("Memory");
+    ASSERT_NE(driver, nullptr) << "GDAL Memory driver unavailable";
     dataset_.reset(driver->Create("synthetic", 0, 0, 0, GDT_Unknown, nullptr));
+    ASSERT_NE(dataset_, nullptr) << "failed to create the synthetic MEM dataset";
     srs_.SetWellKnownGeogCS("WGS84");
     layer_ = dataset_->CreateLayer("features", &srs_, wkbUnknown, nullptr);
+    ASSERT_NE(layer_, nullptr) << "failed to create the synthetic feature layer";
     addField("OBJL", OFTInteger);
     addField("DRVAL1", OFTReal);
     addField("DRVAL2", OFTReal);
