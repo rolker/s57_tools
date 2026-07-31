@@ -422,3 +422,31 @@ one atomic commit. Rebuilt `s57_to_geotiff` clean and re-ran its suite: 34 tests
 - [x] (must-fix) Scale-0 malformed cell no longer enters Pass A — a `chartScale() <= 0` cell is dropped with a warning before it can either export or clip valid neighbors via the `other.scale < cell.scale` predicate — `s57_to_geotiff/src/exporter.cpp:629` — `4769272`
 - [x] (suggestion) Boundary SOUNDG on the exact MaxX/MinY extent edge (floored to col==width/row==height) is pulled back into the last pixel instead of being dropped; points genuinely outside the extent still floor past the edge and are dropped — `s57_to_geotiff/src/exporter.cpp:347` — `aff7e99`
 - [x] (suggestion) `forEachFeature` now owns the in-flight `OGRFeature*` in a `unique_ptr` with an `OGRFeature::DestroyFeature` deleter, so a throwing callback destroys it instead of leaking — `s57_to_geotiff/src/exporter.cpp:73` — `6f31445`
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-07-31 19:07 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: approved
+
+**Branch**: feature/issue-27 at `3f1bcdc`
+**Mode**: pre-push
+**Depth**: Deep (reason: new C++/GDAL package + shared marine_charts public-API edit; 2011 lines / 12 files)
+**Must-fix**: 0 | **Suggestions**: 6
+**Round**: 5 | **Ship**: recommended — 0 must-fix; Round-4's must-fix + 2 suggestions all addressed and verified; both fresh adversarial passes confirm correct sign chain, clip predicate, GDAL/OGR RAII, error propagation, exception safety; remaining items are defensive/doc suggestions; loop converged
+**Static analysis**: run (cppcheck 2.13, xmllint) — clean on new code (useStlAlgorithm nit unenforced; unusedStructMember are cross-TU false positives; shadowVariable hits are pre-existing getGrid lines outside the diff; package.xml well-formed)
+**Claude Adversarial**: 2 passes (Lens A logic + Lens B systemic). **Copilot**: off (default). **Local**: skipped (Ollama unreachable).
+
+### Findings
+- [ ] (suggestion) 2-D SOUNDG point burns getZ()==0.0 -> band1=datum_z (false shoal at datum) instead of no-data; ENC SOUNDG are 3-D by spec so low-likelihood, but no Is3D()/coord-dim guard — `s57_to_geotiff/src/exporter.cpp:373`
+- [ ] (suggestion) kMaxRasterPixels comment says "~a few GB" but a cap-sized cell's peak working set (~50·n) is ~12 GB; cap still bounds allocation but a legit large cell at the cap can OOM-kill a constrained host before bad_alloc — doc/tuning accuracy — `s57_to_geotiff/src/exporter.cpp:48`
+- [ ] (suggestion) chartScale()/open() (Pass A) and openVector()/baseLabel() (Pass B) run outside the per-cell try/catch; a throw there terminates the run instead of degrading to a skipped-cell warning (open() written not to throw -> defense-in-depth) — `s57_to_geotiff/src/exporter.cpp:631`
+- [ ] (suggestion) clip loop NaNs depth_bd[i] but leaves sigma[i] burned; harmless today (datum loop gates out_sigma on finite depth) but a latent trap if that coupling is refactored — clear both — `s57_to_geotiff/src/exporter.cpp:450`
+- [ ] (suggestion) public readCatzocZones(GDALDataset*) surfaces a GDAL type while GDAL::GDAL is linked PRIVATE; mitigated by header forward-decl + ament_export_dependencies(GDAL), but PUBLIC linkage is cleaner for an exported API — `marine_charts/CMakeLists.txt:72`
+- [ ] (suggestion) non-empty corpus where every cell is all-no-data returns -1/exit 1 despite writing valid empty GeoTIFFs; documented design choice, only occurs on total datum failure (finer-covered coarse cells imply finer cells have data) — borderline — `s57_to_geotiff/src/exporter.cpp:715`
+
+### Governance & plan-drift
+No governance concerns: consequences map fully addressed (marine_charts header -> link + GDAL export, SOUNDG/M_QUAL comments, README round-trip, cost-model gate documented out-of-scope); [uma] ADR-0010 D7 / ADR-0002 D2 and [ws] ADR-0008 compliant. Plan drift: matches Files-to-Change; documented deviations (SOUNDG Z vs VALSOU, two readCatzocZones overloads) noted in prior entries. No undisclosed drift.
+
+### Next step
+Lifecycle: **Local Review (approved)** → push / open PR → **triage-reviews**. All 6 findings are non-blocking suggestions (apply in a cheap follow-up or track); none gate the push.
