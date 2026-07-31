@@ -1,5 +1,6 @@
 #include <cstring>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 #include "exporter.hpp"
@@ -52,7 +53,13 @@ int main(int argc, char ** argv)
     } else if (std::strcmp(argv[i], "--datum-config") == 0) {
       opts.datum_config = needArg(i, argc, argv);
     } else if (std::strcmp(argv[i], "--lake-datum") == 0) {
-      opts.lake_datum = std::stod(needArg(i, argc, argv));
+      const char * value = needArg(i, argc, argv);
+      try {
+        opts.lake_datum = std::stod(value);
+      } catch (const std::exception &) {
+        std::cerr << "error: --lake-datum expects a number, got '" << value << "'\n";
+        usage();
+      }
     } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
       usage();
     } else if (n_positional < 2) {
