@@ -103,7 +103,7 @@ private:
   void addField(const char * name, OGRFieldType type)
   {
     OGRFieldDefn def(name, type);
-    layer_->CreateField(&def);
+    EXPECT_EQ(layer_->CreateField(&def), OGRERR_NONE) << "failed to create field " << name;
   }
 
   std::unique_ptr<GDALDataset> dataset_;
