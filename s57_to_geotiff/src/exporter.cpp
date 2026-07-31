@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -36,6 +37,14 @@ constexpr double kResolvableGroundFraction = 0.0005;
 // Per-side raster dimension cap: a guard against a malformed scale/extent
 // demanding an unbounded allocation, not a normal operational limit.
 constexpr double kMaxRasterDim = 200000.0;
+
+// Total pixel-count cap. The per-side cap alone still permits a cap-by-cap cell
+// (~4e10 px ~ hundreds of GB across the working buffers) that would throw
+// bad_alloc. This bounds the product well above any legitimate ENC cell (the
+// densest realistic harbor cell is tens of millions of pixels) while rejecting
+// pathological extents before allocation. The per-cell try/catch in runExport is
+// the backstop for any residual allocation failure.
+constexpr std::size_t kMaxRasterPixels = 250000000;  // 2.5e8 px ~ a few GB
 
 // A charted sounding with no CATZOC zone would otherwise get sigma 0.0, which a
 // consumer could read as false certainty. Floor it at the CATZOC A1 base (0.5 m)
@@ -232,6 +241,10 @@ bool exportCell(
   const int width = std::max(1, static_cast<int>(cols));
   const int height = std::max(1, static_cast<int>(rows));
   const std::size_t n = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+  if (n > kMaxRasterPixels) {
+    error = "raster pixel count exceeds the safety cap (malformed scale or extent)";
+    return false;
+  }
 
   double gt[6] = {min_lon, pixel, 0.0, max_lat, 0.0, -pixel};
   const std::string wkt = wgs84Wkt();
@@ -587,7 +600,17 @@ int runExport(const ExporterOptions & opts, std::ostream & log)
       opts.out_dir + "/" + baseLabel(cell.ds->label()) + ".tif";
     std::string error;
     CellExport stats;
-    if (exportCell(*gdal, cell.scale, datum, clip, out_path, error, &stats)) {
+    bool ok = false;
+    try {
+      ok = exportCell(*gdal, cell.scale, datum, clip, out_path, error, &stats);
+    } catch (const std::exception & e) {
+      // Degrade any per-cell failure (e.g. bad_alloc from a still-large cell that
+      // passed the dimension caps) to a skipped-cell warning instead of a
+      // process-wide terminate.
+      error = std::string("exception during export: ") + e.what();
+      ok = false;
+    }
+    if (ok) {
       if (stats.written == 0) {
         log << "warning: " << cell.ds->label()
             << ": no in-datum data (all pixels no-data); wrote empty " << out_path << "\n";
