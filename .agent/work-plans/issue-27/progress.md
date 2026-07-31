@@ -404,3 +404,21 @@ No governance concerns: consequences map fully addressed (marine_charts header->
 
 ### Next step
 Lifecycle: **Local Review (changes-requested)** → `address-findings` (1 must-fix + 2 suggestions open) → re-dispatch review-code. The must-fix is a single mechanical guard; the two suggestions are non-blocking (apply or track).
+
+## Implementation
+**Status**: complete
+**When**: 2026-07-31 18:52 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**Branch**: feature/issue-27 at `6f31445`
+**Addressed**: Local Review (Pre-Push) @ 2026-07-31 18:43 +00:00, `1569d1e` (Round 4; 1 must-fix + 2 suggestions)
+**Commits**: `4769272`, `aff7e99`, `6f31445`
+
+Addressed all three open findings from the Round-4 pre-push review; each fix is
+one atomic commit. Rebuilt `s57_to_geotiff` clean and re-ran its suite: 34 tests,
+0 failures, 17 skipped. No findings deferred.
+
+### Actions
+- [x] (must-fix) Scale-0 malformed cell no longer enters Pass A — a `chartScale() <= 0` cell is dropped with a warning before it can either export or clip valid neighbors via the `other.scale < cell.scale` predicate — `s57_to_geotiff/src/exporter.cpp:629` — `4769272`
+- [x] (suggestion) Boundary SOUNDG on the exact MaxX/MinY extent edge (floored to col==width/row==height) is pulled back into the last pixel instead of being dropped; points genuinely outside the extent still floor past the edge and are dropped — `s57_to_geotiff/src/exporter.cpp:347` — `aff7e99`
+- [x] (suggestion) `forEachFeature` now owns the in-flight `OGRFeature*` in a `unique_ptr` with an `OGRFeature::DestroyFeature` deleter, so a throwing callback destroys it instead of leaking — `s57_to_geotiff/src/exporter.cpp:73` — `6f31445`
