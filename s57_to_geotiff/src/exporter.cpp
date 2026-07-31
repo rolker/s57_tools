@@ -5,6 +5,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <iostream>
 #include <limits>
 #include <memory>
 
@@ -104,6 +105,15 @@ public:
         geometry != nullptr)
       {
         geoms_.push_back({geometry, z.catzoc});
+      } else {
+        // A zone that fails to reconstruct loses its CATZOC sigma floor, which can
+        // read as false certainty downstream; surface it rather than dropping it
+        // silently (marine_charts logs the mirror failure on the export side).
+        if (geometry) {
+          OGRGeometryFactory::destroyGeometry(geometry);
+        }
+        std::cerr << "s57_to_geotiff: dropping CATZOC zone (code " << z.catzoc
+                  << "): WKB parse failed\n";
       }
     }
   }

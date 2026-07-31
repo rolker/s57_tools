@@ -435,6 +435,11 @@ std::vector<CatzocZone> readCatzocZones(GDALDataset* dataset)
     zone.wkb.resize(geometry->WkbSize());
     if(geometry->exportToWkb(wkbNDR, zone.wkb.data()) == OGRERR_NONE)
       zones.push_back(std::move(zone));
+    else
+      // A dropped zone silently removes its CATZOC sigma floor downstream (possible
+      // false certainty); surface it rather than losing it without a trace.
+      std::cerr << "marine_charts: readCatzocZones: dropping M_QUAL zone (CATZOC "
+                << zone.catzoc << "): WKB export failed" << std::endl;
   }
   return zones;
 }
