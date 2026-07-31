@@ -612,12 +612,24 @@ int runExport(const ExporterOptions & opts, std::ostream & log)
   std::vector<Cell> cells;
   cells.reserve(datasets.size());
   for (auto & ds : datasets) {
+    const double scale = ds->chartScale();
+    // A malformed cell with no readable compilation scale (chartScale()==0)
+    // would enter Pass B with scale 0; the `other.scale < cell.scale` clip
+    // predicate then reads 0 < scale -> true for every real cell, so its
+    // footprints would NaN out valid depth from every overlapping cell even as
+    // it fails its own export at exportCell's `chart_scale > 0` guard. Drop it
+    // here so a scale-0 cell can neither export nor clip.
+    if (!(scale > 0.0)) {
+      log << "warning: " << ds->filePath()
+          << ": non-positive chart scale; skipping (cannot export or clip)\n";
+      continue;
+    }
     auto gdal = openVector(ds->filePath());
     if (!gdal) {
       log << "warning: cannot open " << ds->filePath() << "; skipping\n";
       continue;
     }
-    cells.push_back({ds, ds->chartScale(), readFootprints(*gdal)});
+    cells.push_back({ds, scale, readFootprints(*gdal)});
   }
 
   // Pass B: export each cell, clipped by every strictly-finer cell's footprints
