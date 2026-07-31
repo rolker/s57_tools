@@ -210,3 +210,29 @@ Lifecycle: **Implementation** → **review-code** (re-review the fixes). Hand of
 a fresh-context sub-agent:
 
     .agent/scripts/dispatch_subagent.sh --mode in-process --issue 27 --skill review-code
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-07-31 16:42 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: approved
+
+**Branch**: feature/issue-27 at `4c47234`
+**Mode**: pre-push
+**Depth**: Deep (reason: 1645 lines > 200 and 11 files > 10; new C++/GDAL package + shared marine_charts public-API edit)
+**Must-fix**: 0 | **Suggestions**: 5
+**Round**: 2 | **Ship**: recommended — 0 must-fix after all 11 round-1 findings addressed; the one round-2 must-fix candidate was a verified false positive; remaining items are defensive-hardening suggestions
+**Static analysis**: run (cppcheck 2.13, xmllint) — clean on new code (only cross-TU unusedStructMember false positives + one un-enforced useStlAlgorithm nit, dropped)
+**Claude Adversarial**: 2 passes (Lens A logic + Lens B systemic). **Copilot**: off (default). **Local**: skipped (Ollama not reachable).
+
+### Findings
+- [ ] (rejected/false-positive) Lens A "must-fix": lon pixel span uses lat angular span → wrong georeferencing — REJECTED: GGGS `latitudeScaleFactor`==1 for |lat|<72°, so cells are square-in-degrees in all mid-latitude waters; the square-degree geotransform matches the GGGS grid and is self-consistent — `s57_to_geotiff/src/exporter.cpp:216`
+- [ ] (suggestion) all-cells-failed / all-no-data corpus returns 0 and exits 0 (indistinguishable from success); return nonzero when `cells.size()>0 && exported==0` — `s57_to_geotiff/src/exporter.cpp:557` / `main.cpp:78`
+- [ ] (suggestion) two `GDALRasterizeGeometries` returns unchecked — a CE_Failure silently drops depth pixels or under-clips (stale coarser data leaks through a finer footprint); check + warn per-cell like every other GDAL call — `s57_to_geotiff/src/exporter.cpp:294,369`
+- [ ] (suggestion) `kMaxRasterDim` blocks the int-overflow UB but a cap-sized cell still allocs ~TB → uncaught `bad_alloc` → terminate (no top-level catch); cap the pixel product and/or wrap the per-cell body to degrade to a skipped-cell warning — `s57_to_geotiff/src/exporter.cpp:38,228`
+- [ ] (suggestion) area pixels get σ exactly 0.0 for flat band + no CATZOC while soundings floor at `kMinSoundingSigma`; consider a matching area floor or document the asymmetry (low: real ENCs rarely encode DRVAL1==DRVAL2) — `s57_to_geotiff/src/exporter.cpp:289`
+- [ ] (note) polar-only (>72° lat): exporter keeps factor 1 while GGGS steps lon 3×/9× → E-W oversampling there (not data-loss; import resamples); a "square-degree, <72° lat" README note closes it — `s57_to_geotiff/src/exporter.cpp:216`
+
+### Next step
+Lifecycle: **Local Review (approved)** → push / open PR → **triage-reviews**. The
+five suggestions are non-blocking (apply now or track); no must-fix gates the push.
