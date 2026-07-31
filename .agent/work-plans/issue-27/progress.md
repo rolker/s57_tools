@@ -286,3 +286,32 @@ Lifecycle: **Implementation** → **review-code** (re-review the fixes). Hand of
 a fresh-context sub-agent:
 
     .agent/scripts/dispatch_subagent.sh --mode in-process --issue 27 --skill review-code
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-07-31 17:08 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: approved
+
+**Branch**: feature/issue-27 at `1953919` (code state `cb5e01f`; HEAD adds only progress.md)
+**Mode**: pre-push
+**Depth**: Deep (reason: new C++/GDAL package + shared marine_charts public-API edit; 1792 lines / 11 files)
+**Must-fix**: 0 | **Suggestions**: 3
+**Round**: 3 | **Ship**: recommended — 0 must-fix; round-2 approved and its 5 findings all addressed; this round's items are non-blocking suggestions / verified false-positives; loop converged
+**Static analysis**: run (cppcheck 2.13, xmllint) — clean on new code (useStlAlgorithm nit + pre-existing getGrid shadowVariable dropped)
+**Claude Adversarial**: 2 passes (Lens A logic + Lens B systemic). **Copilot**: off (default). **Local**: skipped (Ollama unreachable).
+
+### Findings
+- [ ] (suggestion) `work`/`mask`/`out` GDAL datasets use `unique_ptr`'s default deleter, not `GDALClose` like sibling marine_charts (`GDALDeleter`) / `GDALDatasetUniquePtr` — functionally correct (6/6 tests reopen and read back the written GeoTIFF), so idiom-consistency cleanup, not a bug — `s57_to_geotiff/src/exporter.cpp:266,385,459`
+- [ ] (suggestion) dropped M_QUAL zone on WKB round-trip failure is silent; a missing zone removes its σ floor (possible false certainty) — very low likelihood (round-tripping freshly-produced WKB) but a one-line log would surface data-quality issues — `marine_charts/src/s57_dataset.cpp:436` / `s57_to_geotiff/src/exporter.cpp:102`
+- [ ] (suggestion) marine_charts now exposes `readCatzocZones(GDALDataset*)` but doesn't `ament_export_dependencies(GDAL)`; sole current consumer (s57_to_geotiff) finds GDAL itself so no impact now — forward-looking note for future consumers — `marine_charts/CMakeLists.txt`
+- [x] (rejected/false-positive) Lens B "critical resource leak / UB" on the `unique_ptr<GDALDataset>` deleter — REJECTED: GDALDataset has a public virtual destructor that flushes; the write-then-reopen-and-read tests pass 6/6, direct evidence the GTiff flushes/closes on destruction — **no action** (downgraded to suggestion #1, an idiom nit)
+- [x] (rejected/below-threshold) CRS-not-WGS84 assumption (ENC spec-locked to WGS84), DRVAL2<DRVAL1 unwarned (`max()`→0 handles it), multiple-soundings-per-pixel last-wins (expected at raster res), sounding-index int overflow (bounded by kMaxRasterPixels) — **no action**
+- [x] (rejected/false-positive) Lens A lon/lat square-degree "must-fix" — REJECTED again: same verified FP dismissed in round 2 (GGGS factor 1 for |lat|<72°); Lens A independently re-derived it as documented/acceptable — **no action**
+
+### Governance & plan-drift
+No governance concerns: consequences map fully addressed (marine_charts header→link, SOUNDG/M_QUAL comments, README round-trip, cost-model gate out-of-scope); [uma]ADR-0010 D7 / ADR-0002 D2 and [ws]ADR-0008 compliant. Plan drift: matches Files-to-Change; all deviations documented in prior entries. No undisclosed drift.
+
+### Next step
+Lifecycle: **Local Review (approved)** → push / open PR → **triage-reviews**. The three
+suggestions are non-blocking (apply now or track); no must-fix gates the push.
