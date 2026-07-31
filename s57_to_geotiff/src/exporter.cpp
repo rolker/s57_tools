@@ -33,6 +33,15 @@ constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 // the work plan's "Scale->level constant" note.
 constexpr double kResolvableGroundFraction = 0.0005;
 
+// Per-side raster dimension cap: a guard against a malformed scale/extent
+// demanding an unbounded allocation, not a normal operational limit.
+constexpr double kMaxRasterDim = 200000.0;
+
+// A charted sounding with no CATZOC zone would otherwise get sigma 0.0, which a
+// consumer could read as false certainty. Floor it at the CATZOC A1 base (0.5 m)
+// so band 2 is never a hard zero for a real measurement.
+constexpr double kMinSoundingSigma = 0.5;
+
 // S-57 object class labels used here.
 constexpr int kObjlDepare = 42;
 constexpr int kObjlDrgare = 46;
@@ -160,6 +169,13 @@ bool exportCell(
   const std::vector<OGRGeometry *> & clip_geoms, const std::string & out_path,
   std::string & error, CellExport * stats)
 {
+  // A malformed cell can carry a zero/negative scale; guard before it reaches
+  // gggs::Level::fromCellSize (log2 of +inf is UB) and before any allocation.
+  if (!(chart_scale > 0.0)) {
+    error = "non-positive chart scale";
+    return false;
+  }
+
   // --- CATZOC zones for the sigma floor -------------------------------------
   CatzocZones zones(marine_charts::readCatzocZones(&dataset));
 
@@ -204,10 +220,17 @@ bool exportCell(
   }
   const double min_lon = extent.MinX;
   const double max_lat = extent.MaxY;
-  const int width =
-    std::max(1, static_cast<int>(std::ceil((extent.MaxX - extent.MinX) / pixel)));
-  const int height =
-    std::max(1, static_cast<int>(std::ceil((extent.MaxY - extent.MinY) / pixel)));
+  // Compute the dimensions in double and cap them before narrowing to int: a
+  // pathological extent/pixel ratio would otherwise overflow the int cast (UB)
+  // and demand an unbounded allocation.
+  const double cols = std::ceil((extent.MaxX - extent.MinX) / pixel);
+  const double rows = std::ceil((extent.MaxY - extent.MinY) / pixel);
+  if (!(cols >= 0.0 && rows >= 0.0) || cols > kMaxRasterDim || rows > kMaxRasterDim) {
+    error = "raster dimensions exceed the safety cap (malformed scale or extent)";
+    return false;
+  }
+  const int width = std::max(1, static_cast<int>(cols));
+  const int height = std::max(1, static_cast<int>(rows));
   const std::size_t n = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
 
   double gt[6] = {min_lon, pixel, 0.0, max_lat, 0.0, -pixel};
@@ -222,6 +245,10 @@ bool exportCell(
   // Working raster: band 1 = depth below chart datum (positive-down), band 2 =
   // sigma. Both start as NaN so untouched pixels stay no-data.
   std::unique_ptr<GDALDataset> work(mem_driver->Create("", width, height, 2, GDT_Float64, nullptr));
+  if (!work) {
+    error = "failed to allocate the working raster";
+    return false;
+  }
   work->SetGeoTransform(gt);
   work->SetProjection(wkt.c_str());
   work->GetRasterBand(1)->Fill(kNaN);
@@ -254,6 +281,10 @@ bool exportCell(
         const double half_band = std::max(0.0, (*d2 - *d1) / 2.0);
         OGREnvelope env;
         geometry->getEnvelope(&env);
+        // CATZOC is sampled once at the polygon's bbox centroid and burned across
+        // the whole area. A DEPARE that straddles two M_QUAL zones therefore gets
+        // a single zone's sigma; splitting per-zone would need a polygon
+        // intersection pass (left as future work).
         const int cz = zones.at((env.MinX + env.MaxX) / 2.0, (env.MinY + env.MaxY) / 2.0);
         const double sigma = std::max(half_band, catzocSigma(cz, depth));
 
@@ -264,6 +295,10 @@ bool exportCell(
           GDALDataset::ToHandle(work.get()), 2, bands, 1, &gh, nullptr, nullptr, burn,
           nullptr, nullptr, nullptr);
       } else if (objl == kObjlSoundg) {
+        // S-57 encodes each sounding's depth as the point geometry's Z ordinate
+        // (positive-down), not a VALSOU attribute, so we read getZ() here. This
+        // deviates from plan step 5's "VALSOU" wording; geometry Z is the correct
+        // S-57 source for SOUNDG.
         const OGRwkbGeometryType type = wkbFlatten(geometry->getGeometryType());
         auto add = [&](double x, double y, double z) {
           const int col = static_cast<int>(std::floor((x - min_lon) / pixel));
@@ -272,7 +307,8 @@ bool exportCell(
             return;
           }
           const int cz = zones.at(x, y);
-          soundings.push_back({col, row, z, catzocSigma(cz, z)});
+          const double sounding_sigma = std::max(catzocSigma(cz, z), kMinSoundingSigma);
+          soundings.push_back({col, row, z, sounding_sigma});
         };
         if (type == wkbPoint) {
           const OGRPoint * p = geometry->toPoint();
@@ -310,6 +346,10 @@ bool exportCell(
   if (!clip_geoms.empty()) {
     std::unique_ptr<GDALDataset> mask(
       mem_driver->Create("", width, height, 1, GDT_Byte, nullptr));
+    if (!mask) {
+      error = "failed to allocate the clip mask";
+      return false;
+    }
     mask->SetGeoTransform(gt);
     mask->SetProjection(wkt.c_str());
     mask->GetRasterBand(1)->Fill(0);
@@ -475,6 +515,11 @@ int runExport(const ExporterOptions & opts, std::ostream & log)
 {
   std::error_code ec;
   std::filesystem::create_directories(opts.out_dir, ec);
+  if (ec) {
+    log << "error: cannot create output directory " << opts.out_dir << ": "
+        << ec.message() << "\n";
+    return -1;                          // fatal setup error (see header contract)
+  }
 
   marine_charts::S57Catalog catalog(opts.enc_root);
   auto datasets = catalog.intersectingCharts(-90.0, -180.0, 90.0, 180.0);
@@ -505,6 +550,10 @@ int runExport(const ExporterOptions & opts, std::ostream & log)
 
   // Pass B: export each cell, clipped by every strictly-finer cell's footprints
   // (finer = smaller scale denominator; largest scale governs, ADR-0010 D7).
+  // The comparison is strict: two cells at the *same* compilation scale do not
+  // clip each other. Standard ENC usage bands don't overlap at equal scale, and
+  // any residual same-scale overlap is left for import_geotiff to dedup rather
+  // than resolved arbitrarily here.
   int exported = 0;
   for (const Cell & cell : cells) {
     std::vector<OGRGeometry *> clip;
@@ -524,18 +573,23 @@ int runExport(const ExporterOptions & opts, std::ostream & log)
     std::string error;
     CellExport stats;
     if (exportCell(*gdal, cell.scale, datum, clip, out_path, error, &stats)) {
-      log << "exported " << out_path << " (" << stats.width << "x" << stats.height
-          << ", " << stats.written << " cells, scale 1:" << static_cast<long>(cell.scale)
-          << ", GGGS level " << stats.level << " -> import_geotiff --level " << stats.level
-          << ")\n";
-      ++exported;
+      if (stats.written == 0) {
+        log << "warning: " << cell.ds->label()
+            << ": no in-datum data (all pixels no-data); wrote empty " << out_path << "\n";
+      } else {
+        log << "exported " << out_path << " (" << stats.width << "x" << stats.height
+            << ", " << stats.written << " cells, scale 1:" << static_cast<long>(cell.scale)
+            << ", GGGS level " << stats.level << " -> import_geotiff --level " << stats.level
+            << ")\n";
+        ++exported;
+      }
     } else {
       log << "warning: " << cell.ds->label() << ": " << error << "\n";
     }
   }
 
   // Release cloned footprints.
-  for (Cell & cell : cells) {
+  for (const Cell & cell : cells) {
     for (OGRGeometry * g : cell.footprints) {
       OGRGeometryFactory::destroyGeometry(g);
     }
