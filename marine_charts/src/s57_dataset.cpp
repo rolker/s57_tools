@@ -383,7 +383,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
           case 126: // SLOTOP Slope topline
           case 127: // SLOGRD Sloping ground
           case 128: // SMCFAC Small craft facility
-          case 129: // SOUNDG Sounding              *should we look at individual soundings?
+          case 129: // SOUNDG Sounding  (costmap path ignores; s57_to_geotiff reads via GetFeatures for the chart layer)
           case 135: // TESARE Territorial sea area
           case 144: // TOPMAR Topmark
           case 146: // TSSBND Traffic separation scheme boundary
@@ -395,7 +395,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
           case 302: // M_COVR Coverage
           case 305: // M_NPUB Nautical publication information
           case 306: // M_NSYS Navigational system of marks
-          case 308: // M_QUAL Quality of data
+          case 308: // M_QUAL Quality of data  (costmap path ignores; readCatzocZones() exposes CATZOC for s57_to_geotiff)
           case 400: // C_AGGR Aggregation
           case 401: // C_ASSO Association
             break;
@@ -407,6 +407,50 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
     }
   }
   return ret;
+}
+
+std::vector<CatzocZone> readCatzocZones(GDALDataset* dataset)
+{
+  std::vector<CatzocZone> zones;
+  if(!dataset)
+    return zones;
+
+  for(auto&& featurePair: dataset->GetFeatures())
+  {
+    int oi = featurePair.feature->GetFieldIndex("OBJL");
+    if(oi == -1)
+      continue;
+    if(featurePair.feature->GetFieldAsInteger(oi) != 308) // M_QUAL Quality of data
+      continue;
+
+    OGRGeometry* geometry = featurePair.feature->GetGeometryRef();
+    if(!geometry)
+      continue;
+
+    CatzocZone zone;
+    int ci = featurePair.feature->GetFieldIndex("CATZOC");
+    if(ci != -1 && featurePair.feature->IsFieldSetAndNotNull(ci))
+      zone.catzoc = featurePair.feature->GetFieldAsInteger(ci);
+
+    zone.wkb.resize(geometry->WkbSize());
+    if(geometry->exportToWkb(wkbNDR, zone.wkb.data()) == OGRERR_NONE)
+      zones.push_back(std::move(zone));
+    else
+      // A dropped zone silently removes its CATZOC sigma floor downstream (possible
+      // false certainty); surface it rather than losing it without a trace.
+      std::cerr << "marine_charts: readCatzocZones: dropping M_QUAL zone (CATZOC "
+                << zone.catzoc << "): WKB export failed" << std::endl;
+  }
+  return zones;
+}
+
+std::vector<CatzocZone> readCatzocZones(const std::string& path)
+{
+  auto dataset = std::shared_ptr<GDALDataset>(
+    reinterpret_cast<GDALDataset*>(
+      GDALOpenEx(path.c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr)),
+    GDALDeleter);
+  return readCatzocZones(dataset.get());
 }
 
 } // namespace marine_charts

@@ -69,7 +69,7 @@ install(
 )
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
-ament_export_dependencies(geographic_msgs geometry_msgs grid_map_core)
+ament_export_dependencies(GDAL geographic_msgs geometry_msgs grid_map_core)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
