@@ -327,13 +327,13 @@ suggestions are non-blocking (apply now or track); no must-fix gates the push.
 **CI**: all-pass (`build-and-test` success, `copilot-pull-request-reviewer` success)
 
 ### Findings
-- [ ] (cross-confirmed, must-fix) Output GeoTIFF `out` is destroyed by `unique_ptr`'s default deleter, so the close-time flush's `CPLErr` is discarded and `exportCell` returns `true` — a disk-full / I/O failure on the final GTiff write is silently swallowed and the cell is still counted "exported". Not the leak/UB that round 3's Lens B claimed (correctly rejected: `GDALDataset` has a public virtual dtor that flushes) — the defect is the *unreported* error. In-workspace precedent documents exactly this for GTiff writes (`marine_tiled_raster_store/src/tile_io.cpp:177-186`, checks `GDALClose(ds) != CE_None`), and this very file already uses `GDALClose` in a custom deleter at `exporter.cpp:497` — internal inconsistency. Fix: close `out` explicitly and check the `CPLErr` (GDAL 3.7+; workspace targets 3.8), failing the cell on error. MEM `work`/`mask` (266, 385) stay idiom-only — no file backing, nothing to flush — `s57_to_geotiff/src/exporter.cpp:459`
-- [ ] (must-fix, Copilot) `buildDatum()` builds the VDatum query only when `--geoid` is set, so `--vdatum-dir` alone is silently ignored: `make_vdatum_query` never runs, its "geoid_grid is empty" diag never fires, and every pixel falls through to no-data with no message. The reverse (`--geoid` alone) *is* diagnosed by the library. Usage text advertises the two flags independently. Fix: enter the block when either flag is set (letting `make_vdatum_query`'s diag report the missing one), or warn explicitly when exactly one is given — `s57_to_geotiff/src/exporter.cpp:522-534`
-- [ ] (suggestion, Copilot) Unknown `-`-prefixed arguments are accepted as positionals while fewer than two have been seen: `s57_to_geotiff --badflag out` runs with `enc_root="--badflag"` and exits 0 with "no charts found". Fix: reject an unrecognized argument beginning with `-` via `usage()` before the positional branch — `s57_to_geotiff/src/main.cpp:65`
-- [ ] (suggestion, Copilot) Test fixture `SyntheticCell` dereferences the results of `GetDriverByName("Memory")`, `Create()`, and `CreateLayer()` unchecked — any failure crashes the test binary instead of failing with a message. Production code null-checks the analogous MEM driver lookup (`exporter.cpp:259`), so the harness is the outlier. Fix: `ASSERT_NE(..., nullptr)` (or throw) on each — `s57_to_geotiff/test/test_exporter.cpp:25-28`
-- [ ] (suggestion, Copilot) `addField()` ignores `CreateField()`'s return; on failure the later `SetField()` calls silently no-op and tests fail far from the cause. Fix: assert `OGRERR_NONE` — `s57_to_geotiff/test/test_exporter.cpp:99-103`
-- [ ] (suggestion, Local Review R3 carry-over) A M_QUAL zone dropped on WKB export/round-trip failure is silent; the missing zone removes its σ floor (possible false certainty). One-line log at both ends — `marine_charts/src/s57_dataset.cpp:436` / `s57_to_geotiff/src/exporter.cpp:102`
-- [ ] (suggestion, Local Review R3 carry-over) `marine_charts` exposes `readCatzocZones(GDALDataset*)` without `ament_export_dependencies(GDAL)`. Verified low: the public header forward-declares `class GDALDataset` (`s57_dataset.h:12`) so it stays self-contained, and the sole consumer finds GDAL itself — forward-looking only — `marine_charts/CMakeLists.txt:72`
+- [x] (cross-confirmed, must-fix) Output GeoTIFF `out` is destroyed by `unique_ptr`'s default deleter, so the close-time flush's `CPLErr` is discarded and `exportCell` returns `true` — a disk-full / I/O failure on the final GTiff write is silently swallowed and the cell is still counted "exported". Not the leak/UB that round 3's Lens B claimed (correctly rejected: `GDALDataset` has a public virtual dtor that flushes) — the defect is the *unreported* error. In-workspace precedent documents exactly this for GTiff writes (`marine_tiled_raster_store/src/tile_io.cpp:177-186`, checks `GDALClose(ds) != CE_None`), and this very file already uses `GDALClose` in a custom deleter at `exporter.cpp:497` — internal inconsistency. Fix: close `out` explicitly and check the `CPLErr` (GDAL 3.7+; workspace targets 3.8), failing the cell on error. MEM `work`/`mask` (266, 385) stay idiom-only — no file backing, nothing to flush — `s57_to_geotiff/src/exporter.cpp:459`
+- [x] (must-fix, Copilot) `buildDatum()` builds the VDatum query only when `--geoid` is set, so `--vdatum-dir` alone is silently ignored: `make_vdatum_query` never runs, its "geoid_grid is empty" diag never fires, and every pixel falls through to no-data with no message. The reverse (`--geoid` alone) *is* diagnosed by the library. Usage text advertises the two flags independently. Fix: enter the block when either flag is set (letting `make_vdatum_query`'s diag report the missing one), or warn explicitly when exactly one is given — `s57_to_geotiff/src/exporter.cpp:522-534`
+- [x] (suggestion, Copilot) Unknown `-`-prefixed arguments are accepted as positionals while fewer than two have been seen: `s57_to_geotiff --badflag out` runs with `enc_root="--badflag"` and exits 0 with "no charts found". Fix: reject an unrecognized argument beginning with `-` via `usage()` before the positional branch — `s57_to_geotiff/src/main.cpp:65`
+- [x] (suggestion, Copilot) Test fixture `SyntheticCell` dereferences the results of `GetDriverByName("Memory")`, `Create()`, and `CreateLayer()` unchecked — any failure crashes the test binary instead of failing with a message. Production code null-checks the analogous MEM driver lookup (`exporter.cpp:259`), so the harness is the outlier. Fix: `ASSERT_NE(..., nullptr)` (or throw) on each — `s57_to_geotiff/test/test_exporter.cpp:25-28`
+- [x] (suggestion, Copilot) `addField()` ignores `CreateField()`'s return; on failure the later `SetField()` calls silently no-op and tests fail far from the cause. Fix: assert `OGRERR_NONE` — `s57_to_geotiff/test/test_exporter.cpp:99-103`
+- [x] (suggestion, Local Review R3 carry-over) A M_QUAL zone dropped on WKB export/round-trip failure is silent; the missing zone removes its σ floor (possible false certainty). One-line log at both ends — `marine_charts/src/s57_dataset.cpp:436` / `s57_to_geotiff/src/exporter.cpp:102`
+- [x] (suggestion, Local Review R3 carry-over) `marine_charts` exposes `readCatzocZones(GDALDataset*)` without `ament_export_dependencies(GDAL)`. Verified low: the public header forward-declares `class GDALDataset` (`s57_dataset.h:12`) so it stays self-contained, and the sole consumer finds GDAL itself — forward-looking only — `marine_charts/CMakeLists.txt:72`
 
 ### False positives
 - None dismissed outright this round — all 5 Copilot comments verified against local code as valid at some severity.
@@ -341,3 +341,41 @@ suggestions are non-blocking (apply now or track); no must-fix gates the push.
 
 ### Next step
 Lifecycle: **Integrated Review** → `address-findings` (2 must-fix + 5 suggestions open).
+
+## Implementation
+**Status**: complete
+**When**: 2026-07-31 18:32 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**PR**: #29 at `9aceeb3`   <!-- branch feature/issue-27 HEAD; fix commits are local, host pushes to PR #29 -->
+**Addressed**: `## Integrated Review` (complete, 2026-07-31 14:15 -04:00, PR #29 at `18698a8`) — all 7 open findings (2 must-fix + 5 suggestions)
+**Commits**: `0637a83`, `932d469`, `ca9f809`, `198946c`, `825fb3c`, `e9ef4da`, `f33a8f8`, `9aceeb3`
+
+### Actions
+- [x] (cross-confirmed, must-fix) GTiff `out` closed explicitly via `GDALClose(out.release())`; the close-time `CPLErr` now fails the cell instead of being swallowed by the default `unique_ptr` deleter. MEM `work`/`mask` left idiom-only (no file backing) — `s57_to_geotiff/src/exporter.cpp:459` — `0637a83`
+- [x] (must-fix, Copilot) `buildDatum` enters the VDatum block when *either* `--geoid` or `--vdatum-dir` is set, so a lone `--vdatum-dir` is no longer silently ignored and `make_vdatum_query`'s missing-grid diagnostic fires — `s57_to_geotiff/src/exporter.cpp:522-534` — `932d469`
+- [x] (suggestion, Copilot) Unknown `-`-prefixed CLI argument rejected via `usage()` before the positional branch (verified: `--badflag out` → "error: unknown option", exit 1) — `s57_to_geotiff/src/main.cpp:65` — `ca9f809`
+- [x] (suggestion, Copilot) Fixture `SyntheticCell` guards the MEM driver/dataset/layer handles — `s57_to_geotiff/test/test_exporter.cpp:22-40` — `198946c` (+ `9aceeb3`, see decision below)
+- [x] (suggestion, Copilot) Fixture `addField` checks `CreateField`'s return (`EXPECT_EQ … OGRERR_NONE`) — `s57_to_geotiff/test/test_exporter.cpp:100-104` — `825fb3c`
+- [x] (suggestion, R3 carry-over) Dropped M_QUAL/CATZOC zone now logged at both ends (WKB export in `marine_charts`, WKB parse in the exporter); also fixes a latent geometry leak on a parse failure that left a partial geometry allocated — `marine_charts/src/s57_dataset.cpp:436` / `s57_to_geotiff/src/exporter.cpp:102` — `e9ef4da`
+- [x] (suggestion, R3 carry-over) `ament_export_dependencies(GDAL)` added for the public `readCatzocZones(GDALDataset*)` API — `marine_charts/CMakeLists.txt:72` — `f33a8f8`
+
+### Decisions
+- **Fixture guard is a `throw`, not `ASSERT_NE`.** The Copilot finding offered "`ASSERT_NE(..., nullptr)` (or throw)". `ASSERT_NE` expands to a *value-returning* `return`, which is illegal in a constructor — the first build failed with `error: returning a value from a constructor`. The `throw std::runtime_error` alternative has the same effect (gtest reports it as a test failure with the message) and additionally prevents the downstream null-deref the finding was about. Corrective compile fix in `9aceeb3`, on top of the original `198946c`.
+- **No deferred findings.** Every open item was actioned with a real commit. The source entry's two `False positives` plain bullets (the `unique_ptr` leak framing; the "none dismissed" note) are dismissals, not actions, and were correctly left un-actioned.
+
+### Build & test (actual, post-fix)
+`./build.sh marine_charts s57_to_geotiff` → clean (no warnings/errors). `./test.sh
+marine_charts s57_to_geotiff` → **34 tests, 0 errors, 0 failures, 17 skipped**;
+`test_exporter.gtest.xml` shows the gtest suite **6/6 passing**. CLI smoke:
+`s57_to_geotiff --badflag /tmp/out` → "error: unknown option '--badflag'" + usage,
+exit 1; `--help` exits 1 (matching `import_geotiff`).
+
+### No push / PR
+Local commits only; the host publishes to PR #29.
+
+### Next step
+Lifecycle: **Implementation** → **review-code** (re-review the fixes). Hand off to
+a fresh-context sub-agent:
+
+    .agent/scripts/dispatch_subagent.sh --mode in-process --issue 27 --skill review-code
