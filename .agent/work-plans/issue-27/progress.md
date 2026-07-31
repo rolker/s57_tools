@@ -44,8 +44,8 @@ issue: 27
 **Verdict**: approve-with-suggestions
 
 ### Findings
-- [ ] (must-fix) `s57_to_geotiff/package.xml` omits `marine_autonomy`, which provides `gggs::Level::fromCellSize`; `marine_vertical_datum` does not pull it in transitively — build blocker — `plan.md:29`
-- [ ] (suggestion) M_COVR footprint source for the finer-scale clip is unspecified; `S57Dataset` exposes only a bbox — state the exporter reads M_COVR (OBJL 302) geometry directly — `plan.md:36`
-- [ ] (suggestion) scale→level constant `0.0003125` (0.3125 mm-at-scale) diverges from ADR-0010 D7's "≈0.5 mm-at-scale" (0.0005); confirm or document — `plan.md:37`
-- [ ] (suggestion) ADR table mixes project (uma ADR-0010 D7, ADR-0002 D2) and workspace (0008/0009/0018) ADRs under one unqualified namespace with number collisions; qualify the project ones — `plan.md:80`
-- [ ] (suggestion) cost-model gate sequencing noted in Context but not the Consequences table; getGrid() case 308 stays a no-op — add a consequence row for completeness — `plan.md:89`
+- [x] (must-fix) `s57_to_geotiff/package.xml` omits `marine_autonomy`, which provides `gggs::Level::fromCellSize`; `marine_vertical_datum` does not pull it in transitively — build blocker — `plan.md:29` — **folded at `8aeb7a4`** (dep added to Approach step 2 + Files table row)
+- [x] (suggestion) M_COVR footprint source for the finer-scale clip is unspecified; `S57Dataset` exposes only a bbox — state the exporter reads M_COVR (OBJL 302) geometry directly — `plan.md:36` — **folded at `8aeb7a4`** (Approach step 3 "Footprint clip" bullet)
+- [x] (suggestion) scale→level constant `0.0003125` (0.3125 mm-at-scale) diverges from ADR-0010 D7's "≈0.5 mm-at-scale" (0.0005); confirm or document — `plan.md:37` — **folded at `8aeb7a4`** (adopted 0.0005 per ADR + operator guidance; documented that 0.3125 mm is the S52 display-pixel size, a distinct quantity)
+- [x] (suggestion) ADR table mixes project (uma ADR-0010 D7, ADR-0002 D2) and workspace (0008/0009/0018) ADRs under one unqualified namespace with number collisions; qualify the project ones — `plan.md:80` — **folded at `8aeb7a4`** ([uma]/[ws] tags added)
+- [x] (suggestion) cost-model gate sequencing noted in Context but not the Consequences table; getGrid() case 308 stays a no-op — add a consequence row for completeness — `plan.md:89` — **folded at `8aeb7a4`** (cost-model-gate row added to Consequences)
