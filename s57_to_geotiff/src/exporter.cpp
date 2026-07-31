@@ -535,7 +535,12 @@ std::vector<OGRGeometry *> readFootprints(GDALDataset & dataset)
 DatumFn buildDatum(const ExporterOptions & opts, std::ostream & log)
 {
   marine_vertical_datum::VDatumQueryFn vquery;
-  if (!opts.geoid_grid.empty()) {
+  // Enter the block when *either* grid flag is set, not just --geoid. Building the
+  // query with only one of the pair lets make_vdatum_query emit its own diagnostic
+  // for the missing grid (e.g. "geoid_grid is empty"); gating on --geoid alone
+  // silently ignored a lone --vdatum-dir, so every pixel fell through to no-data
+  // with no message.
+  if (!opts.geoid_grid.empty() || !opts.vdatum_dir.empty()) {
     marine_vertical_datum::VDatumConfig cfg;
     cfg.geoid_grid = opts.geoid_grid;
     cfg.vdatum_grid_dir = opts.vdatum_dir;
