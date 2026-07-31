@@ -477,6 +477,19 @@ bool exportCell(
   out->GetRasterBand(1)->SetDescription("depth (WGS84 ellipsoidal height, m, up-positive)");
   out->GetRasterBand(2)->SetDescription("sigma (1-sigma vertical uncertainty, m)");
 
+  // Close the GeoTIFF explicitly and check the close-time CPLErr. The final flush
+  // to disk happens on close, so a disk-full / I/O write failure surfaces only
+  // here; the default unique_ptr deleter would discard that error and the cell
+  // would be reported "exported" despite a truncated file. Matches the
+  // marine_tiled_raster_store tile_io.cpp precedent and openVector()'s own
+  // GDALClose deleter below. GDAL 3.7+ returns CPLErr from GDALClose; the
+  // workspace targets 3.8. The MEM work/mask datasets have no file backing, so
+  // their default-deleter close stays fine.
+  if (GDALClose(out.release()) != CE_None) {
+    error = "failed to flush/close " + out_path;
+    return false;
+  }
+
   if (stats) {
     stats->width = width;
     stats->height = height;
