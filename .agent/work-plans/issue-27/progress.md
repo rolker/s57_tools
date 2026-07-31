@@ -397,7 +397,7 @@ a fresh-context sub-agent:
 ### Findings
 - [x] (must-fix) Scale-0 malformed cell (M_COVR present but no readable DSPM_CSCL -> chartScale()==0) is kept in Pass A `cells` with scale 0; Pass B clip predicate `other.scale < cell.scale` is `0 < scale` -> true for every real cell, so its footprints NaN out valid depth pixels from every overlapping cell while it fails its own export via the existing `chart_scale > 0` guard — silent data loss, inconsistent with that guard. Fix: filter scale<=0 cells out of Pass A with a warning — `s57_to_geotiff/src/exporter.cpp:620`
 - [x] (suggestion) SOUNDG point exactly on the MaxX/MaxY extent edge with an exact-integer pixel ratio maps to col==width/row==height and is dropped; in the no-M_COVR fallback path the boundary-defining sounding can be silently lost — `s57_to_geotiff/src/exporter.cpp:347`
-- [ ] (suggestion) `forEachFeature` leaks the in-flight OGRFeature* if the callback throws (bounded single-feature leak per aborted cell on the OOM path runExport's try/catch handles); wrap in a scope guard — `s57_to_geotiff/src/exporter.cpp:73`
+- [x] (suggestion) `forEachFeature` leaks the in-flight OGRFeature* if the callback throws (bounded single-feature leak per aborted cell on the OOM path runExport's try/catch handles); wrap in a scope guard — `s57_to_geotiff/src/exporter.cpp:73`
 
 ### Governance & plan-drift
 No governance concerns: consequences map fully addressed (marine_charts header->link + GDAL export, SOUNDG/M_QUAL comments, README round-trip, cost-model gate documented out-of-scope); [uma]ADR-0010 D7 / ADR-0002 D2 and [ws]ADR-0008 compliant. Plan drift: matches Files-to-Change; all deviations documented in prior entries. No undisclosed drift.

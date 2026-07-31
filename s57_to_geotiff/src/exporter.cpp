@@ -71,8 +71,12 @@ void forEachFeature(GDALDataset & dataset, Fn && fn)
     layer->ResetReading();
     OGRFeature * feature = nullptr;
     while ((feature = layer->GetNextFeature()) != nullptr) {
+      // GetNextFeature transfers ownership to the caller; own it here so it is
+      // destroyed even if fn throws (e.g. a bad_alloc mid-cell) rather than
+      // leaking the in-flight feature.
+      std::unique_ptr<OGRFeature, void (*)(OGRFeature *)> owned(
+        feature, [](OGRFeature * f) {OGRFeature::DestroyFeature(f);});
       fn(feature);
-      OGRFeature::DestroyFeature(feature);
     }
   }
 }
