@@ -300,7 +300,17 @@ bool exportCell(
         // a single zone's sigma; splitting per-zone would need a polygon
         // intersection pass (left as future work).
         const int cz = zones.at((env.MinX + env.MaxX) / 2.0, (env.MinY + env.MaxY) / 2.0);
-        const double sigma = std::max(half_band, catzocSigma(cz, depth));
+        // Asymmetry vs SOUNDG: an area's half-band IS its stated uncertainty and
+        // can be legitimately small, so it is deliberately NOT floored at
+        // kMinSoundingSigma the way a discrete sounding is (that floor would
+        // inflate a genuinely narrow DEPARE band). The one exception is the
+        // degenerate DRVAL1==DRVAL2 area with no covering CATZOC zone, which
+        // would otherwise claim sigma exactly 0 (false certainty); floor only
+        // that case.
+        double sigma = std::max(half_band, catzocSigma(cz, depth));
+        if (sigma <= 0.0) {
+          sigma = kMinSoundingSigma;
+        }
 
         int bands[2] = {1, 2};
         double burn[2] = {depth, sigma};
