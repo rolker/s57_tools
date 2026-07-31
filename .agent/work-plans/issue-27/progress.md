@@ -33,3 +33,19 @@ issue: 27
 ### Open questions
 - [ ] Thread-safety scope for `make_vdatum_query()`: one factory call per cell or per corpus? (per-thread in v1 single-threaded loop = one call total)
 - [ ] Output file naming: confirm `{S57Dataset::label()}.tif` is unambiguous across the New Castle ENC corpus before committing to it.
+
+## Plan Review
+**Status**: complete
+**When**: 2026-07-31 15:30 +00:00
+**By**: Claude Code Agent (Claude Opus)  <!-- independent: shares agent name with the Sonnet plan author but is a distinct model in a separate dispatched context; not an author self-review -->
+
+**Plan**: `.agent/work-plans/issue-27/plan.md` at `07aa8c3`
+**PR**: PR-less (reviewed from local plan + progress.md; `gh` unauthenticated in this context)
+**Verdict**: approve-with-suggestions
+
+### Findings
+- [ ] (must-fix) `s57_to_geotiff/package.xml` omits `marine_autonomy`, which provides `gggs::Level::fromCellSize`; `marine_vertical_datum` does not pull it in transitively — build blocker — `plan.md:29`
+- [ ] (suggestion) M_COVR footprint source for the finer-scale clip is unspecified; `S57Dataset` exposes only a bbox — state the exporter reads M_COVR (OBJL 302) geometry directly — `plan.md:36`
+- [ ] (suggestion) scale→level constant `0.0003125` (0.3125 mm-at-scale) diverges from ADR-0010 D7's "≈0.5 mm-at-scale" (0.0005); confirm or document — `plan.md:37`
+- [ ] (suggestion) ADR table mixes project (uma ADR-0010 D7, ADR-0002 D2) and workspace (0008/0009/0018) ADRs under one unqualified namespace with number collisions; qualify the project ones — `plan.md:80`
+- [ ] (suggestion) cost-model gate sequencing noted in Context but not the Consequences table; getGrid() case 308 stays a no-op — add a consequence row for completeness — `plan.md:89`
