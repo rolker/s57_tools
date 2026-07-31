@@ -37,6 +37,7 @@ struct CellExport
 {
   int width = 0;
   int height = 0;
+  int level = 0;      // GGGS level chosen from the chart scale (pass to import_geotiff --level)
   long written = 0;   // pixels with a finite depth written to band 1
 };
 

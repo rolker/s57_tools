@@ -83,7 +83,9 @@ s57_to_geotiff ~/data/world/charts/ENC_ROOT /tmp/chart_export \
     --vdatum-dir /opt/vdatum
 
 # 2. Import a cell into the store's chart layer at the level the exporter chose.
-#    (Inspect the level with gdalinfo / the export log; pass it to --level.)
+#    The export log prints the GGGS level per cell, e.g.
+#      exported /tmp/chart_export/US5NH02M.tif (... GGGS level 12 -> import_geotiff --level 12)
+#    Pass that level so the import matches the source resolution.
 import_geotiff ~/data/world/store chart /tmp/chart_export/US5NH02M.tif --level 12
 
 # 3. Query the store and confirm depths/σ round-trip to the charted values.

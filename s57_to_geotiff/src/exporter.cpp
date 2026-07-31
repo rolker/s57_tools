@@ -396,6 +396,7 @@ bool exportCell(
   if (stats) {
     stats->width = width;
     stats->height = height;
+    stats->level = level.level();
     stats->written = written;
   }
   return true;
@@ -525,6 +526,7 @@ int runExport(const ExporterOptions & opts, std::ostream & log)
     if (exportCell(*gdal, cell.scale, datum, clip, out_path, error, &stats)) {
       log << "exported " << out_path << " (" << stats.width << "x" << stats.height
           << ", " << stats.written << " cells, scale 1:" << static_cast<long>(cell.scale)
+          << ", GGGS level " << stats.level << " -> import_geotiff --level " << stats.level
           << ")\n";
       ++exported;
     } else {
