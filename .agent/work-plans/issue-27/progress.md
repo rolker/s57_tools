@@ -49,3 +49,86 @@ issue: 27
 - [x] (suggestion) scale→level constant `0.0003125` (0.3125 mm-at-scale) diverges from ADR-0010 D7's "≈0.5 mm-at-scale" (0.0005); confirm or document — `plan.md:37` — **folded at `8aeb7a4`** (adopted 0.0005 per ADR + operator guidance; documented that 0.3125 mm is the S52 display-pixel size, a distinct quantity)
 - [x] (suggestion) ADR table mixes project (uma ADR-0010 D7, ADR-0002 D2) and workspace (0008/0009/0018) ADRs under one unqualified namespace with number collisions; qualify the project ones — `plan.md:80` — **folded at `8aeb7a4`** ([uma]/[ws] tags added)
 - [x] (suggestion) cost-model gate sequencing noted in Context but not the Consequences table; getGrid() case 308 stays a no-op — add a consequence row for completeness — `plan.md:89` — **folded at `8aeb7a4`** (cost-model-gate row added to Consequences)
+
+## Implementation
+**Status**: complete
+**When**: 2026-07-31 16:05 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**Branch**: feature/issue-27
+**Plan**: `.agent/work-plans/issue-27/plan.md` (re-synced this branch; step-0 fold at `8aeb7a4`, open-question/overload re-sync at `18e9793`)
+
+### Step 0 — Plan Review findings folded
+All five approve-with-suggestions findings folded into plan.md at `8aeb7a4`
+and checked off (annotations above, committed `510e991`). Constant reconciled to
+`0.0005` (0.5 mm-at-scale per ADR-0010 D7); documented that
+`recommendedResolution()`'s 0.3125 mm is the S52 display-pixel size, a distinct
+quantity, so it is not used for level selection.
+
+### Commits (Step 1)
+- `aadf134` feat(marine_charts): `readCatzocZones()` M_QUAL reader (+ `GDALDataset*`
+  overload; case 129/308 no-ops annotated to point at the new consumer)
+- `6122f44` feat(s57_to_geotiff): the exporter package (CLI + `exporter.{hpp,cpp}`,
+  no store dependency)
+- `1980865` test(s57_to_geotiff): golden-file tests on a synthetic in-memory ENC fixture
+- `73d8e33` docs(s57_to_geotiff): README (export rules + round-trip demo)
+- `9e45149` fix(s57_to_geotiff): local-CI build/lint cleanups
+- `04554f7` feat(s57_to_geotiff): report the chosen GGGS level per cell
+- `18e9793` plan: resolve open questions + note the `readCatzocZones` overload
+
+### What was built
+- **CATZOC reader in `marine_charts`** (`readCatzocZones`): reads M_QUAL (OBJL 308)
+  zones as WKB + CATZOC code; OGR stays out of the public header.
+- **`s57_to_geotiff` package**: per-cell export loop — DEPARE/DRGARE band-midpoint
+  depth + half-band σ floor (via GDAL rasterize), SOUNDG points (Z depth, override
+  the area pixel), CATZOC→σ (`max(half-band, CATZOC)`), per-pixel chart-datum→
+  ellipsoid via `marine_vertical_datum`'s full precedence chain, scale→GGGS level
+  via `gggs::Level::fromCellSize(scale × 0.0005)`, largest-scale-governs clip by
+  the union of finer cells' M_COVR footprints. Output: WGS84 two-band GeoTIFF
+  (band1 ellipsoidal height, band2 σ, NaN no-data) in `import_geotiff`'s convention.
+
+### Build & test results (actual)
+Built in-container with `colcon build --packages-up-to s57_to_geotiff`
+(ROS 2 Jazzy; GDAL 3.8.4, PROJ 9.4.0, yaml-cpp present). Dependencies
+`marine_autonomy`, `marine_charts`, `marine_vertical_datum` all built.
+- **s57_to_geotiff**: builds clean (no warnings/errors). `colcon test` →
+  **16 tests, 0 errors, 0 failures, 4 skipped**; the gtest suite is
+  **6/6 passing** (ZOC-table mapping, band midpoint + half-band σ floor,
+  CATZOC-varied σ, sounding-overrides-area, level-selection-from-scale,
+  finer-footprint clip). cppcheck + lint_cmake + xmllint pass.
+- **marine_charts**: `colcon test` → 18 tests, 0 failures (13 skipped) — no regression.
+- **CLI smoke test**: `--help` prints usage (exit 1, matching `import_geotiff`);
+  an empty corpus reports "no charts found" and exits 0.
+
+### Deviations from plan (plan re-synced this branch)
+- **scale→level constant** `0.0003125`→`0.0005` (Plan Review finding #3; folded
+  at `8aeb7a4`).
+- **`readCatzocZones` overloads**: added a `GDALDataset*` overload beyond the
+  planned path-only signature (lets the exporter/tests run on an already-open
+  dataset). Additive; noted in plan step 1 at `18e9793`.
+- **package structure**: `exporter.cpp` compiled into a small static
+  `s57_to_geotiff_core` lib so the gtest links the core directly; `main.cpp` is a
+  thin CLI over it. Consistent with the plan's exporter/main split.
+- **output naming**: strip the `.000` extension (`baseLabel`) rather than using
+  the raw `label()` — resolves plan open-question #2 (cell names are unique).
+- **level reporting**: added the chosen GGGS level to the per-cell log line and
+  `CellExport` so the operator can pass `import_geotiff --level N` for the
+  round-trip (not in the original plan; makes the acceptance path usable).
+
+### Follow-up notes (outside s57_tools — recorded, NOT edited here)
+- **`import_geotiff` CLI does not accept the `chart` layer name.**
+  `SourceLayer::Chart` exists (`bathy_cell.hpp`, uma#275) but
+  `import_geotiff_main.cpp`'s `layerFromName()` maps only `survey|reference`.
+  Teaching it `chart` (+ the `chart_staging_writable` / `replaceChartLayer`
+  staging swap ADR-0010 D7 mandates) is a `unh_marine_autonomy` follow-up. Until
+  then the README documents exercising the round-trip against `reference`
+  (identical two-band ellipsoidal convention + multi-level import). This does not
+  block this issue's exporter deliverable.
+
+### Not done here (per resolved constraints, do not re-litigate)
+- No real-NOAA-cell round-trip was executed (no ENC corpus or VDatum/geoid grids
+  in-container); the round-trip is **documented** in the README as the acceptance
+  path, and the golden-file tests cover the band/σ/level/clip logic on a synthetic
+  fixture. The uma#276 cost-model gate is a live-costmap precondition, not a
+  blocker for this offline bench (per Issue Review resolution).
+- No push / PR / GitHub writes (host publishes later).
