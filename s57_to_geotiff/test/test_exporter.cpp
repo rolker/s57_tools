@@ -8,7 +8,7 @@
 #include "gdal_priv.h"
 #include "ogrsf_frmts.h"
 
-#include "marine_autonomy/gggs/level.h"
+#include "marine_autonomy/gggs.h"
 #include "exporter.hpp"
 
 namespace
@@ -45,7 +45,7 @@ public:
     f.SetField("CATCOV", 1);
     auto poly = makeRect(minx, miny, maxx, maxy);
     f.SetGeometry(poly.get());
-    layer_->CreateFeature(&f);
+    EXPECT_EQ(layer_->CreateFeature(&f), OGRERR_NONE);
   }
 
   // A DEPARE depth area with a [drval1, drval2] band.
@@ -58,7 +58,7 @@ public:
     f.SetField("DRVAL2", drval2);
     auto poly = makeRect(minx, miny, maxx, maxy);
     f.SetGeometry(poly.get());
-    layer_->CreateFeature(&f);
+    EXPECT_EQ(layer_->CreateFeature(&f), OGRERR_NONE);
   }
 
   // An M_QUAL quality zone carrying a CATZOC code.
@@ -69,7 +69,7 @@ public:
     f.SetField("CATZOC", catzoc);
     auto poly = makeRect(minx, miny, maxx, maxy);
     f.SetGeometry(poly.get());
-    layer_->CreateFeature(&f);
+    EXPECT_EQ(layer_->CreateFeature(&f), OGRERR_NONE);
   }
 
   // A single sounding (SOUNDG) point with a positive-down depth as its Z.
@@ -79,7 +79,7 @@ public:
     f.SetField("OBJL", 129);
     OGRPoint p(lon, lat, depth);
     f.SetGeometry(&p);
-    layer_->CreateFeature(&f);
+    EXPECT_EQ(layer_->CreateFeature(&f), OGRERR_NONE);
   }
 
   static std::unique_ptr<OGRPolygon> makeRect(
@@ -127,12 +127,13 @@ double sample(const std::string & path, int band, double lon, double lat)
     static_cast<GDALDataset *>(GDALOpenEx(path.c_str(), GDAL_OF_RASTER, nullptr, nullptr, nullptr)));
   EXPECT_TRUE(ds) << "cannot reopen " << path;
   double gt[6];
-  ds->GetGeoTransform(gt);
+  EXPECT_EQ(ds->GetGeoTransform(gt), CE_None);
   int col = static_cast<int>((lon - gt[0]) / gt[1]);
   int row = static_cast<int>((lat - gt[3]) / gt[5]);
   double value = std::nan("");
-  ds->GetRasterBand(band)->RasterIO(
-    GF_Read, col, row, 1, 1, &value, 1, 1, GDT_Float64, 0, 0);
+  EXPECT_EQ(
+    ds->GetRasterBand(band)->RasterIO(
+      GF_Read, col, row, 1, 1, &value, 1, 1, GDT_Float64, 0, 0), CE_None);
   return value;
 }
 

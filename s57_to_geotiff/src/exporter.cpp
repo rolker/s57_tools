@@ -12,7 +12,7 @@
 #include "gdal_priv.h"
 #include "ogrsf_frmts.h"
 
-#include "marine_autonomy/gggs/level.h"
+#include "marine_autonomy/gggs.h"
 #include "marine_charts/s57_catalog.h"
 #include "marine_charts/s57_dataset.h"
 #include "marine_vertical_datum/datum_config.hpp"
@@ -280,7 +280,7 @@ bool exportCell(
         } else if (type == wkbMultiPoint) {
           const OGRMultiPoint * mp = geometry->toMultiPoint();
           for (int gi = 0; gi < mp->getNumGeometries(); ++gi) {
-            const OGRPoint * p = mp->getGeometryRef(gi)->toPoint();
+            const OGRPoint * p = mp->getGeometryRef(gi);
             add(p->getX(), p->getY(), p->getZ());
           }
         }
@@ -330,8 +330,12 @@ bool exportCell(
         GDALDataset::ToHandle(mask.get()), 1, mask_band, static_cast<int>(handles.size()),
         handles.data(), nullptr, nullptr, burns.data(), nullptr, nullptr, nullptr);
       std::vector<unsigned char> covered(n);
-      mask->GetRasterBand(1)->RasterIO(
-        GF_Read, 0, 0, width, height, covered.data(), width, height, GDT_Byte, 0, 0);
+      if (mask->GetRasterBand(1)->RasterIO(
+          GF_Read, 0, 0, width, height, covered.data(), width, height, GDT_Byte, 0, 0) != CE_None)
+      {
+        error = "failed to read clip mask";
+        return false;
+      }
       for (std::size_t i = 0; i < n; ++i) {
         if (covered[i]) {
           depth_bd[i] = kNaN;
@@ -376,10 +380,14 @@ bool exportCell(
   }
   out->SetGeoTransform(gt);
   out->SetProjection(wkt.c_str());
-  out->GetRasterBand(1)->RasterIO(
-    GF_Write, 0, 0, width, height, out_depth.data(), width, height, GDT_Float64, 0, 0);
-  out->GetRasterBand(2)->RasterIO(
-    GF_Write, 0, 0, width, height, out_sigma.data(), width, height, GDT_Float64, 0, 0);
+  if (out->GetRasterBand(1)->RasterIO(
+      GF_Write, 0, 0, width, height, out_depth.data(), width, height, GDT_Float64, 0, 0) != CE_None ||
+    out->GetRasterBand(2)->RasterIO(
+      GF_Write, 0, 0, width, height, out_sigma.data(), width, height, GDT_Float64, 0, 0) != CE_None)
+  {
+    error = "failed to write raster bands to " + out_path;
+    return false;
+  }
   out->GetRasterBand(1)->SetNoDataValue(kNaN);
   out->GetRasterBand(2)->SetNoDataValue(kNaN);
   out->GetRasterBand(1)->SetDescription("depth (WGS84 ellipsoidal height, m, up-positive)");
