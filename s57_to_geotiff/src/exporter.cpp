@@ -222,6 +222,12 @@ bool exportCell(
   // --- Raster geometry from the GGGS level for this scale --------------------
   const auto level = gggs::Level::fromCellSize(
     static_cast<float>(chart_scale * kResolvableGroundFraction));
+  // Square-degree geotransform: the same angular span is used for both the lon
+  // and lat pixel size. This matches the GGGS grid for |lat| < 72 deg, where
+  // GGGS keeps its longitude scale factor at 1. Above 72 deg GGGS steps longitude
+  // 3x/9x, so a polar cell would be E-W oversampled here (no data loss; import
+  // resamples). ENC bathymetry corpora are mid-latitude, so this stays exact in
+  // practice. See the README "square-degree, <72 deg lat" note.
   const double pixel = level.cellAngularSpan();          // degrees
   if (!(pixel > 0.0)) {
     error = "non-positive pixel size from GGGS level";

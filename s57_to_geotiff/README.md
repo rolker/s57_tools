@@ -51,6 +51,12 @@ ellipsoidal height, band 2 = 1-σ, non-finite = no-data), so no `--depth-scale` 
   strictly-finer cells' `M_COVR` coverage footprints (read directly from the
   OGR `M_COVR` geometry), so coarse cells are never generated where finer
   coverage exists.
+- **Square-degree raster, `<72°` lat**: the output geotransform uses the same
+  GGGS angular span for the lon and lat pixel size. This is exact for `|lat|`
+  below 72°, where GGGS holds its longitude scale factor at 1 — i.e. all
+  mid-latitude waters, which is where ENC bathymetry lives. Above 72° GGGS steps
+  longitude 3×/9× per level, so a polar cell would be E-W oversampled by this
+  exporter (not data loss — `import_geotiff` resamples onto the store grid).
 
 ## Usage
 
