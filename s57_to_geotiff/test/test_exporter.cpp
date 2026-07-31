@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "cpl_conv.h"
@@ -23,13 +24,23 @@ public:
   {
     GDALAllRegister();
     OGRRegisterAll();
+    // Throw (not ASSERT_NE) on a failed GDAL handle: gtest's ASSERT_* expands to a
+    // value-returning `return`, which is illegal in a constructor. A throw here
+    // still fails the test with a clear message via gtest's exception handling, and
+    // it prevents the later null-deref that the unchecked handles would cause.
     GDALDriver * driver = GetGDALDriverManager()->GetDriverByName("Memory");
-    ASSERT_NE(driver, nullptr) << "GDAL Memory driver unavailable";
+    if (!driver) {
+      throw std::runtime_error("GDAL Memory driver unavailable");
+    }
     dataset_.reset(driver->Create("synthetic", 0, 0, 0, GDT_Unknown, nullptr));
-    ASSERT_NE(dataset_, nullptr) << "failed to create the synthetic MEM dataset";
+    if (!dataset_) {
+      throw std::runtime_error("failed to create the synthetic MEM dataset");
+    }
     srs_.SetWellKnownGeogCS("WGS84");
     layer_ = dataset_->CreateLayer("features", &srs_, wkbUnknown, nullptr);
-    ASSERT_NE(layer_, nullptr) << "failed to create the synthetic feature layer";
+    if (!layer_) {
+      throw std::runtime_error("failed to create the synthetic feature layer");
+    }
     addField("OBJL", OFTInteger);
     addField("DRVAL1", OFTReal);
     addField("DRVAL2", OFTReal);
