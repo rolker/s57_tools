@@ -132,3 +132,30 @@ Built in-container with `colcon build --packages-up-to s57_to_geotiff`
   fixture. The uma#276 cost-model gate is a live-costmap precondition, not a
   blocker for this offline bench (per Issue Review resolution).
 - No push / PR / GitHub writes (host publishes later).
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-07-31 16:15 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: changes-requested
+
+**Branch**: feature/issue-27 at `54351a3`
+**Mode**: pre-push
+**Depth**: Deep (reason: 1512 lines > 200 and 11 files > 10; new C++/GDAL package + cross-package marine_charts edit)
+**Must-fix**: 1 | **Suggestions**: 9
+**Round**: 1 | **Ship**: continue — one mechanical input-validation guard; rest are suggestions, convergence expected next round
+**Static analysis**: run (cppcheck 2.13, xmllint) — clean on new code (shadowVariable hits are pre-existing getGrid lines, outside the diff)
+**Claude Adversarial**: 2 passes (Lens A + Lens B). **Copilot**: off (default). **Local**: skipped (Ollama not reachable).
+
+### Findings
+- [ ] (must-fix) Validate `chart_scale > 0` and cap raster width/height before allocating — a scale==0 malformed cell reaches `gggs::Level::fromCellSize(0.0f)` where `static_cast<int>(ceil(log2(+inf)))` is UB, and `ceil(extent/pixel)` is unbounded — `s57_to_geotiff/src/exporter.cpp:198`
+- [ ] (suggestion) Null-check MEM `work`/`mask` `Create()` returns (GTiff `out` is checked, MEM is not) — `s57_to_geotiff/src/exporter.cpp:224`
+- [ ] (suggestion) SOUNDG with no M_QUAL gets σ=0.0 (no floor); band2=0 can read as false certainty — consider a documented minimum σ — `s57_to_geotiff/src/exporter.cpp:274`
+- [ ] (suggestion) DEPARE/DRGARE CATZOC sampled at bbox centroid, burned across whole polygon; note the zone-straddling limitation — `s57_to_geotiff/src/exporter.cpp:257`
+- [ ] (suggestion) `runExport`'s documented "-1 on fatal setup error" never happens; setup failures (ignored `create_directories` ec, unavailable VDatum) exit 0 — wire a fatal path or drop the contract — `s57_to_geotiff/src/exporter.cpp:477`
+- [ ] (suggestion) All-no-data cell (written==0) still writes a GeoTIFF reported as "exported" — skip/warn — `s57_to_geotiff/src/exporter.cpp:350`
+- [ ] (suggestion) `std::stod` for `--lake-datum` is unguarded — bad input aborts instead of printing usage — `s57_to_geotiff/src/main.cpp:55`
+- [ ] (suggestion) Equal-scale overlapping cells don't clip each other (strict `<`) — confirm import dedups or document — `s57_to_geotiff/src/exporter.cpp:511`
+- [ ] (suggestion) `tf2`/`tf2_geometry_msgs` declared+linked but no direct use found (geographic_msgs is a genuine transitive dep) — confirm or prune — `s57_to_geotiff/CMakeLists.txt:17`
+- [ ] (suggestion) cppcheck: `for (Cell & cell : cells)` can be `const Cell &` — `s57_to_geotiff/src/exporter.cpp:538`
+- [ ] (note) Plan-drift: plan step 5 says SOUNDG depth = VALSOU, code uses geometry Z (getZ) — actually more correct for S-57; add to deviations list — `s57_to_geotiff/src/exporter.cpp:279`
