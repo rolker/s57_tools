@@ -148,14 +148,65 @@ Built in-container with `colcon build --packages-up-to s57_to_geotiff`
 **Claude Adversarial**: 2 passes (Lens A + Lens B). **Copilot**: off (default). **Local**: skipped (Ollama not reachable).
 
 ### Findings
-- [ ] (must-fix) Validate `chart_scale > 0` and cap raster width/height before allocating — a scale==0 malformed cell reaches `gggs::Level::fromCellSize(0.0f)` where `static_cast<int>(ceil(log2(+inf)))` is UB, and `ceil(extent/pixel)` is unbounded — `s57_to_geotiff/src/exporter.cpp:198`
-- [ ] (suggestion) Null-check MEM `work`/`mask` `Create()` returns (GTiff `out` is checked, MEM is not) — `s57_to_geotiff/src/exporter.cpp:224`
-- [ ] (suggestion) SOUNDG with no M_QUAL gets σ=0.0 (no floor); band2=0 can read as false certainty — consider a documented minimum σ — `s57_to_geotiff/src/exporter.cpp:274`
-- [ ] (suggestion) DEPARE/DRGARE CATZOC sampled at bbox centroid, burned across whole polygon; note the zone-straddling limitation — `s57_to_geotiff/src/exporter.cpp:257`
-- [ ] (suggestion) `runExport`'s documented "-1 on fatal setup error" never happens; setup failures (ignored `create_directories` ec, unavailable VDatum) exit 0 — wire a fatal path or drop the contract — `s57_to_geotiff/src/exporter.cpp:477`
-- [ ] (suggestion) All-no-data cell (written==0) still writes a GeoTIFF reported as "exported" — skip/warn — `s57_to_geotiff/src/exporter.cpp:350`
-- [ ] (suggestion) `std::stod` for `--lake-datum` is unguarded — bad input aborts instead of printing usage — `s57_to_geotiff/src/main.cpp:55`
-- [ ] (suggestion) Equal-scale overlapping cells don't clip each other (strict `<`) — confirm import dedups or document — `s57_to_geotiff/src/exporter.cpp:511`
-- [ ] (suggestion) `tf2`/`tf2_geometry_msgs` declared+linked but no direct use found (geographic_msgs is a genuine transitive dep) — confirm or prune — `s57_to_geotiff/CMakeLists.txt:17`
-- [ ] (suggestion) cppcheck: `for (Cell & cell : cells)` can be `const Cell &` — `s57_to_geotiff/src/exporter.cpp:538`
-- [ ] (note) Plan-drift: plan step 5 says SOUNDG depth = VALSOU, code uses geometry Z (getZ) — actually more correct for S-57; add to deviations list — `s57_to_geotiff/src/exporter.cpp:279`
+- [x] (must-fix) Validate `chart_scale > 0` and cap raster width/height before allocating — a scale==0 malformed cell reaches `gggs::Level::fromCellSize(0.0f)` where `static_cast<int>(ceil(log2(+inf)))` is UB, and `ceil(extent/pixel)` is unbounded — `s57_to_geotiff/src/exporter.cpp:198` — **fixed at `fc19042`** (early `chart_scale > 0` guard; dims computed in double and capped at `kMaxRasterDim` before the int narrowing)
+- [x] (suggestion) Null-check MEM `work`/`mask` `Create()` returns (GTiff `out` is checked, MEM is not) — `s57_to_geotiff/src/exporter.cpp:224` — **fixed at `fc19042`** (both `Create()` returns null-checked)
+- [x] (suggestion) SOUNDG with no M_QUAL gets σ=0.0 (no floor); band2=0 can read as false certainty — consider a documented minimum σ — `s57_to_geotiff/src/exporter.cpp:274` — **fixed at `fc19042`** (`kMinSoundingSigma = 0.5 m`, the CATZOC A1 base, floors every sounding's σ)
+- [x] (suggestion) DEPARE/DRGARE CATZOC sampled at bbox centroid, burned across whole polygon; note the zone-straddling limitation — `s57_to_geotiff/src/exporter.cpp:257` — **fixed at `fc19042`** (documented in-code)
+- [x] (suggestion) `runExport`'s documented "-1 on fatal setup error" never happens; setup failures (ignored `create_directories` ec, unavailable VDatum) exit 0 — wire a fatal path or drop the contract — `s57_to_geotiff/src/exporter.cpp:477` — **fixed at `fc19042`** (create_directories failure now returns -1; VDatum-unavailable stays a per-pixel no-data by design, not a fatal setup error)
+- [x] (suggestion) All-no-data cell (written==0) still writes a GeoTIFF reported as "exported" — skip/warn — `s57_to_geotiff/src/exporter.cpp:350` — **fixed at `fc19042`** (written==0 now logs a warning and is not counted as exported)
+- [x] (suggestion) `std::stod` for `--lake-datum` is unguarded — bad input aborts instead of printing usage — `s57_to_geotiff/src/main.cpp:55` — **fixed at `62966ec`** (try/catch → usage())
+- [x] (suggestion) Equal-scale overlapping cells don't clip each other (strict `<`) — confirm import dedups or document — `s57_to_geotiff/src/exporter.cpp:511` — **fixed at `fc19042`** (documented: same-scale bands don't overlap in a standard ENC corpus; residual overlap left for import_geotiff to dedup)
+- [x] (suggestion) `tf2`/`tf2_geometry_msgs` declared+linked but no direct use found (geographic_msgs is a genuine transitive dep) — confirm or prune — `s57_to_geotiff/CMakeLists.txt:17` — **fixed at `255b81d`** (pruned; both come transitively via marine_autonomy — verified build + 6/6 gtest still pass)
+- [x] (suggestion) cppcheck: `for (Cell & cell : cells)` can be `const Cell &` — `s57_to_geotiff/src/exporter.cpp:538` — **fixed at `fc19042`** (const-qualified)
+- [x] (note) Plan-drift: plan step 5 says SOUNDG depth = VALSOU, code uses geometry Z (getZ) — actually more correct for S-57; add to deviations list — `s57_to_geotiff/src/exporter.cpp:279` — **fixed at `fc19042`** (in-code comment records the deviation; also in the deviations list below)
+
+## Implementation
+**Status**: complete
+**When**: 2026-07-31 16:27 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**Branch**: feature/issue-27 at `255b81d`
+**Addressed**: `## Local Review (Pre-Push)` (changes-requested, 2026-07-31 16:15 +00:00, branch at `54351a3`) — all 11 open findings (1 must-fix, 9 suggestions, 1 note)
+**Commits**: `fc19042` (exporter.cpp), `62966ec` (main.cpp --lake-datum), `255b81d` (tf2 prune)
+
+### Actions
+- [x] (must-fix) chart_scale>0 guard + raster-dim cap before allocation — `s57_to_geotiff/src/exporter.cpp` — `fc19042`
+- [x] Null-check MEM `work`/`mask` `Create()` returns — `s57_to_geotiff/src/exporter.cpp` — `fc19042`
+- [x] Sounding σ floored at `kMinSoundingSigma` (0.5 m, CATZOC A1 base) — `s57_to_geotiff/src/exporter.cpp` — `fc19042`
+- [x] Documented CATZOC bbox-centroid / zone-straddling limitation — `s57_to_geotiff/src/exporter.cpp` — `fc19042`
+- [x] `runExport` returns -1 on `create_directories` failure (fatal-setup contract now real) — `s57_to_geotiff/src/exporter.cpp` — `fc19042`
+- [x] All-no-data cell (written==0) warns instead of "exported" — `s57_to_geotiff/src/exporter.cpp` — `fc19042`
+- [x] `--lake-datum` `std::stod` wrapped in try/catch → usage() — `s57_to_geotiff/src/main.cpp` — `62966ec`
+- [x] Documented strict equal-scale non-clipping (import_geotiff dedups) — `s57_to_geotiff/src/exporter.cpp` — `fc19042`
+- [x] Pruned unused `tf2`/`tf2_geometry_msgs` deps — `s57_to_geotiff/CMakeLists.txt`, `package.xml` — `255b81d`
+- [x] const-qualified footprint-release loop (cppcheck) — `s57_to_geotiff/src/exporter.cpp` — `fc19042`
+- [x] (note) Documented SOUNDG depth = geometry Z (not VALSOU) plan-drift — `s57_to_geotiff/src/exporter.cpp` — `fc19042`
+
+### Deviations / decisions
+- **SOUNDG depth source**: code reads the point geometry's Z ordinate, not a
+  VALSOU attribute as plan step 5 worded it. Geometry Z is the correct S-57
+  encoding for soundings; recorded here as the resolution of the plan-drift note.
+- **VDatum-unavailable is not a fatal setup error**: the fatal path wired for
+  the "-1" contract covers only `create_directories` failure. An unavailable
+  VDatum query is intentionally a per-pixel no-data outcome (documented in
+  `buildDatum`), not a run-fatal condition, so it stays a warning.
+- **tf2 prune confirmed by build**: `colcon build --packages-select s57_to_geotiff`
+  succeeds and the gtest suite stays 6/6 without the explicit tf2/tf2_geometry_msgs
+  find_package/link/depend entries (they resolve transitively via marine_autonomy).
+
+### Build & test (actual, post-fix)
+`./build.sh s57_to_geotiff` → clean. `./test.sh s57_to_geotiff` → 0 errors,
+0 failures; `test_exporter.gtest.xml` shows **6/6 gtest cases passing**
+(ZOC mapping, band midpoint + half-band σ, CATZOC-varied σ, sounding-overrides-area,
+level-selection, finer-footprint clip). No regressions from the σ-floor change
+(the sole sounding test uses CATZOC A1 → σ 0.55 > the 0.5 floor).
+
+### No push / PR
+Local commits only; host publishes. No deferred findings — every open item was
+actioned with a real commit.
+
+### Next step
+Lifecycle: **Implementation** → **review-code** (re-review the fixes). Hand off to
+a fresh-context sub-agent:
+
+    .agent/scripts/dispatch_subagent.sh --mode in-process --issue 27 --skill review-code
