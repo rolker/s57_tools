@@ -62,6 +62,12 @@ int main(int argc, char ** argv)
       }
     } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
       usage();
+    } else if (argv[i][0] == '-') {
+      // Reject an unrecognized dash-prefixed token as a mistyped flag before the
+      // positional branch; otherwise `s57_to_geotiff --badflag out` would run with
+      // enc_root="--badflag" and exit 0 with "no charts found".
+      std::cerr << "error: unknown option '" << argv[i] << "'\n";
+      usage();
     } else if (n_positional < 2) {
       positional[n_positional++] = argv[i];
     } else {
