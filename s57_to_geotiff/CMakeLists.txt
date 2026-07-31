@@ -14,8 +14,6 @@ find_package(geographic_msgs REQUIRED)
 find_package(marine_autonomy REQUIRED)      # header-only gggs::Level::fromCellSize
 find_package(marine_charts REQUIRED)
 find_package(marine_vertical_datum REQUIRED)
-find_package(tf2 REQUIRED)
-find_package(tf2_geometry_msgs REQUIRED)
 
 # Core export logic, split out so the test can link it.
 add_library(${PROJECT_NAME}_core STATIC
@@ -30,8 +28,6 @@ target_link_libraries(${PROJECT_NAME}_core PUBLIC
   marine_charts::marine_charts
   marine_vertical_datum::marine_vertical_datum
   ${geographic_msgs_TARGETS}
-  ${tf2_geometry_msgs_TARGETS}
-  tf2::tf2
 )
 
 add_executable(${PROJECT_NAME} src/main.cpp)
