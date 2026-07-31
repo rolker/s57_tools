@@ -68,7 +68,9 @@ struct ExporterOptions
 
 // Discover every cell under opts.enc_root, build the datum query once, compute
 // each cell's finer-scale clip, and export it. Progress and warnings go to
-// `log`. Returns the number of cells written, or -1 on a fatal setup error.
+// `log`. Returns the number of cells written; 0 for a genuinely empty corpus
+// (no charts found); or -1 on a fatal setup error, or when a non-empty corpus
+// produced no output at all (every cell failed or was all no-data).
 int runExport(const ExporterOptions & opts, std::ostream & log);
 
 }  // namespace s57_to_geotiff

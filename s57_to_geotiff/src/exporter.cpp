@@ -596,6 +596,15 @@ int runExport(const ExporterOptions & opts, std::ostream & log)
   }
 
   log << "exported " << exported << " of " << cells.size() << " cell(s)\n";
+
+  // A non-empty corpus that produced nothing (every cell failed or was all
+  // no-data) is a failure, not a silent success: signal it so the CLI exits
+  // nonzero and a caller can tell it apart from a genuinely empty corpus (which
+  // returns 0 above). -1 already means "no output"; reuse it here.
+  if (!cells.empty() && exported == 0) {
+    log << "error: no cells exported from a non-empty corpus\n";
+    return -1;
+  }
   return exported;
 }
 
