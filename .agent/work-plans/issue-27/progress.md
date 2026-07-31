@@ -315,3 +315,29 @@ No governance concerns: consequences map fully addressed (marine_charts header�
 ### Next step
 Lifecycle: **Local Review (approved)** → push / open PR → **triage-reviews**. The three
 suggestions are non-blocking (apply now or track); no must-fix gates the push.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-07-31 14:15 -04:00
+**By**: Claude Code Agent (Claude Opus)
+
+**PR**: #29 at `18698a8`
+**Sources**: 3 (Copilot R1 @ `18698a8`, Local Review (Pre-Push) R3 @ `1953919` — same code, `18698a8` is the progress-only commit on top, CI rollup)
+**Cross-source confirmations**: 1
+**CI**: all-pass (`build-and-test` success, `copilot-pull-request-reviewer` success)
+
+### Findings
+- [ ] (cross-confirmed, must-fix) Output GeoTIFF `out` is destroyed by `unique_ptr`'s default deleter, so the close-time flush's `CPLErr` is discarded and `exportCell` returns `true` — a disk-full / I/O failure on the final GTiff write is silently swallowed and the cell is still counted "exported". Not the leak/UB that round 3's Lens B claimed (correctly rejected: `GDALDataset` has a public virtual dtor that flushes) — the defect is the *unreported* error. In-workspace precedent documents exactly this for GTiff writes (`marine_tiled_raster_store/src/tile_io.cpp:177-186`, checks `GDALClose(ds) != CE_None`), and this very file already uses `GDALClose` in a custom deleter at `exporter.cpp:497` — internal inconsistency. Fix: close `out` explicitly and check the `CPLErr` (GDAL 3.7+; workspace targets 3.8), failing the cell on error. MEM `work`/`mask` (266, 385) stay idiom-only — no file backing, nothing to flush — `s57_to_geotiff/src/exporter.cpp:459`
+- [ ] (must-fix, Copilot) `buildDatum()` builds the VDatum query only when `--geoid` is set, so `--vdatum-dir` alone is silently ignored: `make_vdatum_query` never runs, its "geoid_grid is empty" diag never fires, and every pixel falls through to no-data with no message. The reverse (`--geoid` alone) *is* diagnosed by the library. Usage text advertises the two flags independently. Fix: enter the block when either flag is set (letting `make_vdatum_query`'s diag report the missing one), or warn explicitly when exactly one is given — `s57_to_geotiff/src/exporter.cpp:522-534`
+- [ ] (suggestion, Copilot) Unknown `-`-prefixed arguments are accepted as positionals while fewer than two have been seen: `s57_to_geotiff --badflag out` runs with `enc_root="--badflag"` and exits 0 with "no charts found". Fix: reject an unrecognized argument beginning with `-` via `usage()` before the positional branch — `s57_to_geotiff/src/main.cpp:65`
+- [ ] (suggestion, Copilot) Test fixture `SyntheticCell` dereferences the results of `GetDriverByName("Memory")`, `Create()`, and `CreateLayer()` unchecked — any failure crashes the test binary instead of failing with a message. Production code null-checks the analogous MEM driver lookup (`exporter.cpp:259`), so the harness is the outlier. Fix: `ASSERT_NE(..., nullptr)` (or throw) on each — `s57_to_geotiff/test/test_exporter.cpp:25-28`
+- [ ] (suggestion, Copilot) `addField()` ignores `CreateField()`'s return; on failure the later `SetField()` calls silently no-op and tests fail far from the cause. Fix: assert `OGRERR_NONE` — `s57_to_geotiff/test/test_exporter.cpp:99-103`
+- [ ] (suggestion, Local Review R3 carry-over) A M_QUAL zone dropped on WKB export/round-trip failure is silent; the missing zone removes its σ floor (possible false certainty). One-line log at both ends — `marine_charts/src/s57_dataset.cpp:436` / `s57_to_geotiff/src/exporter.cpp:102`
+- [ ] (suggestion, Local Review R3 carry-over) `marine_charts` exposes `readCatzocZones(GDALDataset*)` without `ament_export_dependencies(GDAL)`. Verified low: the public header forward-declares `class GDALDataset` (`s57_dataset.h:12`) so it stays self-contained, and the sole consumer finds GDAL itself — forward-looking only — `marine_charts/CMakeLists.txt:72`
+
+### False positives
+- None dismissed outright this round — all 5 Copilot comments verified against local code as valid at some severity.
+- (Copilot, partial) The `unique_ptr` deleter comment's implied resource-leak framing remains rejected on the round-3 grounds (virtual dtor flushes; 6/6 write-then-reopen tests pass). Only its error-reporting consequence is carried forward as the cross-confirmed must-fix above.
+
+### Next step
+Lifecycle: **Integrated Review** → `address-findings` (2 must-fix + 5 suggestions open).
