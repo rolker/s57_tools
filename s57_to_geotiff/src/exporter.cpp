@@ -264,6 +264,7 @@ bool exportCell(
   };
   std::vector<Sounding> soundings;
 
+  bool rasterize_ok = true;
   forEachFeature(
     dataset, [&](OGRFeature * feature) {
       OGRGeometry * geometry = feature->GetGeometryRef();
@@ -291,9 +292,12 @@ bool exportCell(
         int bands[2] = {1, 2};
         double burn[2] = {depth, sigma};
         OGRGeometryH gh = OGRGeometry::ToHandle(geometry);
-        GDALRasterizeGeometries(
-          GDALDataset::ToHandle(work.get()), 2, bands, 1, &gh, nullptr, nullptr, burn,
-          nullptr, nullptr, nullptr);
+        if (GDALRasterizeGeometries(
+            GDALDataset::ToHandle(work.get()), 2, bands, 1, &gh, nullptr, nullptr, burn,
+            nullptr, nullptr, nullptr) != CE_None)
+        {
+          rasterize_ok = false;         // a dropped burn would silently lose depth pixels
+        }
       } else if (objl == kObjlSoundg) {
         // S-57 encodes each sounding's depth as the point geometry's Z ordinate
         // (positive-down), not a VALSOU attribute, so we read getZ() here. This
@@ -322,6 +326,11 @@ bool exportCell(
         }
       }
     });
+
+  if (!rasterize_ok) {
+    error = "failed to rasterize a DEPARE/DRGARE polygon (depth pixels dropped)";
+    return false;
+  }
 
   // --- Read working bands into memory ---------------------------------------
   std::vector<double> depth_bd(n);
@@ -366,9 +375,15 @@ bool exportCell(
     }
     if (!handles.empty()) {
       int mask_band[1] = {1};
-      GDALRasterizeGeometries(
-        GDALDataset::ToHandle(mask.get()), 1, mask_band, static_cast<int>(handles.size()),
-        handles.data(), nullptr, nullptr, burns.data(), nullptr, nullptr, nullptr);
+      if (GDALRasterizeGeometries(
+          GDALDataset::ToHandle(mask.get()), 1, mask_band, static_cast<int>(handles.size()),
+          handles.data(), nullptr, nullptr, burns.data(), nullptr, nullptr, nullptr) != CE_None)
+      {
+        // A failed clip mask would under-clip: stale coarser depth could leak
+        // through a finer cell's footprint. Fail the cell rather than emit it.
+        error = "failed to rasterize the finer-scale clip mask";
+        return false;
+      }
       std::vector<unsigned char> covered(n);
       if (mask->GetRasterBand(1)->RasterIO(
           GF_Read, 0, 0, width, height, covered.data(), width, height, GDT_Byte, 0, 0) != CE_None)
