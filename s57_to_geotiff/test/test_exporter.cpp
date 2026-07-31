@@ -28,9 +28,14 @@ public:
     // value-returning `return`, which is illegal in a constructor. A throw here
     // still fails the test with a clear message via gtest's exception handling, and
     // it prevents the later null-deref that the unchecked handles would cause.
+    // Vector in-memory driver: "Memory" through GDAL 3.10; merged into the
+    // unified "MEM" driver in GDAL 3.11+, so try both names.
     GDALDriver * driver = GetGDALDriverManager()->GetDriverByName("Memory");
     if (!driver) {
-      throw std::runtime_error("GDAL Memory driver unavailable");
+      driver = GetGDALDriverManager()->GetDriverByName("MEM");
+    }
+    if (!driver) {
+      throw std::runtime_error("GDAL in-memory vector driver unavailable");
     }
     dataset_.reset(driver->Create("synthetic", 0, 0, 0, GDT_Unknown, nullptr));
     if (!dataset_) {
@@ -140,6 +145,11 @@ double sample(const std::string & path, int band, double lon, double lat)
   std::unique_ptr<GDALDataset> ds(
     static_cast<GDALDataset *>(GDALOpenEx(path.c_str(), GDAL_OF_RASTER, nullptr, nullptr, nullptr)));
   EXPECT_TRUE(ds) << "cannot reopen " << path;
+  if (!ds) {
+    // EXPECT_TRUE has already failed the test; bail out instead of segfaulting
+    // on the dereferences below (ASSERT_* is unusable in a value-returning helper).
+    return std::nan("");
+  }
   double gt[6];
   EXPECT_EQ(ds->GetGeoTransform(gt), CE_None);
   int col = static_cast<int>((lon - gt[0]) / gt[1]);
