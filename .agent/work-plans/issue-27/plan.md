@@ -25,7 +25,9 @@ and the `chart` store layer merged 2026-07-30 (uma PR#280). The round-trip accep
    `std::vector<CatzocZone>{wkb, catzoc_code}`. OGR types stay out of the public
    header; the caller reconstructs geometry from WKB. Case 308 in `getGrid()`
    stays a no-op (the costmap path does not consume CATZOC); the new reader is a
-   separate entry point.
+   separate entry point. (Implemented with two overloads: the path-based one plus
+   a `readCatzocZones(GDALDataset*)` overload the exporter/tests use on an
+   already-open dataset — `GDALDataset` is only forward-declared in the header.)
 
 2. **New `s57_to_geotiff` ROS 2 package** in this repo (CLI binary only; no store dependency):
    - `s57_to_geotiff/package.xml` — depends on `marine_charts`, `marine_vertical_datum`,
@@ -124,8 +126,8 @@ project ADR (`unh_marine_autonomy/docs/decisions/`), **[ws]** = workspace ADR
 
 ## Open Questions
 
-- [ ] Does `marine_vertical_datum::make_vdatum_query()` need to be called once per cell or once per corpus? Thread safety note in the header says one call per thread — the per-cell loop is single-threaded in v1, so one factory call total is correct.
-- [ ] Naming convention for output files: `{cell_label}.tif` matches the label from `S57Dataset::label()` (filename without path); confirm this is unambiguous across the New Castle corpus before committing to it.
+- [x] Does `marine_vertical_datum::make_vdatum_query()` need to be called once per cell or once per corpus? **Resolved:** the header's thread-safety note says one query per thread; the v1 export loop is single-threaded, so `runExport` builds exactly one query for the whole corpus (`buildDatum`). A future parallel exporter must build one per thread.
+- [x] Naming convention for output files: `{cell_label}.tif`. **Resolved:** the output basename strips the trailing `.000` extension from `S57Dataset::label()` (`baseLabel()`), so a cell `US5NH02M.000` yields `US5NH02M.tif`. S-57 cell names are unique across a corpus, so the stripped base is collision-free; documented in the README.
 
 ## Estimated Scope
 
