@@ -20,3 +20,16 @@ issue: 27
   — **Resolved (host)**: the gate applies to chart data feeding a *live costmap* deployment (uma#276, tracked as an Aug deploy precondition), not to the offline round-trip bench test (export → import → store query), which touches no costmap. The plan should note the sequencing constraint in its consequences section; it does not block this issue's acceptance.
 - [x] Confirm uma#274 (`marine_vertical_datum`) is available before starting implementation — the datum conversion is load-bearing for the tool's correctness, and implementing the exporter without it would require a significant rework at wire-up time.
   — **Resolved (host)**: uma#274 merged 2026-07-24 (unh_marine_autonomy PR#279, `3578292`); uma#275 chart layer merged 2026-07-30 (PR#280, `6d3ca5c`). Both dependencies are satisfied.
+
+## Plan Authored
+**Status**: complete
+**When**: 2026-07-31 15:26 +00:00
+**By**: Claude Code Agent (Claude Sonnet)
+
+**Plan**: `.agent/work-plans/issue-27/plan.md` at `07aa8c3`
+**Branch**: feature/issue-27 at `07aa8c3`
+**Phases**: single
+
+### Open questions
+- [ ] Thread-safety scope for `make_vdatum_query()`: one factory call per cell or per corpus? (per-thread in v1 single-threaded loop = one call total)
+- [ ] Output file naming: confirm `{S57Dataset::label()}.tif` is unambiguous across the New Castle ENC corpus before committing to it.
