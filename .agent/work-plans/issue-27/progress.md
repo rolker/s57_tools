@@ -226,13 +226,63 @@ a fresh-context sub-agent:
 **Claude Adversarial**: 2 passes (Lens A logic + Lens B systemic). **Copilot**: off (default). **Local**: skipped (Ollama not reachable).
 
 ### Findings
-- [ ] (rejected/false-positive) Lens A "must-fix": lon pixel span uses lat angular span → wrong georeferencing — REJECTED: GGGS `latitudeScaleFactor`==1 for |lat|<72°, so cells are square-in-degrees in all mid-latitude waters; the square-degree geotransform matches the GGGS grid and is self-consistent — `s57_to_geotiff/src/exporter.cpp:216`
-- [ ] (suggestion) all-cells-failed / all-no-data corpus returns 0 and exits 0 (indistinguishable from success); return nonzero when `cells.size()>0 && exported==0` — `s57_to_geotiff/src/exporter.cpp:557` / `main.cpp:78`
-- [ ] (suggestion) two `GDALRasterizeGeometries` returns unchecked — a CE_Failure silently drops depth pixels or under-clips (stale coarser data leaks through a finer footprint); check + warn per-cell like every other GDAL call — `s57_to_geotiff/src/exporter.cpp:294,369`
-- [ ] (suggestion) `kMaxRasterDim` blocks the int-overflow UB but a cap-sized cell still allocs ~TB → uncaught `bad_alloc` → terminate (no top-level catch); cap the pixel product and/or wrap the per-cell body to degrade to a skipped-cell warning — `s57_to_geotiff/src/exporter.cpp:38,228`
-- [ ] (suggestion) area pixels get σ exactly 0.0 for flat band + no CATZOC while soundings floor at `kMinSoundingSigma`; consider a matching area floor or document the asymmetry (low: real ENCs rarely encode DRVAL1==DRVAL2) — `s57_to_geotiff/src/exporter.cpp:289`
-- [ ] (note) polar-only (>72° lat): exporter keeps factor 1 while GGGS steps lon 3×/9× → E-W oversampling there (not data-loss; import resamples); a "square-degree, <72° lat" README note closes it — `s57_to_geotiff/src/exporter.cpp:216`
+- [x] (rejected/false-positive) Lens A "must-fix": lon pixel span uses lat angular span → wrong georeferencing — REJECTED: GGGS `latitudeScaleFactor`==1 for |lat|<72°, so cells are square-in-degrees in all mid-latitude waters; the square-degree geotransform matches the GGGS grid and is self-consistent — `s57_to_geotiff/src/exporter.cpp:216` — **no action** (dismissal, not a fix; the `<72°` validity boundary it rests on is now documented in-code + README at `cb5e01f`)
+- [x] (suggestion) all-cells-failed / all-no-data corpus returns 0 and exits 0 (indistinguishable from success); return nonzero when `cells.size()>0 && exported==0` — `s57_to_geotiff/src/exporter.cpp:557` / `main.cpp:78` — **fixed at `98641d1`** (`runExport` returns -1 when a non-empty corpus exports nothing → `main` exits 1; header contract updated)
+- [x] (suggestion) two `GDALRasterizeGeometries` returns unchecked — a CE_Failure silently drops depth pixels or under-clips (stale coarser data leaks through a finer footprint); check + warn per-cell like every other GDAL call — `s57_to_geotiff/src/exporter.cpp:294,369` — **fixed at `9277bf9`** (both returns checked; a failed depth burn or clip mask now fails the cell with a per-cell warning)
+- [x] (suggestion) `kMaxRasterDim` blocks the int-overflow UB but a cap-sized cell still allocs ~TB → uncaught `bad_alloc` → terminate (no top-level catch); cap the pixel product and/or wrap the per-cell body to degrade to a skipped-cell warning — `s57_to_geotiff/src/exporter.cpp:38,228` — **fixed at `f53587e`** (added `kMaxRasterPixels` product cap + try/catch around the per-cell `exportCell` degrading any exception to a skipped-cell warning)
+- [x] (suggestion) area pixels get σ exactly 0.0 for flat band + no CATZOC while soundings floor at `kMinSoundingSigma`; consider a matching area floor or document the asymmetry (low: real ENCs rarely encode DRVAL1==DRVAL2) — `s57_to_geotiff/src/exporter.cpp:289` — **fixed at `368f48f`** (floor only the degenerate σ==0 area case at `kMinSoundingSigma`; a genuinely narrow half-band is left intact and the asymmetry is documented in-code)
+- [x] (note) polar-only (>72° lat): exporter keeps factor 1 while GGGS steps lon 3×/9× → E-W oversampling there (not data-loss; import resamples); a "square-degree, <72° lat" README note closes it — `s57_to_geotiff/src/exporter.cpp:216` — **fixed at `cb5e01f`** (README "square-degree, <72° lat" note + in-code comment)
 
 ### Next step
 Lifecycle: **Local Review (approved)** → push / open PR → **triage-reviews**. The
 five suggestions are non-blocking (apply now or track); no must-fix gates the push.
+
+## Implementation
+**Status**: complete
+**When**: 2026-07-31 16:53 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**Branch**: feature/issue-27 at `cb5e01f`
+**Addressed**: `## Local Review (Pre-Push)` (approved, 2026-07-31 16:42 +00:00, branch at `4c47234`) — all 5 open findings (4 suggestions + 1 note); the 1 rejected/false-positive is a dismissal, not actioned.
+**Commits**: `98641d1`, `9277bf9`, `f53587e`, `368f48f`, `cb5e01f`
+
+### Actions
+- [x] Non-empty corpus that exports nothing now returns -1 → CLI exits 1 (distinct from an empty corpus, which stays 0); header contract updated — `s57_to_geotiff/src/exporter.cpp:598`, `exporter.hpp` — `98641d1`
+- [x] Both `GDALRasterizeGeometries` returns checked — a failed depth burn or clip-mask rasterize now fails the cell with a per-cell warning (no silently-dropped depth pixels, no under-clip leak) — `s57_to_geotiff/src/exporter.cpp` — `9277bf9`
+- [x] Added `kMaxRasterPixels` pixel-product cap + try/catch around the per-cell `exportCell` degrading any exception (incl. `bad_alloc`) to a skipped-cell warning instead of a process terminate — `s57_to_geotiff/src/exporter.cpp` — `f53587e`
+- [x] Degenerate σ==0 area pixel (DRVAL1==DRVAL2, no CATZOC) floored at `kMinSoundingSigma`; a genuinely narrow half-band is left intact; asymmetry vs SOUNDG documented in-code — `s57_to_geotiff/src/exporter.cpp` — `368f48f`
+- [x] (note) Square-degree geotransform `<72°` lat validity documented — README "square-degree, <72° lat" note + in-code comment; >72° = E-W oversampling, not data loss — `s57_to_geotiff/README.md`, `s57_to_geotiff/src/exporter.cpp` — `cb5e01f`
+- [x] (rejected/false-positive) Lens A lon-span "must-fix" — **no action** (the review already rejected it as a false positive; the `<72°` validity boundary it rests on is now documented, `cb5e01f`)
+
+### Decisions
+- **Area σ floor is targeted, not blanket.** An area's half-band *is* its stated
+  uncertainty and can be legitimately small, so flooring every area pixel at
+  `kMinSoundingSigma` (as soundings are) would inflate genuinely-narrow DEPARE
+  bands. Only the degenerate exact-zero case (DRVAL1==DRVAL2 *and* no CATZOC),
+  which is the "false certainty" the finding flagged, is floored.
+- **Rasterize failures fail the cell rather than warn-and-continue.** A dropped
+  depth burn or under-clipped mask is a silent correctness defect; skipping the
+  cell (a per-cell warning in `runExport`) is safer than emitting a cell with
+  missing pixels or leaked coarse data.
+- **`kMaxRasterPixels` = 2.5e8.** Bounds the product well above any realistic ENC
+  cell (tens of millions of pixels) while rejecting pathological extents; the
+  per-cell try/catch is the backstop for any residual allocation failure.
+
+### Build & test (actual)
+`./build.sh s57_to_geotiff` → clean (no warnings/errors). `./test.sh
+s57_to_geotiff` → **34 tests, 0 errors, 0 failures, 17 skipped**;
+`test_exporter.gtest.xml` shows the gtest suite **6/6 passing** (ZOC mapping,
+band midpoint + half-band σ, CATZOC-varied σ, sounding-overrides-area,
+level-selection, finer-footprint clip) — no regression from the σ-floor or
+rasterize-check changes.
+
+### No push / PR
+Local commits only; the host publishes. No deferred findings — every open item
+was actioned with a real commit, except the rejected false-positive (a dismissal,
+correctly left un-actioned).
+
+### Next step
+Lifecycle: **Implementation** → **review-code** (re-review the fixes). Hand off to
+a fresh-context sub-agent:
+
+    .agent/scripts/dispatch_subagent.sh --mode in-process --issue 27 --skill review-code
