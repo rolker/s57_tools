@@ -344,8 +344,21 @@ bool exportCell(
         // S-57 source for SOUNDG.
         const OGRwkbGeometryType type = wkbFlatten(geometry->getGeometryType());
         auto add = [&](double x, double y, double z) {
-          const int col = static_cast<int>(std::floor((x - min_lon) / pixel));
-          const int row = static_cast<int>(std::floor((max_lat - y) / pixel));
+          int col = static_cast<int>(std::floor((x - min_lon) / pixel));
+          int row = static_cast<int>(std::floor((max_lat - y) / pixel));
+          // A point exactly on the MaxX / MinY extent edge with an exact-integer
+          // pixel ratio floors to col==width / row==height (one past the last
+          // pixel) and would be dropped. In the no-M_COVR fallback the extent is
+          // defined by these very soundings, so a boundary point must land in the
+          // last pixel; pull an exact far-edge index back into range (a point
+          // genuinely outside the extent still floors past the edge and is
+          // dropped below).
+          if (col == width) {
+            col = width - 1;
+          }
+          if (row == height) {
+            row = height - 1;
+          }
           if (col < 0 || col >= width || row < 0 || row >= height) {
             return;
           }
