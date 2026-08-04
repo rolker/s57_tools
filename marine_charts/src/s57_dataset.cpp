@@ -221,6 +221,9 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
           case 55:  // FSHFAC Fishing facility
           case 61:  // GATCON Gate
           case 86:  // OBSTRN Obstruction   * TODO, check if submerged and safe
+                    //   (survives D10 suppressed mode via elevation=1.0 land-lethal,
+                    //   NOT the hazard channel — if this ever gains a VALSOU-based
+                    //   depth, route it into "hazard" like UWTROC/WRECKS)
           case 90:  // PILPNT Pile
           case 98:  // PYLONS Pylon/bridge support
           case 122: // SLCONS Shoreline construction
@@ -297,13 +300,21 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
           case 159: // WRECKS Wreck
           {
             int i = featurePair.feature->GetFieldIndex("VALSOU");
-            if(i>=0)  // GetFieldIndex returns -1 when absent; 0 is a valid index
-              if(featurePair.feature->IsFieldSetAndNotNull(i))
-              {
-                double sounding = featurePair.feature->GetFieldAsDouble(i);
-                context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -sounding, "elevation");
-                context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -sounding, "hazard");
-              }
+            if(i>=0 && featurePair.feature->IsFieldSetAndNotNull(i))
+            {
+              double sounding = featurePair.feature->GetFieldAsDouble(i);
+              context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -sounding, "elevation");
+              context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -sounding, "hazard");
+            }
+            else
+            {
+              // No recorded sounding: assume awash (elevation 0) in the hazard
+              // channel only. The depth-suppressed consumer (ADR-0010 D10)
+              // then keeps the rock/wreck lethal; the elevation channel is
+              // deliberately NOT written, so default-mode depth costs are
+              // unchanged (these features were never rasterized before).
+              context.rasterize(*ret, featurePair.feature->GetGeometryRef(), 0.0, "hazard");
+            }
             break;
           }
 

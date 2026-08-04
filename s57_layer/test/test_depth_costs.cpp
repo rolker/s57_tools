@@ -199,6 +199,13 @@ TEST_F(DepthCostsTest, SuppressedHazardStaysLethal)
       << "Suppressed mode: hazard cell (charted sounding elevation="
       << sounding_elevation << ") must be LETHAL.";
   }
+
+  // Soundingless UWTROC/WRECKS rasterize hazard=0.0 with NO elevation write
+  // (awash assumption; round-2 review must-fix). Hazard alone must be LETHAL.
+  auto grid2 = makeS57Grid();
+  grid2.at("hazard", idx) = 0.0;  // elevation stays NaN
+  EXPECT_EQ(layer.testGetCost(grid2, idx), nav2_costmap_2d::LETHAL_OBSTACLE)
+    << "Suppressed mode: soundingless hazard (no elevation) must be LETHAL.";
 }
 
 // (g) Default mode: the hazard channel does not alter the depth-ramp result —

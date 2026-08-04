@@ -46,11 +46,16 @@ surveyed depths by per-cell uncertainty. The layer then paints only:
 *   **Restricted areas** and **low overhead clearance**: LETHAL_OBSTACLE (unchanged)
 *   **Charted point hazards** (UWTROC underwater rocks, WRECKS, PIPSOL pipelines,
     via the grid's `hazard` channel): LETHAL_OBSTACLE regardless of charted depth —
-    deliberately conservative, so a charted wreck **with a recorded sounding**
-    outside survey coverage never vanishes from the costmap. (Hazards charted
-    without a sounding value are not rasterized by `marine_charts` at all — a
-    pre-existing limitation that applies in both modes.)
-*   **Unsurveyed / caution** submerged areas: `unsurveyed_cost`
+    deliberately conservative, so a charted rock or wreck outside survey coverage
+    never vanishes from the costmap. Soundingless UWTROC/WRECKS are assumed awash
+    and painted lethal (hazard channel only; default-mode costs unchanged).
+    **Safety caveat**: a PIPSOL charted without `DRVAL1` is *not* rasterized —
+    blanket-lethal on a long buried-pipeline route could wrongly close a whole
+    channel — so in suppressed mode such pipelines rely on `bathymetry_layer`
+    coverage or operator awareness.
+*   **Unsurveyed / caution** submerged areas that carry a charted depth band:
+    `unsurveyed_cost` (a bare UNSARE/CTNARE mark with no `elevation` data is
+    NO_INFORMATION in both modes)
 *   All other submerged cells: NO_INFORMATION (left to `bathymetry_layer`)
 
 In this mode the depth-related parameters — `minimum_depth`, `maximum_caution_depth`,

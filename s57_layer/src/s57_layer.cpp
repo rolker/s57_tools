@@ -520,14 +520,14 @@ unsigned char S57Layer::get_cost_from_grid(grid_map::GridMap &grid, const grid_m
   if(!depth_costs_)
   {
     // ADR-0010 D10 suppressed mode: no depth ramp — bathymetry_layer owns
-    // depth costs. Retained here: discrete charted hazards with a recorded
-    // sounding (UWTROC/WRECKS/PIPSOL via the "hazard" channel — in
-    // "elevation" they are indistinguishable from a DEPARE band, so without
-    // this they would vanish wherever bathymetry_layer has no coverage),
-    // land, and the unsurveyed/caution floor. Soundingless hazards are not
-    // rasterized at all (pre-existing marine_charts limitation, both modes).
-    // The exists() guard tolerates grids from an s57_grids build predating
-    // the channel.
+    // depth costs. Retained here: discrete charted hazards (UWTROC/WRECKS/
+    // PIPSOL via the "hazard" channel — in "elevation" they are
+    // indistinguishable from a DEPARE band, so without this they would
+    // vanish wherever bathymetry_layer has no coverage), land, and the
+    // unsurveyed/caution floor. Soundingless UWTROC/WRECKS are rasterized
+    // as awash in "hazard" only; a PIPSOL without DRVAL1 is not rasterized
+    // (see README safety caveat). The exists() guard tolerates grids from
+    // an s57_grids build predating the channel.
     if(grid.exists("hazard") && !std::isnan(grid.at("hazard", index)))
       return nav2_costmap_2d::LETHAL_OBSTACLE;
     if(!std::isnan(elevation))
