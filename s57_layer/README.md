@@ -36,15 +36,42 @@ local_costmap:
     *   **Depth < minimum_depth**: LETHAL_OBSTACLE
     *   **Depth < maximum_caution_depth**: Scaled cost (Non-Lethal to Free)
 
+## Suppressed-depth mode (ADR-0010 D10)
+
+With `depth_costs: false`, this layer stops computing depth costs — `bathymetry_layer`
+(unh_marine_autonomy) becomes the single depth authority, arbitrating charted and
+surveyed depths by per-cell uncertainty. The layer then paints only:
+
+*   **Land / built features** (`elevation > 0`): LETHAL_OBSTACLE
+*   **Restricted areas** and **low overhead clearance**: LETHAL_OBSTACLE (unchanged)
+*   **Charted point hazards** (UWTROC underwater rocks, WRECKS, PIPSOL pipelines,
+    via the grid's `hazard` channel): LETHAL_OBSTACLE regardless of charted depth —
+    deliberately conservative, so a charted wreck outside survey coverage never
+    vanishes from the costmap
+*   **Unsurveyed / caution** submerged areas: `unsurveyed_cost`
+*   All other submerged cells: NO_INFORMATION (left to `bathymetry_layer`)
+
+In this mode the depth-related parameters — `minimum_depth`, `maximum_caution_depth`,
+`chart_datum_frame`, `sea_surface_frame`, `tide_invalidate_threshold` — are **inert**
+(still declared, for config compatibility). No `chart_datum` TF is required or looked
+up: a missing tide transform can neither warn nor invalidate tiles.
+
 ## Parameters
 
 | Parameter | Type | Description | Default |
 |---|---|---|---|
 | `enabled` | bool | Enable/Disable the layer. | true |
-| `minimum_depth` | double | Water depth (m) considered an obstacle. | |
-| `maximum_caution_depth` | double | Water depth (m) where cost scaling ends. | |
-| `overhead_clearance` | double | Height (m) of required clearance. | |
-| `unsurveyed_cost` | int | Cost (0-255) for unsurveyed areas. | |
-| `update_timeout` | double | Max time (s) to wait for chart updates. | |
-| `tile_size` | int | Internal tile size for sub-grids. | |
+| `depth_costs` | bool | `false` suppresses the depth ramp (ADR-0010 D10 mode, see above). | true |
+| `minimum_depth` | double | Water depth (m) considered an obstacle. Inert when `depth_costs: false`. | 0.0 |
+| `maximum_caution_depth` | double | Water depth (m) where cost scaling ends. Inert when `depth_costs: false`. | 5.0 |
+| `overhead_clearance` | double | Height (m) of required clearance. | 10.0 |
+| `unsurveyed_cost` | int | Cost (0-255) for unsurveyed areas. | 100 |
+| `update_timeout` | double | Max time (s) to wait for chart updates. | 0.5 |
+| `tile_size` | int | Internal tile size for sub-grids. | 100 |
+| `buffer_fraction` | double | Fraction of the window size used to buffer chart requests. | 0.05 |
+| `allow_uncharted` | bool | Leave uncharted cells untouched (`true`) or cost them LETHAL (`false`). | true |
+| `chart_datum_frame` | string | TF frame of the chart datum for tide correction. Empty disables tide correction. Inert when `depth_costs: false`. | "" |
+| `sea_surface_frame` | string | TF frame of the sea surface for tide correction. Empty disables tide correction. Inert when `depth_costs: false`. | "map_tide" |
+| `tide_invalidate_threshold` | double | Tide-offset change (m) that invalidates cached tiles. Inert when `depth_costs: false`. | 0.01 |
+| `get_datasets_service` | string | Override for the `s57_grids` dataset service name. | `<ns>/get_datasets` |
 | `s57_grids_namespace` | string | Namespace prefix for `s57_grids` services/topics. | "" |

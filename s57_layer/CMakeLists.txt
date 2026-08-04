@@ -81,6 +81,18 @@ if(BUILD_TESTING)
     tf2_ros::tf2_ros
   )
 
+  ament_add_gtest(test_depth_costs test/test_depth_costs.cpp)
+  target_include_directories(test_depth_costs PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_link_libraries(test_depth_costs
+    ${PROJECT_NAME}
+    nav2_costmap_2d::nav2_costmap_2d_core
+    nav2_util::nav2_util_core
+    rclcpp::rclcpp
+    tf2_ros::tf2_ros
+  )
+
   ament_add_gtest(test_plugin_loading test/test_plugin_loading.cpp)
   target_link_libraries(test_plugin_loading
     nav2_costmap_2d::nav2_costmap_2d_core

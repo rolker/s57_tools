@@ -49,6 +49,14 @@ void S57Layer::onInitialize()
   declareParameter("unsurveyed_cost", rclcpp::ParameterValue(unsurveyed_cost_));
   node->get_parameter(name_+".unsurveyed_cost", unsurveyed_cost_);
 
+  // ADR-0010 D10: false suppresses the depth ramp (bathymetry_layer is the
+  // depth authority); this layer then paints only land/restricted/overhead/
+  // caution/unsurveyed and charted point hazards. Depth-related parameters
+  // (minimum_depth, maximum_caution_depth, chart_datum_frame,
+  // sea_surface_frame, tide_invalidate_threshold) stay declared but inert.
+  declareParameter("depth_costs", rclcpp::ParameterValue(depth_costs_));
+  node->get_parameter(name_+".depth_costs", depth_costs_);
+
   declareParameter("update_timeout", rclcpp::ParameterValue(update_timeout_));
   node->get_parameter(name_+".update_timeout", update_timeout_);
   declareParameter("tile_size", rclcpp::ParameterValue(tile_size_));
@@ -88,7 +96,11 @@ void S57Layer::onInitialize()
     tide_invalidate_threshold_ = default_tide_invalidate_threshold;
   }
 
-  if(!chart_datum_frame_.empty() && !sea_surface_frame_.empty())
+  if(!depth_costs_)
+    RCLCPP_INFO_STREAM(logger_,
+      "Depth costs suppressed (ADR-0010 D10 mode): bathymetry_layer is the "
+      "depth authority; tide correction inactive, no chart_datum TF required.");
+  else if(!chart_datum_frame_.empty() && !sea_surface_frame_.empty())
     RCLCPP_INFO_STREAM(logger_, "Tide correction enabled: sea surface height in chart datum frame ("
       << sea_surface_frame_ << " expressed in " << chart_datum_frame_
       << "), invalidate threshold " << tide_invalidate_threshold_ << " m");
@@ -155,7 +167,9 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
   if (!enabled_)
     return;
 
-  if(!chart_datum_frame_.empty() && !sea_surface_frame_.empty())
+  // Tide only matters for the depth ramp; in suppressed mode (D10) skip the
+  // lookup entirely so a missing chart_datum TF never warns or invalidates.
+  if(depth_costs_ && !chart_datum_frame_.empty() && !sea_surface_frame_.empty())
   {
     try
     {
@@ -503,6 +517,26 @@ unsigned char S57Layer::get_cost_from_grid(grid_map::GridMap &grid, const grid_m
   if(!std::isnan(overhead) && overhead < overhead_clearance_)
     return nav2_costmap_2d::LETHAL_OBSTACLE;
   auto elevation = grid.at("elevation", index);
+  if(!depth_costs_)
+  {
+    // ADR-0010 D10 suppressed mode: no depth ramp — bathymetry_layer owns
+    // depth costs. Retained here: discrete charted hazards (UWTROC/WRECKS/
+    // PIPSOL via the "hazard" channel — in "elevation" they are
+    // indistinguishable from a DEPARE band, so without this they would
+    // vanish wherever bathymetry_layer has no coverage), land, and the
+    // unsurveyed/caution floor. The exists() guard tolerates grids from an
+    // s57_grids build predating the channel.
+    if(grid.exists("hazard") && !std::isnan(grid.at("hazard", index)))
+      return nav2_costmap_2d::LETHAL_OBSTACLE;
+    if(!std::isnan(elevation))
+    {
+      if(elevation > 0.0)  // shoreline / intertidal / built feature
+        return nav2_costmap_2d::LETHAL_OBSTACLE;
+      if(!std::isnan(grid.at("unsurveyed", index)) || !std::isnan(grid.at("caution", index)))
+        return unsurveyed_cost_;
+    }
+    return nav2_costmap_2d::NO_INFORMATION;
+  }
   if(!std::isnan(elevation))
   {
     // Anything above chart datum is shoreline / intertidal / built feature
