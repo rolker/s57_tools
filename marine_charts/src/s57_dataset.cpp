@@ -282,11 +282,12 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
           {
             int i = featurePair.feature->GetFieldIndex("DRVAL1");
             if(i>=0)  // GetFieldIndex returns -1 when absent; 0 is a valid index
-            {
-              double min_depth = featurePair.feature->GetFieldAsDouble(i);
-              context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -min_depth, "elevation");
-              context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -min_depth, "hazard");
-            }
+              if(featurePair.feature->IsFieldSetAndNotNull(i))  // DRVAL1 not mandatory on PIPSOL; OGR returns 0.0 for unset, which would rasterize a spurious -0.0 hazard band
+              {
+                double min_depth = featurePair.feature->GetFieldAsDouble(i);
+                context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -min_depth, "elevation");
+                context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -min_depth, "hazard");
+              }
             break;
           }
 

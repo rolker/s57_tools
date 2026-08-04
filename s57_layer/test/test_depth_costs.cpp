@@ -231,6 +231,39 @@ TEST_F(DepthCostsTest, SuppressedToleratesGridWithoutHazardLayer)
   EXPECT_EQ(cost, nav2_costmap_2d::NO_INFORMATION);
 }
 
+// (i) Regression for the PIPSOL DRVAL1 null-guard (marine_charts/src/
+// s57_dataset.cpp): an unset/null DRVAL1 must NOT rasterize a hazard value.
+// OGR returns 0.0 for an unset field, so an unguarded read writes hazard = -0.0
+// (non-NaN) — and in suppressed mode ANY non-NaN hazard cell is LETHAL (see
+// s57_layer.cpp), turning a depth-less charted pipeline into an unconditional
+// lethal band that bathymetry_layer cannot clear.  The dataset-level
+// rasterization path (S57Dataset::getGrid) opens a GDAL dataset by file path
+// and has no in-memory OGR test seam, so the guard's effect is verified here at
+// the layer contract it protects: with no hazard write (hazard = NaN) the
+// submerged pipeline cell defers to bathymetry_layer (NO_INFORMATION), whereas
+// the buggy hazard = -0.0 would instead be a LETHAL band.
+TEST_F(DepthCostsTest, SuppressedUnsetPipsolDepthIsNotLethalBand)
+{
+  S57LayerForTest layer;
+  layer.setDepthCosts(false);
+  grid_map::Index idx(0, 0);
+
+  // Guard working: DRVAL1 unset -> no elevation/hazard write -> both NaN.  The
+  // pipeline footprint is left for bathymetry_layer, not painted lethal.
+  auto guarded = makeS57Grid();
+  EXPECT_EQ(layer.testGetCost(guarded, idx), nav2_costmap_2d::NO_INFORMATION)
+    << "Unset-DRVAL1 PIPSOL must leave no hazard write (defer to bathymetry).";
+
+  // Bug symptom (guard removed): OGR's 0.0 default -> hazard = -0.0 (non-NaN)
+  // -> an unconditional lethal band.  Asserted to document why the guard
+  // matters, not to endorse the behavior.
+  auto unguarded = makeS57Grid();
+  unguarded.at("elevation", idx) = -0.0;
+  unguarded.at("hazard", idx) = -0.0;
+  EXPECT_EQ(layer.testGetCost(unguarded, idx), nav2_costmap_2d::LETHAL_OBSTACLE)
+    << "A spurious hazard=-0.0 (the unguarded bug) would be a lethal band.";
+}
+
 // Integration smoke test: full updateBounds/updateCosts cycle in suppressed
 // mode with tide frames configured but NO transforms published.  The layer
 // must reach isCurrent() without throwing — in suppressed mode the tide TF
