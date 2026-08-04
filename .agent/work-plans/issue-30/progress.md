@@ -123,3 +123,38 @@ The issue proposes implementing the ADR-0010 D10 split: add a mode to `s57_layer
 - Copilot Adversarial: off (default, not opted in). Local Adversarial: skipped (local_review.sh not present in project repo).
 - Build: marine_charts (hazard channel) compiles clean; s57_layer test build blocked by unbuilt underlay_ws (geographic_msgs/geodesy) dependency in this worktree — environment gap, not a diff defect. Test execution deferred to CI.
 - Plan adherence: zero drift; all 6 planned files + test cases (a)-(h) + integration smoke present; plan-review must-fix resolved via dedicated hazard channel (option a) as planned.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-08-03 23:41 -04:00
+**By**: Claude Code Agent (Claude Opus)
+
+**PR**: #31 at `b3575a5`
+**Sources**: 3 (Copilot R1 @ `b3575a5`, Local Review (Pre-Push) @ `33b012e`, CI rollup @ `b3575a5`)
+**Cross-source confirmations**: 0
+**CI**: all-pass (build-and-test success, copilot-pull-request-reviewer success)
+
+### Findings
+- [ ] (must-fix, Copilot) PIPSOL (94) reads `DRVAL1` via `GetFieldAsDouble` without an
+  `IsFieldSetAndNotNull(i)` guard, unlike the WRECKS/UWTROC `VALSOU` block six lines
+  below. OGR returns `0.0` for an unset/null field, and `DRVAL1` is not mandatory on
+  PIPSOL in S-57 — so a depth-less charted pipeline rasterizes `elevation = -0.0` **and**
+  (new in this PR) `hazard = -0.0`. In suppressed mode `get_cost_from_grid()` returns
+  `LETHAL_OBSTACLE` for any non-NaN `hazard` cell, so the entire pipeline footprint
+  becomes an unconditional lethal band that `bathymetry_layer` cannot clear. The PR
+  did not create the unguarded read, but it newly routes it into the hazard channel,
+  which escalates a wrong depth value into a hard, uncleavable obstacle.
+  Fix: wrap both rasterize calls in `if(featurePair.feature->IsFieldSetAndNotNull(i))`,
+  matching the VALSOU block; add a test case for a PIPSOL with an unset `DRVAL1`
+  asserting no `hazard` write. — `marine_charts/src/s57_dataset.cpp:284-291`
+
+### False positives
+- (none)
+
+### Prior-round findings (resolved)
+- (Local Review (Pre-Push) @ `33b012e`) Overstated hazard guarantee in comment + README —
+  addressed in `b3575a5` (qualified to "with a recorded sounding").
+- (Local Review (Pre-Push) @ `33b012e`) `if(i>0)` dropped field index 0 — addressed in
+  `b3575a5` (`>= 0` in the touched VALSOU/DRVAL1 blocks). Copilot's finding above is a
+  *different* defect in the same block (null-value guard, not index guard), so it is not
+  a cross-source confirmation of this item.
