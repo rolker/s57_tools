@@ -72,3 +72,16 @@ The issue proposes implementing the ADR-0010 D10 split: add a mode to `s57_layer
 - [ ] Include test cases for both modes: default (regression) and suppressed (no TF warning; obstacles still painted; charted land/LETHAL from LNDARE retained)
 - [ ] Clarify `unsurveyed`/`caution` cost path in suppressed mode (no `depth` variable — need to preserve the `unsurveyed_cost` guard without the ramp)
 - [ ] File or link the echoboats config-flip follow-up so it doesn't get lost after this PR merges
+
+## Plan Authored
+**Status**: complete
+**When**: 2026-08-04 00:00 +00:00
+**By**: Claude Code Agent (Claude Sonnet)
+
+**Plan**: `.agent/work-plans/issue-30/plan.md` at `0b332d7`
+**Branch**: feature/issue-30 at `0b332d7`
+**Phases**: single
+
+### Open questions
+- [ ] Should `depth_costs: false` suppress `tide_invalidate_threshold` declaration or leave it declared-but-inert? (Recommend: inert, documented.)
+- [ ] File echoboats config-flip as a new issue before this PR merges, or link in PR description and defer? (Recommend: link in PR description.)
