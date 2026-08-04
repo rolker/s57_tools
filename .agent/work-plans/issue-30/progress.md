@@ -135,7 +135,7 @@ The issue proposes implementing the ADR-0010 D10 split: add a mode to `s57_layer
 **CI**: all-pass (build-and-test success, copilot-pull-request-reviewer success)
 
 ### Findings
-- [ ] (must-fix, Copilot) PIPSOL (94) reads `DRVAL1` via `GetFieldAsDouble` without an
+- [x] (must-fix, Copilot) PIPSOL (94) reads `DRVAL1` via `GetFieldAsDouble` without an
   `IsFieldSetAndNotNull(i)` guard, unlike the WRECKS/UWTROC `VALSOU` block six lines
   below. OGR returns `0.0` for an unset/null field, and `DRVAL1` is not mandatory on
   PIPSOL in S-57 — so a depth-less charted pipeline rasterizes `elevation = -0.0` **and**
@@ -158,3 +158,39 @@ The issue proposes implementing the ADR-0010 D10 split: add a mode to `s57_layer
   `b3575a5` (`>= 0` in the touched VALSOU/DRVAL1 blocks). Copilot's finding above is a
   *different* defect in the same block (null-value guard, not index guard), so it is not
   a cross-source confirmation of this item.
+
+## Implementation
+**Status**: complete
+**When**: 2026-08-04 03:48 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**PR**: #31 at `fc82534`
+**Addressed**: Integrated Review (When 2026-08-03 23:41 -04:00, PR #31 @ `b3575a5`) — its single open must-fix
+**Commits**: `fc82534`
+
+### Actions
+- [x] (must-fix) PIPSOL `DRVAL1` read had no null-value guard — an unset/null field made OGR
+  return `0.0`, rasterizing `hazard = -0.0`; in D10 suppressed mode any non-NaN hazard cell is
+  LETHAL, so a depth-less charted pipeline became an unconditional lethal band `bathymetry_layer`
+  cannot clear. Wrapped both rasterize calls in `IsFieldSetAndNotNull(i)`, matching the
+  WRECKS/UWTROC VALSOU block — `marine_charts/src/s57_dataset.cpp:283-290`
+
+### Notes
+- The must-fix's requested "PIPSOL with unset `DRVAL1` asserts no `hazard` write" test is added at
+  the **layer** seam, not the dataset seam: `S57Dataset::getGrid` opens a GDAL dataset by file path
+  and has no in-memory OGR test harness (marine_charts has no test dir at all; GDAL's S-57 driver is
+  read-only, so no fixture can be synthesized). A true dataset-level test would require refactoring
+  the safety-critical feature-rasterization loop to inject a Memory-driver dataset — disproportionate
+  for a thin fix pass. Instead, test `(i)` `SuppressedUnsetPipsolDepthIsNotLethalBand`
+  (`s57_layer/test/test_depth_costs.cpp`) pins the observable contract the guard protects: with no
+  hazard write (`hazard = NaN`) the submerged pipeline cell defers to `bathymetry_layer`
+  (NO_INFORMATION), whereas the buggy `hazard = -0.0` would be LETHAL. Follow-up candidate: add a
+  Memory-driver OGR rasterization harness to `marine_charts` for direct dataset-level coverage.
+- Build/test: `marine_charts` (the guard) builds clean. `s57_layer` (the test) cannot compile in this
+  worktree — pre-existing `underlay_ws` gap (geographic_msgs/geodesy unbuilt), the same environment
+  gap the Local Review recorded; test execution deferred to CI. The test reuses adjacent tests'
+  helpers/patterns.
+
+### Next step
+Lifecycle: **Implementation** → **review-code** (re-review the fix). Dispatch a fresh-context
+sub-agent: `.agent/scripts/dispatch_subagent.sh --mode in-process --issue 30 --skill review-code`
