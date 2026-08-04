@@ -1,0 +1,146 @@
+"""Region-config loading and validation for the ENC updater."""
+
+import dataclasses
+import os
+from typing import List, Optional, Tuple
+
+import yaml
+
+from . import UpdaterError
+
+DEFAULT_CATALOG_URL = 'https://charts.noaa.gov/ENCs/ENCProdCat.xml'
+
+# Band 1 is WGS84 ellipsoidal height (up-positive). The +100 m upper bound
+# deliberately admits inland/lake surfaces (e.g. Lake Massabesic sits near
+# +52 m ellipsoidal); the -12000 m lower bound is deeper than any ocean.
+DEFAULT_DEPTH_RANGE = (-12000.0, 100.0)
+
+
+@dataclasses.dataclass
+class NavLivenessConfig:
+    """
+    Nav-down interlock probe settings.
+
+    An empty ``nodes`` list means the interlock is not configured for this
+    host (e.g. a dev machine with no navigation stack) and the probe is
+    skipped entirely. With nodes configured, any probe failure refuses the
+    swap (fail closed).
+    """
+
+    nodes: List[str] = dataclasses.field(default_factory=list)
+    ros_setup: Optional[str] = None
+    timeout: float = 20.0
+
+
+@dataclasses.dataclass
+class UpdaterConfig:
+    """Validated region configuration (see config/region_example.yaml)."""
+
+    corpus_dir: str
+    store_dir: str
+    cells: List[str]
+    catalog_url: str = DEFAULT_CATALOG_URL
+    geoid: Optional[str] = None
+    vdatum_dir: Optional[str] = None
+    datum_config: Optional[str] = None
+    lake_datum: Optional[float] = None
+    cell_size: Optional[float] = None
+    depth_range: Tuple[float, float] = DEFAULT_DEPTH_RANGE
+    nav_liveness: NavLivenessConfig = dataclasses.field(default_factory=NavLivenessConfig)
+    s57_to_geotiff_bin: Optional[str] = None
+    import_geotiff_bin: Optional[str] = None
+    download_timeout: float = 300.0
+    export_timeout: float = 3600.0
+    stage_timeout: float = 600.0
+    commit_timeout: float = 120.0
+
+
+_TOP_LEVEL_KEYS = {
+    'corpus_dir', 'store_dir', 'cells', 'catalog_url',
+    'geoid', 'vdatum_dir', 'datum_config', 'lake_datum',
+    'cell_size', 'depth_range', 'nav_liveness',
+    's57_to_geotiff_bin', 'import_geotiff_bin',
+    'download_timeout', 'export_timeout', 'stage_timeout', 'commit_timeout',
+}
+
+_NAV_KEYS = {'nodes', 'ros_setup', 'timeout'}
+
+
+def _expand(path: Optional[str]) -> Optional[str]:
+    if path is None:
+        return None
+    return os.path.abspath(os.path.expanduser(str(path)))
+
+
+def load_config(path: str) -> UpdaterConfig:
+    """
+    Load and validate a region config; raise UpdaterError on any problem.
+
+    Unknown keys are rejected rather than ignored: a typo'd key silently
+    falling back to a default is exactly how a field config drifts from what
+    the operator believes it says.
+    """
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            raw = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as e:
+        raise UpdaterError(f'config: cannot read {path}: {e}')
+    if not isinstance(raw, dict):
+        raise UpdaterError(f'config: {path} is not a YAML mapping')
+
+    unknown = set(raw) - _TOP_LEVEL_KEYS
+    if unknown:
+        raise UpdaterError(f'config: unknown key(s) {sorted(unknown)} in {path}')
+    for key in ('corpus_dir', 'store_dir', 'cells'):
+        if key not in raw:
+            raise UpdaterError(f'config: missing required key "{key}" in {path}')
+
+    cells = raw['cells']
+    if (not isinstance(cells, list) or not cells
+            or not all(isinstance(c, str) and c for c in cells)):
+        raise UpdaterError('config: "cells" must be a non-empty list of cell names')
+
+    depth_range = raw.get('depth_range', list(DEFAULT_DEPTH_RANGE))
+    if (not isinstance(depth_range, (list, tuple)) or len(depth_range) != 2
+            or not all(isinstance(v, (int, float)) for v in depth_range)
+            or not depth_range[0] < depth_range[1]):
+        raise UpdaterError('config: "depth_range" must be [min, max] with min < max')
+
+    nav_raw = raw.get('nav_liveness', {}) or {}
+    if not isinstance(nav_raw, dict):
+        raise UpdaterError('config: "nav_liveness" must be a mapping')
+    nav_unknown = set(nav_raw) - _NAV_KEYS
+    if nav_unknown:
+        raise UpdaterError(f'config: unknown nav_liveness key(s) {sorted(nav_unknown)}')
+    nodes = nav_raw.get('nodes', []) or []
+    if not isinstance(nodes, list) or not all(isinstance(n, str) and n for n in nodes):
+        raise UpdaterError('config: nav_liveness.nodes must be a list of node names')
+    nav = NavLivenessConfig(
+        nodes=list(nodes),
+        ros_setup=_expand(nav_raw.get('ros_setup')),
+        timeout=float(nav_raw.get('timeout', 20.0)),
+    )
+
+    def _float_or_none(key):
+        value = raw.get(key)
+        return None if value is None else float(value)
+
+    return UpdaterConfig(
+        corpus_dir=_expand(raw['corpus_dir']),
+        store_dir=_expand(raw['store_dir']),
+        cells=[str(c) for c in cells],
+        catalog_url=str(raw.get('catalog_url', DEFAULT_CATALOG_URL)),
+        geoid=_expand(raw.get('geoid')),
+        vdatum_dir=_expand(raw.get('vdatum_dir')),
+        datum_config=_expand(raw.get('datum_config')),
+        lake_datum=_float_or_none('lake_datum'),
+        cell_size=_float_or_none('cell_size'),
+        depth_range=(float(depth_range[0]), float(depth_range[1])),
+        nav_liveness=nav,
+        s57_to_geotiff_bin=_expand(raw.get('s57_to_geotiff_bin')),
+        import_geotiff_bin=_expand(raw.get('import_geotiff_bin')),
+        download_timeout=float(raw.get('download_timeout', 300.0)),
+        export_timeout=float(raw.get('export_timeout', 3600.0)),
+        stage_timeout=float(raw.get('stage_timeout', 600.0)),
+        commit_timeout=float(raw.get('commit_timeout', 120.0)),
+    )

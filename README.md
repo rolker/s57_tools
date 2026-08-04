@@ -12,6 +12,8 @@ This suite allows you to load S57 charts, convert them into Grid Maps, and use t
 *   **[s57_layer](s57_layer)**: A `nav2_costmap_2d` plugin. Subscribes to `s57_grids` outputs and adds them to the costmap (marking shallow water, restricted areas, etc. as obstacles).
 *   **[marine_charts](marine_charts)**: Underlying C++ library for parsing S57 data.
 *   **[s57_msgs](s57_msgs)**: Custom service and message definitions.
+*   **[s57_to_geotiff](s57_to_geotiff)**: CLI exporter — ENC bathymetry as two-band (depth, σ) GeoTIFFs for the bathymetry store's `chart` layer (ADR-0010 D7).
+*   **[enc_updater](enc_updater)**: Cron-friendly chart updater — downloads NOAA ENC updates and regenerates the store's `chart` layer wholesale, with an enforced nav-down interlock (ADR-0010 D7).
 
 ## Workflow
 
