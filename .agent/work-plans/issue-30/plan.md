@@ -16,23 +16,30 @@ ADR-0010 D10 (unh_marine_autonomy) designates `bathymetry_layer` as the single d
 
 2. **Guard the TF lookup in `updateBounds`** — The tide-correction block at `s57_layer.cpp:158–187` currently fires whenever `chart_datum_frame_` and `sea_surface_frame_` are non-empty. Gate it on `depth_costs_` so no TF lookup (and no `WARN_THROTTLE`) occurs in suppressed mode, even if the frame params remain in the config: `if(depth_costs_ && !chart_datum_frame_.empty() && !sea_surface_frame_.empty())`.
 
-3. **Modify `get_cost_from_grid` for suppressed mode** — When `depth_costs_` is false, after the `restricted` and `overhead` checks (unchanged), handle the elevation branch differently: land (`elevation > 0`) stays `LETHAL_OBSTACLE`; for submerged cells (`elevation <= 0`), skip the depth ramp and return `unsurveyed_cost_` if the `unsurveyed` or `caution` channel is set, else return `NO_INFORMATION` (leaving the cell for `bathymetry_layer`). Cells with no elevation data continue to return `NO_INFORMATION`.
+3. **Add a dedicated `hazard` channel in `marine_charts`** *(plan-review must-fix resolution (a))* — UWTROC/WRECKS/PIPSOL currently rasterize only into `elevation` (as `-VALSOU` / `-DRVAL1`), indistinguishable from a DEPARE band, so suppressing the depth ramp would erase charted rocks/wrecks/pipelines wherever `bathymetry_layer` has no survey coverage. In `S57Dataset::getGrid`: `ret->add("hazard")`; in the UWTROC (153) / WRECKS (159) case, additionally rasterize into `hazard` with the sounding elevation (`-VALSOU`); in the PIPSOL (94) case, additionally rasterize into `hazard` with `-DRVAL1`. The `elevation` writes stay exactly as-is (default-mode behavior unchanged). Point-hazard footprints are small; treating them as LETHAL in suppressed mode regardless of charted depth is deliberately conservative.
 
-4. **Update `s57_layer/README.md`** — Add `depth_costs` to the parameter table. Add a "Suppressed-depth mode" paragraph documenting: depth ramp skipped, `chart_datum_frame`/`sea_surface_frame` ignored (no TF required), land/restricted/overhead/unsurveyed semantics preserved.
+4. **Modify `get_cost_from_grid` for suppressed mode** — When `depth_costs_` is false, after the `restricted` and `overhead` checks (unchanged): a set `hazard` cell (guarded by `grid.exists("hazard")` for mixed-version grids) returns `LETHAL_OBSTACLE`; land (`elevation > 0`) stays `LETHAL_OBSTACLE`; for submerged cells (`elevation <= 0`), skip the depth ramp and return `unsurveyed_cost_` if the `unsurveyed` or `caution` channel is set, else `NO_INFORMATION` (leaving the cell for `bathymetry_layer`). Cells with no elevation data continue to return `NO_INFORMATION`. Default mode (`depth_costs_` true) does not consult `hazard` — behavior byte-identical to today.
 
-5. **Add unit tests in `test/test_depth_costs.cpp`** — Reuse the `S57LayerForTest` subclass pattern from `test_tide_offset.cpp` plus a new `DepthCostsMode` bool setter. Five cases: (a) default-mode regression — submerged cell costs as before; (b) suppressed mode — submerged non-caution cell returns `NO_INFORMATION`; (c) suppressed mode — land cell stays `LETHAL`; (d) suppressed mode — restricted cell stays `LETHAL`; (e) suppressed mode — `unsurveyed`/`caution` cell returns `unsurveyed_cost_`. Register `test_depth_costs` in `CMakeLists.txt` alongside existing gtest targets.
+5. **Update `s57_layer/README.md`** — Add `depth_costs` to the parameter table **and fill the pre-existing table gaps**: `chart_datum_frame`, `sea_surface_frame`, `tide_invalidate_threshold`, `buffer_fraction`, `allow_uncharted`, `get_datasets_service` *(plan-review suggestion)*. Add a "Suppressed-depth mode" paragraph documenting: depth ramp skipped; `chart_datum_frame`/`sea_surface_frame`/`tide_invalidate_threshold` inert (no TF required, left declared for config compatibility); land/restricted/overhead/unsurveyed semantics preserved; charted point hazards (UWTROC/WRECKS/PIPSOL) stay LETHAL via the `hazard` channel.
 
-6. **Add integration smoke test for "no TF warning"** — In `test_depth_costs.cpp`, run a full `updateBounds` / `updateCosts` cycle with `depth_costs: false`, `chart_datum_frame` set to a non-empty string, and no TF published. Assert the layer reaches `isCurrent()` without throwing. (The full WARN suppression is best verified manually or via log-capture; the integration test confirms no crash / no exception.)
+6. **Gate the "Tide correction enabled" startup log on `depth_costs_`** *(plan-review suggestion)* — in suppressed mode with frames configured, log "depth costs suppressed (D10 mode); tide correction inactive" instead.
+
+7. **Add unit tests in `test/test_depth_costs.cpp`** — Reuse the `S57LayerForTest` subclass pattern from `test_tide_offset.cpp` plus a `DepthCostsMode` bool setter. Cases: (a) default-mode regression — submerged cell costs as before; (b) suppressed mode — submerged non-caution cell returns `NO_INFORMATION`; (c) suppressed mode — land cell stays `LETHAL`; (d) suppressed mode — restricted cell stays `LETHAL`; (e) suppressed mode — cell with `elevation <= 0` **and** `unsurveyed`/`caution` set returns `unsurveyed_cost_` *(both conditions required — plan-review suggestion)*; (f) suppressed mode — `hazard` cell returns `LETHAL` even with deep `elevation`; (g) default mode — `hazard` channel present does not alter the depth-ramp result; (h) suppressed mode — grid **without** a `hazard` layer does not throw (mixed-version guard). Register `test_depth_costs` in `CMakeLists.txt` alongside existing gtest targets.
+
+8. **Add integration smoke test for "no TF warning"** — In `test_depth_costs.cpp`, run a full `updateBounds` / `updateCosts` cycle with `depth_costs: false`, `chart_datum_frame` set to a non-empty string, and no TF published. Assert the layer reaches `isCurrent()` without throwing. (The full WARN suppression is best verified manually or via log-capture; the integration test confirms no crash / no exception.)
 
 ## Files to Change
 
 | File | Change |
 |------|--------|
+| `marine_charts/src/s57_dataset.cpp` | Add `hazard` grid channel; rasterize UWTROC/WRECKS (`-VALSOU`) and PIPSOL (`-DRVAL1`) into it (elevation writes unchanged) |
 | `s57_layer/src/s57_layer.h` | Add `bool depth_costs_ = true;` to private members |
-| `s57_layer/src/s57_layer.cpp` | Declare `depth_costs` parameter; gate TF lookup; conditional branch in `get_cost_from_grid` |
-| `s57_layer/README.md` | Add `depth_costs` parameter entry; document suppressed-mode behavior |
-| `s57_layer/test/test_depth_costs.cpp` | New file — 5 unit tests + 1 integration smoke test |
+| `s57_layer/src/s57_layer.cpp` | Declare `depth_costs` parameter; gate TF lookup + startup log; suppressed-mode branch in `get_cost_from_grid` incl. `hazard` → LETHAL |
+| `s57_layer/README.md` | Add `depth_costs` + missing existing params to table; document suppressed-mode behavior |
+| `s57_layer/test/test_depth_costs.cpp` | New file — 8 unit tests + 1 integration smoke test |
 | `s57_layer/CMakeLists.txt` | Register `test_depth_costs` as a gtest target |
+
+*(marine_charts has no test infrastructure; the `hazard`-channel semantics are covered from the consumer side via the (f)/(g)/(h) unit tests on hand-built grids, plus build verification. Standing up S-57 synthetic-cell tests for marine_charts — the `test_exporter.cpp` pattern lives in s57_to_geotiff — is out of scope.)*
 
 ## Principles Self-Check
 
@@ -69,8 +76,10 @@ ADR-0010 D10 (unh_marine_autonomy) designates `bathymetry_layer` as the single d
 
 ## Open Questions
 
-- Should `depth_costs: false` also suppress the `tide_invalidate_threshold` parameter declaration (it becomes meaningless), or leave it declared but inert? Recommend: leave declared but inert — removing it would be a breaking change for configs that set it. Document it as a no-op in suppressed mode.
-- Should the echoboats config-flip follow-up be filed as a new issue before this PR merges, or linked in the PR description and deferred? Recommend: link in PR description; the echoboats repo change is a separate concern.
+*(Both resolved at the plan-review checkpoint, per the recommended defaults.)*
+
+- `tide_invalidate_threshold` under `depth_costs: false`: **left declared but inert** — removing it would be a breaking change for configs that set it. Documented as a no-op in suppressed mode.
+- echoboats config-flip follow-up: **linked in the PR description and deferred** — the echoboats repo change is a separate concern.
 
 ## Estimated Scope
 
