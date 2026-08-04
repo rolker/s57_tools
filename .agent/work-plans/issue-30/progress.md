@@ -194,3 +194,30 @@ The issue proposes implementing the ADR-0010 D10 split: add a mode to `s57_layer
 ### Next step
 Lifecycle: **Implementation** → **review-code** (re-review the fix). Dispatch a fresh-context
 sub-agent: `.agent/scripts/dispatch_subagent.sh --mode in-process --issue 30 --skill review-code`
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-04 03:55 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: changes-requested
+
+**Branch**: feature/issue-30 at `4268021`
+**Mode**: pre-push
+**Depth**: Deep (reason: safety-relevant navigation-costmap cost logic + cross-layer ADR-0010 D10 coordination with bathymetry_layer)
+**Must-fix**: 1 | **Suggestions**: 4
+**Round**: 2 | **Ship**: continue — one safety must-fix (soundingless charted hazards → NO_INFORMATION in suppressed mode), rising from 0 last round; genuine safety concern but resolution is bounded (conservative rasterization or linked follow-up + explicit README caveat).
+
+### Findings
+- [ ] (must-fix) Soundingless charted hazards (UWTROC/WRECKS unset VALSOU; PIPSOL unset DRVAL1) write neither elevation nor hazard, so in D10 suppressed mode they return NO_INFORMATION — a charted rock-awash/unknown-depth wreck outside bathymetry_layer coverage reads as open water. Highest-consequence hazard subcase; hazard-channel fix covers sounded hazards only. Disclosed in README but framed as symmetric "both modes" when suppressed mode is materially worse (strips the DEPARE band). Not a regression; default mode byte-identical. Resolve via (a) conservative-LETHAL rasterization of soundingless UWTROC/WRECKS, or (b) linked follow-up issue + elevate README parenthetical to an explicit safety caveat — `marine_charts/src/s57_dataset.cpp:281-306`
+- [ ] (suggestion) README "Unsurveyed / caution submerged areas: unsurveyed_cost" overstates coverage — floor only applies where a DEPARE elevation coexists; bare UNSARE/CTNARE cells are NO_INFORMATION in both modes (code + test (e) grid3 already correct) — `s57_layer/README.md`
+- [ ] (suggestion) OBSTRN (case 86) survives suppressed mode only via elevation=1.0 land-lethal, a different mechanism than UWTROC/WRECKS; add a note near its "TODO check if submerged" so a future edit doesn't silently drop it in suppressed mode — `marine_charts/src/s57_dataset.cpp:223`
+- [ ] (suggestion) New unconditional ret->add("hazard") is an extra grid layer served across the repo boundary; s57_layer tolerates via grid.exists(), but confirm no downstream consumer indexes layers positionally or asserts on layer count — `marine_charts/src/s57_dataset.cpp:169`
+- [ ] (suggestion) No test named for the soundingless-hazard case (hazard=NaN, elevation=NaN => NO_INFORMATION); test (i) pins it incidentally — a dedicated named test would make the residual risk visible — `s57_layer/test/test_depth_costs.cpp`
+
+### Notes
+- Static analysis: ament cpplint/uncrustify deliberately disabled in-package (Allman house style); no new enforced findings. Copilot Adversarial: off (default). Local Adversarial: skipped (local_review.sh not present in project repo).
+- Plan adherence: zero drift; all 6 planned files + test cases (a)-(i) present. Post-plan PIPSOL null-guard fix (fc82534, test case (i)) correctly in scope per prior Integrated Review.
+- The must-fix reopens the *soundingless* subcase of the plan-review must-fix ("retain point hazards"): the hazard-channel resolution covers sounded hazards only; the soundingless subcase was documented but never explicitly risk-accepted or tracked.
+
+### Next step
+Lifecycle verdict is **changes-requested** → host dispatches **address-findings** to work the open finding(s) from this entry, then re-dispatches **review-code**. Diff is not pushed until a pre-push review returns approved.
