@@ -101,3 +101,25 @@ The issue proposes implementing the ADR-0010 D10 split: add a mode to `s57_layer
 - [ ] (suggestion) `onInitialize` still logs "Tide correction enabled" (`s57_layer.cpp:91-94`) whenever the frames are set, regardless of `depth_costs_`. In suppressed mode with the frames left in config this INFO is misleading. Gate it on `depth_costs_` too, consistent with step 2's TF-lookup gating.
 - [ ] (suggestion) README table is missing `tide_invalidate_threshold`, `buffer_fraction`, `allow_uncharted`, and `get_datasets_service` as well as the two frame params. Step 4 covers only `depth_costs` + the two frames; add at least the three tide-related params together since they form the coherent set this change touches (broader gap-fill optional).
 - [ ] (positive) ADR-0010 pre-adoption is handled correctly (implementation sanctioned by D10's explicit "lands as its own issue/PR"); `review-issue` actions 1-3 and 5 are addressed; scope is well-sized (5 files, single PR); the `Documentation & Instruction Impact` section is present and non-silent.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-04 03:16 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: approved
+
+**Branch**: feature/issue-30 at `33b012e`
+**Mode**: pre-push
+**Depth**: Deep (reason: safety-relevant navigation-costmap cost logic + cross-layer ADR-0010 D10 coordination with bathymetry_layer)
+**Must-fix**: 0 | **Suggestions**: 2
+**Round**: 1 | **Ship**: recommended — 0 must-fix; clean D10 implementation, dual-lens adversarial + governance + plan-drift all clean, only two low-severity doc/robustness suggestions.
+
+### Findings
+- [ ] (suggestion) Overstated hazard guarantee — comment + README claim a charted wreck "never vanishes," but soundingless UWTROC/WRECKS/PIPSOL write no `hazard` channel and return NO_INFORMATION in suppressed mode (not a regression; qualify to "with a recorded sounding") — `s57_layer/src/s57_layer.cpp:522-528`, `s57_layer/README.md` (D10 section)
+- [ ] (suggestion) Field-index guard `if(i>0)` drops a VALSOU/DRVAL1 at field index 0 from both channels; `>= 0` correct (pre-existing file-wide pattern, inherited by the new hazard write) — `marine_charts/src/s57_dataset.cpp:284,299`
+
+### Notes
+- Static analysis: ament_cpplint/uncrustify deliberately disabled in-package (Allman house style); cppcheck shadowed-`int i` is a pre-existing file-wide pattern (none added by this diff). No new enforced findings.
+- Copilot Adversarial: off (default, not opted in). Local Adversarial: skipped (local_review.sh not present in project repo).
+- Build: marine_charts (hazard channel) compiles clean; s57_layer test build blocked by unbuilt underlay_ws (geographic_msgs/geodesy) dependency in this worktree — environment gap, not a diff defect. Test execution deferred to CI.
+- Plan adherence: zero drift; all 6 planned files + test cases (a)-(h) + integration smoke present; plan-review must-fix resolved via dedicated hazard channel (option a) as planned.
