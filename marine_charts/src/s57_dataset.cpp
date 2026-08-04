@@ -166,6 +166,10 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
       ret->add("unsurveyed");
       ret->add("caution");
       ret->add("restricted");
+      // Discrete charted hazards (UWTROC/WRECKS/PIPSOL) also write here, so a
+      // consumer suppressing the depth ramp (ADR-0010 D10) can still keep them
+      // lethal — in "elevation" they are indistinguishable from a DEPARE band.
+      ret->add("hazard");
       ret->setTimestamp(rclcpp::Time(context.earth_to_map().header.stamp).nanoseconds());
 
       for(auto&& featurePair: dataset->GetFeatures())
@@ -281,6 +285,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
             {
               double min_depth = featurePair.feature->GetFieldAsDouble(i);
               context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -min_depth, "elevation");
+              context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -min_depth, "hazard");
             }
             break;
           }
@@ -296,6 +301,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
               {
                 double sounding = featurePair.feature->GetFieldAsDouble(i);
                 context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -sounding, "elevation");
+                context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -sounding, "hazard");
               }
             break;
           }
