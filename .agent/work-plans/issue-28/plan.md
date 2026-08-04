@@ -26,32 +26,52 @@ The operator has resolved both open questions from the Issue Review:
 
 1. **New `enc_updater` package** (`ament_python`) in `s57_tools/enc_updater/`.
    Pure offline tooling: no ROS runtime dependency except the transient graph
-   probe at swap time. No pip-only runtime deps (ADR-0009); uses stdlib +
-   `requests` for HTTP only if unavoidable, else `urllib`.
+   probe at swap time. No pip-only runtime deps (ADR-0009); HTTP via stdlib
+   `urllib` (review suggestion adopted — no `requests`).
 
-2. **`downloader.py`** — fetch NOAA ENC catalog (XML endpoint) for the
-   configured region (list of cell IDs); compare edition/update fields against
-   the corpus manifest (per-cell JSON in `corpus_dir/.manifest.json`); download
-   only changed/new cells as ZIP; validate against catalog checksum before
-   extracting; update manifest on success. Failed or checksum-failing downloads
-   leave the corpus and existing manifest untouched.
+2. **`downloader.py`** — fetch the NOAA ENC product catalog
+   (`https://charts.noaa.gov/ENCs/ENCProdCat.xml`, verified live 2026-08-03:
+   `<cell>` elements carrying `name`/`edtn`/`updn`/`zipfile_location`/
+   `zipfile_size`; the catalog provides **no checksums**) for the configured
+   region (list of cell IDs); compare edition/update fields against the corpus
+   manifest (per-cell JSON in `corpus_dir/.manifest.json`); download only
+   changed/new cells as ZIP; validate before extracting — byte count vs the
+   catalog's `zipfile_size` plus zip CRC verification (`zipfile.testzip`), the
+   strongest integrity signal the catalog supports; update manifest on
+   success. Failed or validation-failing downloads leave the corpus and
+   existing manifest untouched.
 
 3. **`registry.py`** — read/write the edition registry (`editions.json`) that
    records per-cell edition+update numbers for the **active** chart layer.
-   Written inside the staged dir before `--commit` so the atomic rename is the
-   single commit point; old registry stays on disk until the swap completes.
+   Written inside **`<staged_dir>/chart/`** before `--commit` — `--commit`
+   swaps only the `chart/` subdir (`replaceChartLayer`, which skips non-`.tif`
+   entries), so the registry must live there to ride the atomic rename as the
+   single commit point; old registry stays at `<store_dir>/chart/editions.json`
+   until the swap completes.
 
 4. **`regenerator.py`** — orchestrate the regeneration cycle:
-   a. Create a fresh temp staged dir (fail if non-empty to prevent stale tile
-      accumulation per `import_geotiff --stage` warning).
+   a. Create a fresh staged dir **adjacent to the store**
+      (`<store_dir>/../.enc_updater_staging.<pid>`) — never `/tmp`: `--commit`'s
+      atomic `rename(2)` requires staged and store on the **same filesystem**
+      (EXDEV otherwise; review must-fix). Fail if non-empty to prevent stale
+      tile accumulation per `import_geotiff --stage` warning.
    b. Call `s57_to_geotiff <corpus_dir> <geotiff_tmp> [--geoid …] [--vdatum-dir …]`
-      as a subprocess.
-   c. For each GeoTIFF in `<geotiff_tmp>`, call
-      `import_geotiff --stage <staged_dir> chart <geotiff>` as a subprocess.
+      as a subprocess. Parse the per-cell export log lines
+      (`exported <path> (WxH, N cells, scale 1:S, GGGS level L -> import_geotiff --level L)`)
+      to get each GeoTIFF's GGGS level; cells logged as empty/warned are not
+      staged.
+   c. For each exported GeoTIFF, call
+      `import_geotiff --stage <staged_dir> chart <geotiff> --level <L>` as a
+      subprocess — the level always passed explicitly from the export log
+      (review suggestion: no silent `--cell-size` derivation), with optional
+      config overrides for `--cell-size`.
    d. Sanity-check: at least one staged tile, all files non-zero, spot-check
-      that depth values are in a plausible range (−12 000 m to +10 m
-      ellipsoidal; `gdal_info` via subprocess or Python GDAL bindings).
-   e. Write `editions.json` into `<staged_dir>` from the downloader manifest.
+      that band-1 values are in a plausible range (default −12 000 m to
+      **+100 m** ellipsoidal — the +100 upper bound admits inland/lake surfaces,
+      e.g. Massabesic ≈ +52 m ellipsoidal; config-overridable) via `gdalinfo
+      -json` subprocess.
+   e. Write `editions.json` into `<staged_dir>/chart/` from the downloader
+      manifest.
    f. **Nav-down interlock**: source `/opt/ros/<distro>/setup.bash` in a
       subprocess; run `ros2 node list`; abort swap if any of the configured
       nav-liveness node names appears. Log the refusal and exit non-zero.
@@ -67,7 +87,13 @@ The operator has resolved both open questions from the Issue Review:
    but skips the interlock check and `--commit`. Exits 0 on no-change (idempotent).
 
 7. **`config/region_example.yaml`** — example region config for New Castle /
-   Isles of Shoals cells, with cron example and store/corpus paths.
+   Isles of Shoals cells, with cron example and store/corpus paths. Must state
+   the deployment prerequisite (review must-fix, resolved): the target store's
+   deployed consumer code must include `unh_marine_autonomy#276`
+   (worst-case-clearance cost model + confidence gate, **merged 2026-08-03**) —
+   older deployed `bathymetry_layer` builds render high-uncertainty chart cells
+   LETHAL under `unsurveyed_is_lethal`, so hosts still on pre-#276 builds must
+   rebuild before this updater's store feeds a live costmap.
 
 8. **Tests** (`test/`) — no network, no real ENC corpus:
    - `test_downloader.py`: mock HTTP failure mid-download → corpus unchanged;
@@ -94,6 +120,7 @@ The operator has resolved both open questions from the Issue Review:
 | `enc_updater/setup.cfg` | Package config |
 | `enc_updater/enc_updater/__init__.py` | Empty |
 | `enc_updater/enc_updater/__main__.py` | CLI (`--dry-run`, `--config`, `--force`) |
+| `enc_updater/enc_updater/config.py` | YAML region-config load + validation |
 | `enc_updater/enc_updater/downloader.py` | NOAA catalog fetch + checksum + corpus manifest |
 | `enc_updater/enc_updater/registry.py` | Edition registry R/W in staged dir |
 | `enc_updater/enc_updater/nav_liveness.py` | ROS graph probe (`ros2 node list`) |
@@ -120,7 +147,7 @@ The operator has resolved both open questions from the Issue Review:
 
 | ADR | Triggered | How addressed |
 |---|---|---|
-| ADR-0010 D7 | Yes | Wholesale regeneration, atomic swap, nav-down interlock, registry-inside-staged-dir are all implemented as specified |
+| ADR-0010 D7 (**unh_marine_autonomy** `docs/decisions/0010-geospatial-world-model.md` — not the workspace repo's ADR-0010, which is git-bug; review suggestion) | Yes | Wholesale regeneration, atomic swap, nav-down interlock, registry-inside-staged-dir are all implemented as specified |
 | ADR-0009 | Yes | `ament_python` package; no pip-only runtime deps; standard library + ROS 2 CLI subprocesses |
 
 ## Consequences
