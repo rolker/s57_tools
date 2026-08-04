@@ -281,7 +281,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
           case 94:  // PIPSOL Pipeline, submarine/on land
           {
             int i = featurePair.feature->GetFieldIndex("DRVAL1");
-            if(i>0)
+            if(i>=0)  // GetFieldIndex returns -1 when absent; 0 is a valid index
             {
               double min_depth = featurePair.feature->GetFieldAsDouble(i);
               context.rasterize(*ret, featurePair.feature->GetGeometryRef(), -min_depth, "elevation");
@@ -296,7 +296,7 @@ std::shared_ptr<grid_map::GridMap> S57Dataset::getGrid(GridCreationContext conte
           case 159: // WRECKS Wreck
           {
             int i = featurePair.feature->GetFieldIndex("VALSOU");
-            if(i>0)
+            if(i>=0)  // GetFieldIndex returns -1 when absent; 0 is a valid index
               if(featurePair.feature->IsFieldSetAndNotNull(i))
               {
                 double sounding = featurePair.feature->GetFieldAsDouble(i);
