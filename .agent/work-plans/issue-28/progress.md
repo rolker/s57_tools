@@ -14,7 +14,19 @@ issue: 28
 **Scope verdict**: well-scoped
 
 ### Actions
-- [ ] Specify the nav-down liveness signal contract in the plan: the issue says the updater "checks a navigation-liveness signal" but does not define the mechanism (ROS topic heartbeat, file sentinel, service call?). The plan must nail this down — the interlock is load-bearing safety logic, so the interface must be explicit before implementation begins.
-- [ ] Specify the cross-repo API invocation mechanism: the swap step calls "the store's regeneration API" from `unh_marine_autonomy`. The plan must document how the updater invokes that API (subprocess CLI call, Python import, ROS service?) — leaving this implicit risks a coupling assumption that breaks at integration time.
+- [x] Specify the nav-down liveness signal contract in the plan: resolved by operator checkpoint — ROS graph probe (`ros2 node list` in a subprocess after sourcing ROS env).
+- [x] Specify the cross-repo API invocation mechanism: resolved by operator checkpoint — CLI subprocess (`import_geotiff --stage/--commit`).
 - [ ] Verify issue #5 (auto-download & auto-update NOAA ENC data) is still open and add a `Closes #5` keyword to this PR so it doesn't linger as a ghost issue after the work lands.
-- [ ] Confirm issue #27 (`s57_to_geotiff`) is merged and available on the branch before starting implementation — the exporter is invoked as step 3 of the regeneration pipeline.
+- [x] Confirm issue #27 (`s57_to_geotiff`) is merged and available on the branch before starting implementation — confirmed: PR #29 merged 2026-07-31, present on branch base.
+
+## Plan Authored
+**Status**: complete
+**When**: 2026-08-04 03:12 +00:00
+**By**: Claude Code Agent (Claude Sonnet)
+
+**Plan**: `.agent/work-plans/issue-28/plan.md` at `b86543a`
+**Branch**: feature/issue-28 at `b86543a`
+**Phases**: single
+
+### Open questions
+- [ ] No open questions — plan is review-plan-ready.
