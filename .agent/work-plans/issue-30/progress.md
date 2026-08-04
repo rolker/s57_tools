@@ -85,3 +85,19 @@ The issue proposes implementing the ADR-0010 D10 split: add a mode to `s57_layer
 ### Open questions
 - [ ] Should `depth_costs: false` suppress `tide_invalidate_threshold` declaration or leave it declared-but-inert? (Recommend: inert, documented.)
 - [ ] File echoboats config-flip as a new issue before this PR merges, or link in PR description and defer? (Recommend: link in PR description.)
+
+## Plan Review
+**Status**: complete
+**When**: 2026-08-04 02:54 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**Plan**: `.agent/work-plans/issue-30/plan.md` at `0b332d7`
+**PR**: PR-less (reviewed via issue #30 in worktree `feature/issue-30`)
+**Verdict**: changes-requested
+
+### Findings
+- [ ] (must-fix) Suppressed mode drops charted submerged point hazards, contradicting the plan's own retained-semantics claim — `plan.md:19` (and `plan.md:11`). UWTROC (underwater rock) and WRECKS are rasterized into the **`elevation`** channel as negative elevation (`-VALSOU` sounding); PIPSOL likewise uses `-DRVAL1` (`marine_charts/src/s57_dataset.cpp:290-301,277-286`). Step 3's rule "for submerged cells (elevation <= 0) … return `NO_INFORMATION`" therefore erases charted rocks/wrecks in suppressed mode, deferring them to `bathymetry_layer` — which only has data inside survey coverage. A charted wreck outside surveyed water vanishes from the costmap. The `elevation` channel carries no marker separating a DEPARE depth band (which D10 *wants* suppressed — the Broadkill fix) from a discrete UWTROC/WRECKS sounding (which the issue says to *retain*), so s57_layer cannot honor "retain point hazards" from within its own logic. Resolve by one of: (a) add a dedicated hazard channel upstream in `marine_charts` (expands scope → likely a separate issue); (b) explicitly scope-out and document the limitation with a linked follow-up, stating that in suppressed mode charted point hazards outside `bathymetry_layer` coverage are not painted; or (c) keep a LETHAL floor for submerged cells shallower than `minimum_depth_` even in suppressed mode (but this reintroduces depth/tide dependence, partly defeating the no-TF goal). At minimum the plan must surface this tension instead of listing point hazards as retained.
+- [ ] (suggestion) Test case (e) spec is imprecise — `plan.md:23`. For the proposed suppressed path to return `unsurveyed_cost_`, the cell must have **both** `elevation <= 0` **and** `unsurveyed`/`caution` set. The `unsurveyed`/`caution` check lives *inside* the elevation branch (`s57_layer.cpp:523`), so a caution-only cell (elevation = NaN, e.g. a bare CTNARE/UNSARE) returns `NO_INFORMATION` in both modes. Specify that case (e)'s fixture sets a submerged elevation too, and note that pure-caution/unsurveyed cells with no coincident DEPARE elevation are a pre-existing no-op (out of scope to fix, but the plan's "retain caution/unsurveyed" is only true where elevation data coexists).
+- [ ] (suggestion) `onInitialize` still logs "Tide correction enabled" (`s57_layer.cpp:91-94`) whenever the frames are set, regardless of `depth_costs_`. In suppressed mode with the frames left in config this INFO is misleading. Gate it on `depth_costs_` too, consistent with step 2's TF-lookup gating.
+- [ ] (suggestion) README table is missing `tide_invalidate_threshold`, `buffer_fraction`, `allow_uncharted`, and `get_datasets_service` as well as the two frame params. Step 4 covers only `depth_costs` + the two frames; add at least the three tide-related params together since they form the coherent set this change touches (broader gap-fill optional).
+- [ ] (positive) ADR-0010 pre-adoption is handled correctly (implementation sanctioned by D10's explicit "lands as its own issue/PR"); `review-issue` actions 1-3 and 5 are addressed; scope is well-sized (5 files, single PR); the `Documentation & Instruction Impact` section is present and non-silent.
