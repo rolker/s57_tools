@@ -68,8 +68,9 @@ The operator has resolved both open questions from the Issue Review:
    d. Sanity-check: at least one staged tile, all files non-zero, spot-check
       that band-1 values are in a plausible range (default −12 000 m to
       **+100 m** ellipsoidal — the +100 upper bound admits inland/lake surfaces,
-      e.g. Massabesic ≈ +52 m ellipsoidal; config-overridable) via `gdalinfo
-      -json` subprocess.
+      e.g. Massabesic ≈ +52 m ellipsoidal; config-overridable) via the GDAL
+      Python bindings (`python3-gdal` rosdep key — cleaner to mock and no
+      extra CLI packaging question vs a `gdalinfo` subprocess).
    e. Write `editions.json` into `<staged_dir>/chart/` from the downloader
       manifest.
    f. **Nav-down interlock**: source `/opt/ros/<distro>/setup.bash` in a
