@@ -79,6 +79,21 @@ def _expand(path: Optional[str]) -> Optional[str]:
     return os.path.abspath(os.path.expanduser(str(path)))
 
 
+def _require_float(value, label: str) -> float:
+    """
+    Coerce a config value to float, raising UpdaterError (not ValueError).
+
+    A bare ``float()`` on a mistyped YAML value (e.g. ``timeout: fast``) would
+    escape ``load_config`` as an uncaught ``ValueError`` and crash with a
+    traceback instead of the documented clean exit 1; route every coercion
+    through here so a bad value reads as a config error like any other.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise UpdaterError(f'config: "{label}" must be a number, got {value!r}')
+
+
 def load_config(path: str) -> UpdaterConfig:
     """
     Load and validate a region config; raise UpdaterError on any problem.
@@ -132,12 +147,12 @@ def load_config(path: str) -> UpdaterConfig:
         nodes=list(nodes),
         ros_setup=_expand(nav_raw.get('ros_setup')),
         ros_domain_id=domain_id,
-        timeout=float(nav_raw.get('timeout', 20.0)),
+        timeout=_require_float(nav_raw.get('timeout', 20.0), 'nav_liveness.timeout'),
     )
 
     def _float_or_none(key):
         value = raw.get(key)
-        return None if value is None else float(value)
+        return None if value is None else _require_float(value, key)
 
     return UpdaterConfig(
         corpus_dir=_expand(raw['corpus_dir']),
@@ -153,8 +168,12 @@ def load_config(path: str) -> UpdaterConfig:
         nav_liveness=nav,
         s57_to_geotiff_bin=_expand(raw.get('s57_to_geotiff_bin')),
         import_geotiff_bin=_expand(raw.get('import_geotiff_bin')),
-        download_timeout=float(raw.get('download_timeout', 300.0)),
-        export_timeout=float(raw.get('export_timeout', 3600.0)),
-        stage_timeout=float(raw.get('stage_timeout', 600.0)),
-        commit_timeout=float(raw.get('commit_timeout', 120.0)),
+        download_timeout=_require_float(
+            raw.get('download_timeout', 300.0), 'download_timeout'),
+        export_timeout=_require_float(
+            raw.get('export_timeout', 3600.0), 'export_timeout'),
+        stage_timeout=_require_float(
+            raw.get('stage_timeout', 600.0), 'stage_timeout'),
+        commit_timeout=_require_float(
+            raw.get('commit_timeout', 120.0), 'commit_timeout'),
     )
