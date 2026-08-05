@@ -9,10 +9,14 @@ Both files share one schema::
   on-disk ENC corpus holds.
 - The **edition registry** (``editions.json``) records what the *chart layer*
   was built from. It is written inside the staged ``chart/`` directory before
-  ``import_geotiff --commit`` — ``--commit`` swaps only the ``chart/`` subdir
-  (``replaceChartLayer``, which ignores non-``.tif`` entries), so placing the
-  registry there makes the atomic rename the single commit point for tiles
-  and registry together.
+  ``import_geotiff --commit`` — ``--commit`` (``replaceChartLayer``) renames the
+  whole staged ``chart/`` dir into the store with one atomic ``rename(2)``, so
+  every file in it — ``.tif`` tiles and ``editions.json`` alike — rides along in
+  a single commit. (``replaceChartLayer`` only *validates* ``.tif`` tiles,
+  ignoring non-``.tif`` entries when it checks the staged layer is non-empty and
+  well-named; it does not filter them out of the swap.) Placing the registry in
+  ``chart/`` therefore makes the rename the single commit point for tiles and
+  registry together.
 """
 
 import datetime
