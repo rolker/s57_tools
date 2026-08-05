@@ -66,6 +66,15 @@ def check_nav_down(cfg: NavLivenessConfig) -> None:
         print('enc_updater: nav-liveness interlock not configured '
               '(nav_liveness.nodes is empty) — skipping probe')
         return
+    if cfg.ros_domain_id is None:
+        # Nodes are configured but the DDS domain is not pinned: a cron/probe
+        # ROS_DOMAIN_ID that differs from the nav stack's would query an empty
+        # graph and let the swap fail *open*. Warn loudly rather than silently
+        # trusting the ambient domain (see the README nav-liveness contract).
+        print('enc_updater: WARNING nav_liveness.nodes is set but '
+              'nav_liveness.ros_domain_id is not — the probe will use the '
+              'ambient ROS_DOMAIN_ID; if it differs from the nav stack the '
+              'interlock can fail OPEN. Pin ros_domain_id to the nav domain.')
     live = _probe_node_list(cfg)
     present = sorted(set(cfg.nodes) & set(live))
     if present:

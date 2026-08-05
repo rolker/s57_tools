@@ -94,6 +94,25 @@ def test_probe_env_omits_domain_when_unset(monkeypatch):
     assert 'ROS_DOMAIN_ID' not in seen['env']
 
 
+def test_warns_when_nodes_set_but_domain_unpinned(monkeypatch, capsys):
+    """Nodes configured without ros_domain_id warns about the fail-open risk."""
+    monkeypatch.setattr(
+        nav_liveness.subprocess, 'run',
+        lambda *a, **k: FakeCompleted(stdout='/rosout\n'))
+    nav_liveness.check_nav_down(NavLivenessConfig(nodes=['/bizzy/controller']))
+    assert 'fail OPEN' in capsys.readouterr().out
+
+
+def test_no_warning_when_domain_pinned(monkeypatch, capsys):
+    """A pinned ros_domain_id suppresses the fail-open warning."""
+    monkeypatch.setattr(
+        nav_liveness.subprocess, 'run',
+        lambda *a, **k: FakeCompleted(stdout='/rosout\n'))
+    nav_liveness.check_nav_down(
+        NavLivenessConfig(nodes=['/bizzy/controller'], ros_domain_id=7))
+    assert 'fail OPEN' not in capsys.readouterr().out
+
+
 def test_ros_setup_wraps_probe_in_bash(monkeypatch):
     """The setup path is passed as a positional arg, not interpolated in."""
     seen = {}
