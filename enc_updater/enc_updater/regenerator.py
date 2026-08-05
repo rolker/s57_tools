@@ -85,15 +85,36 @@ def parse_export_log(log_text: str) -> List[Tuple[str, int]]:
     return pairs
 
 
-def _band1_min_max(path: str) -> Tuple[float, float]:
-    """Band-1 (ellipsoidal height) min/max of a tile, via the GDAL bindings."""
+def _band1_min_max(path: str) -> Optional[Tuple[float, float]]:
+    """
+    Band-1 (ellipsoidal height) min/max of a tile, via the GDAL bindings.
+
+    Returns ``None`` for a tile with no valid pixels (entirely nodata) — a
+    legitimately empty chart grid, which the range check must skip rather than
+    mistake for corruption. ``ComputeRasterMinMax(approx_ok=False)`` raises when
+    a band holds no valid pixels; that specific case is an empty tile, not an
+    unreadable one (a genuinely corrupt/unreadable file fails earlier, at
+    ``Open``/``GetRasterBand``, and still raises UpdaterError).
+    """
     from osgeo import gdal
     gdal.UseExceptions()
+    dataset = None
     try:
         dataset = gdal.Open(path)
-        return tuple(dataset.GetRasterBand(1).ComputeRasterMinMax(False))
+        band = dataset.GetRasterBand(1)
+        try:
+            return tuple(band.ComputeRasterMinMax(False))
+        except RuntimeError as e:
+            if 'no valid pixels' in str(e).lower():
+                return None
+            raise UpdaterError(f'sanity: cannot read staged tile {path}: {e}')
+    except UpdaterError:
+        raise
     except RuntimeError as e:
         raise UpdaterError(f'sanity: cannot read staged tile {path}: {e}')
+    finally:
+        # Release the GDAL dataset handle promptly rather than waiting on GC.
+        dataset = None
 
 
 # Spot-checking this many tiles bounds sanity-check time on large regions
@@ -117,7 +138,11 @@ def sanity_check(chart_dir: str, depth_range: Tuple[float, float]) -> None:
     low, high = depth_range
     for tile in tiles[:_SANITY_SPOT_CHECK_TILES]:
         path = os.path.join(chart_dir, tile)
-        tile_min, tile_max = _band1_min_max(path)
+        band_range = _band1_min_max(path)
+        if band_range is None:
+            # All-nodata tile (an empty chart grid): no height range to check.
+            continue
+        tile_min, tile_max = band_range
         if tile_min < low or tile_max > high:
             raise UpdaterError(
                 f'sanity: {path} band-1 range [{tile_min}, {tile_max}] outside '
