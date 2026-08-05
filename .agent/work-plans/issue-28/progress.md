@@ -146,3 +146,27 @@ config-coercion, URL-scheme, domain-warning, and real-GDAL all-nodata cases).
 Lifecycle: **Implementation** → **review-code** (re-review the fixes). Hand off to a fresh-context sub-agent:
 
     .agent/scripts/dispatch_subagent.sh --mode in-process --issue 28 --skill review-code
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-05 17:47 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: approved
+
+**Branch**: feature/issue-28 at `85a8df5`
+**Mode**: pre-push
+**Depth**: Deep (reason: ~2500-line new package; untrusted network download + zip extraction + cross-layer subprocess orchestration + nav-safety interlock)
+**Must-fix**: 0 | **Suggestions**: 8
+**Round**: 3 | **Ship**: recommended — all three prior-round must-fixes confirmed fixed; both adversarial must-fix claims dismissed on source verification (editions.json IS delivered by replaceChartLayer's whole-dir rename; interlock/SSRF claims are already-mitigated tradeoffs / narrow defense-in-depth). No must-fix survives.
+**Static analysis**: ament_flake8 clean; ament_pep257 clean; 57/57 tests pass (incl. real-GDAL sanity)
+**Claude Adversarial**: 2 passes (Lens A logic + Lens B systemic/safety); Copilot off (default); Local skipped (Ollama unreachable)
+
+### Findings
+- [ ] (suggestion) Interlock still fails OPEN on RMW_IMPLEMENTATION mismatch (no config key) and if ros_domain_id left unpinned; currently warn+doc only — consider requiring ros_domain_id when nodes set and adding an rmw_implementation key exported into the probe env — `enc_updater/enc_updater/nav_liveness.py:69`
+- [ ] (suggestion) `_open_url` scheme allow-list checks only the initial URL; urlopen follows redirects (http/https/ftp permitted) so a spoofed catalog could 302→internal http SSRF or ftp:// (file:// stays blocked) — re-check scheme per redirect hop or disable redirects — `enc_updater/enc_updater/downloader.py:57`
+- [ ] (suggestion) Leftover PID work-dir after a hard crash fails every subsequent run (exit 1) until manual cleanup; with the flock now guaranteeing no concurrent run, reclaim the stale dir under the held lock instead of refusing — `enc_updater/enc_updater/regenerator.py:210`
+- [ ] (suggestion) Sanity spot-check samples sorted(tiles)[:5] — alphabetically-first tiles cluster in one coordinate corner; a localized corruption elsewhere passes — stride across the sorted list — `enc_updater/enc_updater/regenerator.py:139`
+- [ ] (suggestion) Removing a cell from config.cells prunes neither its manifest entry nor its corpus dir, so it silently stays in the chart (still converges); prune manifest entries absent from cells or document manual cleanup — `enc_updater/enc_updater/downloader.py:274`
+- [ ] (suggestion) Config-load failure returns exit 1 before any health record is written, so persistent config breakage is invisible in .updater_health.json — record a config-phase error — `enc_updater/enc_updater/__main__.py:59`
+- [ ] (suggestion) `_band1_min_max` distinguishes empty-vs-corrupt via the GDAL English substring 'no valid pixels'; a future GDAL rewording would fail all-nodata tiles as corrupt (fail-closed; a real-GDAL test would catch it) — `enc_updater/enc_updater/regenerator.py:108`
+- [ ] (suggestion) Billion-laughs guard is a raw-bytes substring scan; a UTF-16 payload could evade it while expat still expands entities — prefer defusedxml or an expat entity-rejection handler — `enc_updater/enc_updater/downloader.py:76`
