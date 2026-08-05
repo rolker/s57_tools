@@ -18,6 +18,7 @@ import os
 import shutil
 import tempfile
 from typing import Dict, List, Optional, Tuple
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
@@ -44,8 +45,20 @@ class CatalogEntry:
     size: Optional[int]
 
 
+_ALLOWED_URL_SCHEMES = ('http', 'https')
+
+
 def _open_url(url: str, timeout: float):
     """Open a URL for reading (separate function so tests can substitute)."""
+    # Allow-list the scheme before opening. The cell-zip URL comes from the
+    # (external, untrusted) catalog; without this a spoofed catalog could point
+    # `zipfile_location` at `file://` (local file exfiltration) or another
+    # scheme urllib supports, turning the fetch into an SSRF/LFI vector.
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme not in _ALLOWED_URL_SCHEMES:
+        raise UpdaterError(
+            f'download: refusing non-http(s) URL {url!r} '
+            f'(scheme {scheme!r} not in {_ALLOWED_URL_SCHEMES})')
     return urllib.request.urlopen(url, timeout=timeout)
 
 

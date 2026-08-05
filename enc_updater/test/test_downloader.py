@@ -253,6 +253,31 @@ def test_zip_bomb_extract_rejected(tmp_path, monkeypatch):
     assert snapshot(cfg.corpus_dir) == before
 
 
+@pytest.mark.parametrize('bad_url', [
+    'file:///etc/passwd',
+    'ftp://internal.host/secret',
+    'gopher://169.254.169.254/',
+    '/etc/passwd',
+])
+def test_open_url_rejects_non_http_scheme(bad_url):
+    """A spoofed catalog URL with a non-http(s) scheme is refused (SSRF/LFI guard)."""
+    with pytest.raises(UpdaterError, match='refusing non-http'):
+        downloader._open_url(bad_url, timeout=1)
+
+
+@pytest.mark.parametrize('good_url', [
+    'https://charts.noaa.gov/ENCs/US5NH02M.zip',
+    'http://charts.noaa.gov/ENCs/US5NH02M.zip',
+])
+def test_open_url_allows_http_schemes(good_url, monkeypatch):
+    """http/https pass the scheme gate through to urlopen."""
+    seen = {}
+    monkeypatch.setattr(downloader.urllib.request, 'urlopen',
+                        lambda url, timeout: seen.setdefault('url', url))
+    downloader._open_url(good_url, timeout=1)
+    assert seen['url'] == good_url
+
+
 def test_update_replaces_previous_cell_edition(tmp_path, monkeypatch):
     """A newer edition replaces the old cell dir; old files do not linger."""
     zip_a, zip_b = make_cell_zip('US5NH02M'), make_cell_zip('US4NH01M')
