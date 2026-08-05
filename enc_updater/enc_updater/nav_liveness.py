@@ -32,8 +32,12 @@ from .config import NavLivenessConfig
 def _probe_node_list(cfg: NavLivenessConfig) -> List[str]:
     """Run ``ros2 node list`` (optionally under a sourced ROS env)."""
     if cfg.ros_setup:
+        # Pass the setup path as a positional arg ($1) rather than
+        # interpolating it into the script, so an unusual path can't be
+        # word-split or mis-executed by the shell.
         argv = ['bash', '-c',
-                f'source "{cfg.ros_setup}" >/dev/null 2>&1 && ros2 node list']
+                'source "$1" >/dev/null 2>&1 && ros2 node list',
+                'enc_updater-probe', cfg.ros_setup]
     else:
         argv = ['ros2', 'node', 'list']
     env = os.environ.copy()

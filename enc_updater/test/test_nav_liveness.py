@@ -95,7 +95,7 @@ def test_probe_env_omits_domain_when_unset(monkeypatch):
 
 
 def test_ros_setup_wraps_probe_in_bash(monkeypatch):
-    """With ros_setup configured the probe sources it before `ros2 node list`."""
+    """The setup path is passed as a positional arg, not interpolated in."""
     seen = {}
 
     def record_run(argv, **kwargs):
@@ -107,4 +107,8 @@ def test_ros_setup_wraps_probe_in_bash(monkeypatch):
                             ros_setup='/opt/ros/jazzy/setup.bash')
     nav_liveness.check_nav_down(cfg)
     assert seen['argv'][0] == 'bash'
-    assert '/opt/ros/jazzy/setup.bash' in seen['argv'][2]
+    # The script references the path via $1, not by interpolation…
+    assert '$1' in seen['argv'][2]
+    assert '/opt/ros/jazzy/setup.bash' not in seen['argv'][2]
+    # …and the path arrives as the trailing positional argument ($1).
+    assert seen['argv'][-1] == '/opt/ros/jazzy/setup.bash'
