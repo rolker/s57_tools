@@ -66,6 +66,34 @@ def test_empty_node_list_skips_probe(monkeypatch):
     nav_liveness.check_nav_down(NavLivenessConfig(nodes=[]))
 
 
+def test_ros_domain_id_pins_probe_env(monkeypatch):
+    """ros_domain_id is exported into the probe env so it can't fail open."""
+    seen = {}
+
+    def record_run(argv, **kwargs):
+        """Record the env the probe subprocess is given."""
+        seen['env'] = kwargs.get('env')
+        return FakeCompleted(stdout='')
+    monkeypatch.setattr(nav_liveness.subprocess, 'run', record_run)
+    cfg = NavLivenessConfig(nodes=['/bizzy/controller'], ros_domain_id=7)
+    nav_liveness.check_nav_down(cfg)
+    assert seen['env']['ROS_DOMAIN_ID'] == '7'
+
+
+def test_probe_env_omits_domain_when_unset(monkeypatch):
+    """With no ros_domain_id the probe inherits the ambient env unchanged."""
+    seen = {}
+    monkeypatch.delenv('ROS_DOMAIN_ID', raising=False)
+
+    def record_run(argv, **kwargs):
+        """Record the env the probe subprocess is given."""
+        seen['env'] = kwargs.get('env')
+        return FakeCompleted(stdout='')
+    monkeypatch.setattr(nav_liveness.subprocess, 'run', record_run)
+    nav_liveness.check_nav_down(NavLivenessConfig(nodes=['/bizzy/controller']))
+    assert 'ROS_DOMAIN_ID' not in seen['env']
+
+
 def test_ros_setup_wraps_probe_in_bash(monkeypatch):
     """With ros_setup configured the probe sources it before `ros2 node list`."""
     seen = {}

@@ -25,10 +25,17 @@ class NavLivenessConfig:
     host (e.g. a dev machine with no navigation stack) and the probe is
     skipped entirely. With nodes configured, any probe failure refuses the
     swap (fail closed).
+
+    ``ros_domain_id`` pins the probe's DDS domain to the live nav stack's.
+    Without it, a cron/probe environment whose ``ROS_DOMAIN_ID`` differs from
+    the nav stack's queries the wrong graph, sees no nodes, and the interlock
+    fails *open* (the empty result is indistinguishable from "nav down"). See
+    the README nav-liveness contract for the full env-alignment requirement.
     """
 
     nodes: List[str] = dataclasses.field(default_factory=list)
     ros_setup: Optional[str] = None
+    ros_domain_id: Optional[int] = None
     timeout: float = 20.0
 
 
@@ -63,7 +70,7 @@ _TOP_LEVEL_KEYS = {
     'download_timeout', 'export_timeout', 'stage_timeout', 'commit_timeout',
 }
 
-_NAV_KEYS = {'nodes', 'ros_setup', 'timeout'}
+_NAV_KEYS = {'nodes', 'ros_setup', 'ros_domain_id', 'timeout'}
 
 
 def _expand(path: Optional[str]) -> Optional[str]:
@@ -115,9 +122,16 @@ def load_config(path: str) -> UpdaterConfig:
     nodes = nav_raw.get('nodes', []) or []
     if not isinstance(nodes, list) or not all(isinstance(n, str) and n for n in nodes):
         raise UpdaterError('config: nav_liveness.nodes must be a list of node names')
+    domain_id = nav_raw.get('ros_domain_id')
+    if domain_id is not None and (isinstance(domain_id, bool)
+                                  or not isinstance(domain_id, int)
+                                  or not 0 <= domain_id <= 232):
+        raise UpdaterError(
+            'config: nav_liveness.ros_domain_id must be an integer in [0, 232]')
     nav = NavLivenessConfig(
         nodes=list(nodes),
         ros_setup=_expand(nav_raw.get('ros_setup')),
+        ros_domain_id=domain_id,
         timeout=float(nav_raw.get('timeout', 20.0)),
     )
 

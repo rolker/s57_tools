@@ -41,8 +41,16 @@ vdatum_dir: /opt/vdatum
 # the swap. An EMPTY/omitted list disables the probe — only appropriate on
 # hosts with no navigation stack (dev machines). With nodes configured, any
 # probe failure refuses the swap (fail closed).
+#
+# CRITICAL — probe environment alignment: the probe queries the DDS graph in
+# this process's environment. If ROS_DOMAIN_ID or RMW_IMPLEMENTATION differ
+# from the live nav stack's (a cron job inherits neither), the probe sees an
+# empty graph and the interlock FAILS OPEN — the swap runs while nav is up.
+# Pin ros_domain_id below, source the nav stack's setup via ros_setup, and
+# export a matching RMW_IMPLEMENTATION. See the README nav-liveness contract.
 nav_liveness:
   nodes: []
+  # ros_domain_id: 0     # pin the probe's DDS domain to the nav stack's
   # ros_setup: /opt/ros/jazzy/setup.bash   # sourced for the probe if set
   # timeout: 20.0
 

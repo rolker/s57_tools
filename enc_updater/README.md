@@ -78,6 +78,23 @@ appropriate on hosts that never run navigation (dev machines). There is no
 sentinel file or side channel: the probe reads the live ROS graph at swap
 time only.
 
+**Probe environment alignment (critical)**: the probe runs `ros2 node list`
+in the updater's own environment. If that environment's `ROS_DOMAIN_ID` or
+`RMW_IMPLEMENTATION` differs from the live navigation stack's, the probe
+queries the *wrong* DDS graph, sees no nodes, and the interlock **fails open**
+— the swap proceeds while nav is active. Fail-closed only covers probe
+*errors*; a successful-but-blind empty result is indistinguishable from "nav
+genuinely down". A cron job is the likely offender: it inherits none of an
+interactive shell's ROS env. So:
+
+- Pin `nav_liveness.ros_domain_id` to the nav stack's domain (0–232). The
+  updater exports it into the probe's environment, overriding whatever the
+  cron/sourced env carried.
+- Source the same setup the nav stack uses via `nav_liveness.ros_setup`.
+- Ensure `RMW_IMPLEMENTATION` matches the nav stack's — export it in the cron
+  environment or the sourced setup (there is no config key for it; DDS
+  discovery only sees peers on the same middleware).
+
 ## Deployment prerequisite (uma#276)
 
 The store's chart layer only *feeds a costmap safely* on hosts whose

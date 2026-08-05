@@ -12,8 +12,16 @@ indeterminate answer is treated as "nav may be up". An empty/omitted node
 list means the interlock is not configured for this host (documented in the
 README; intended for dev machines with no navigation stack) and the probe is
 skipped.
+
+Fail-open caveat: fail-closed covers probe *errors*, not a probe that
+succeeds but queries the wrong DDS graph. If the probe environment's
+``ROS_DOMAIN_ID`` differs from the live nav stack's, ``ros2 node list``
+returns an empty list and the swap proceeds while nav is active. Pin the
+domain with ``nav_liveness.ros_domain_id`` (set here on the probe's env) and
+keep ``RMW_IMPLEMENTATION`` aligned — see the README nav-liveness contract.
 """
 
+import os
 import subprocess
 from typing import List
 
@@ -28,9 +36,14 @@ def _probe_node_list(cfg: NavLivenessConfig) -> List[str]:
                 f'source "{cfg.ros_setup}" >/dev/null 2>&1 && ros2 node list']
     else:
         argv = ['ros2', 'node', 'list']
+    env = os.environ.copy()
+    if cfg.ros_domain_id is not None:
+        # Pin the probe to the nav stack's DDS domain so a mismatched cron
+        # ROS_DOMAIN_ID can't query an empty graph and let the swap fail open.
+        env['ROS_DOMAIN_ID'] = str(cfg.ros_domain_id)
     try:
         result = subprocess.run(
-            argv, capture_output=True, text=True, timeout=cfg.timeout)
+            argv, capture_output=True, text=True, timeout=cfg.timeout, env=env)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise InterlockRefusal(
             f'interlock: nav-liveness probe failed ({e}) — refusing to swap '
