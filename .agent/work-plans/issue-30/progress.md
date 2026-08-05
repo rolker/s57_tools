@@ -247,3 +247,29 @@ Lifecycle verdict is **changes-requested** → host dispatches **address-finding
 
 ### Next step
 Lifecycle verdict is **approved** → push / open PR → **triage-reviews**. (PR #31 already open from prior rounds; the 5 local commits ahead of origin/feature/issue-30 carry the round-2 fix — push, then dispatch triage-reviews as a fresh-context sub-agent.)
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-08-05 10:21 -04:00
+**By**: Claude Code Agent (Claude Opus)
+
+**PR**: #31 at `e9f655f`
+**Sources**: 4 (Copilot R2 @ `e9f655f`, Copilot R1 @ `b3575a5`, Local Review (Pre-Push) R3 @ `fc72e02`, CI rollup @ `e9f655f`)
+**Cross-source confirmations**: 1
+**CI**: all-pass (build-and-test success, copilot-pull-request-reviewer success)
+
+### Findings
+- [ ] (cross-confirmed, low) PR-description accuracy about soundingless/default-mode behavior: Copilot R2 (suppressed) reads "Deferred follow-ups" as saying soundingless UWTROC/WRECKS are unrasterized, and Local Review R3 flags "default-mode behavior unchanged" as imprecise given the `i>0`→`i>=0` and PIPSOL `IsFieldSetAndNotNull` guards. Body already discloses both the awash `hazard = 0.0` write and the two guard fixes, so this is a one-clause wording qualification on the PR body, not a code change — PR #31 description (no source file)
+- [ ] (suggestion) PIPSOL `IsFieldSetAndNotNull` guard has no direct OGR-seam test — `marine_charts` has no gtest target at all (CMakeLists has lint-only `BUILD_TESTING`), so a direct test needs new test infrastructure plus extraction of the rasterize switch; reverting the guard leaves the suite green. Follow-up issue in `marine_charts`, not a PR blocker — `marine_charts/src/s57_dataset.cpp:288`, `s57_layer/test/test_depth_costs.cpp:252`
+
+### False positives
+- (Copilot R1 @ `b3575a5`) "PIPSOL `DRVAL1` read without `IsFieldSetAndNotNull`" — stale, not wrong: fixed in `fc82534` (three commits after the reviewed SHA); `s57_dataset.cpp:287-288` now guards `i>=0` *and* `IsFieldSetAndNotNull(i)`. Already triaged and closed in the prior `## Integrated Review` @ `b3575a5`.
+- (Copilot R2 @ `e9f655f`, suppressed) "PR description says soundingless UWTROC/WRECKS are not rasterized" — the current body's "What changed" bullet states in bold that soundingless UWTROC/WRECKS write `hazard = 0.0` (awash); the "not rasterized" clause in Deferred follow-ups is scoped to PIPSOL only, which matches `s57_dataset.cpp:286-294`. Retained above only as the wording-precision action item.
+
+### Notes
+- No human reviewer comments and no conversation comments on PR #31; Copilot is the only GitHub-side source.
+- Round-2 must-fix (soundingless charted hazards → NO_INFORMATION in suppressed mode) verified resolved in local code at `s57_dataset.cpp:309-317` (awash `hazard = 0.0`, elevation deliberately unwritten); README §depth_costs carries the matching PIPSOL safety caveat.
+- Zero must-fix findings across all sources at head `e9f655f`. Both open items are documentation/test-seam suggestions.
+
+### Next step
+No must-fix or blocking findings remain and CI is green — PR #31 is merge-ready pending the user's content review. Optionally qualify the PR-body wording and file the `marine_charts` OGR-seam test follow-up before merging via `.agent/scripts/merge_pr.sh --issue 30`.
