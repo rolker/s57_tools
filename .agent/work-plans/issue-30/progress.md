@@ -221,3 +221,29 @@ sub-agent: `.agent/scripts/dispatch_subagent.sh --mode in-process --issue 30 --s
 
 ### Next step
 Lifecycle verdict is **changes-requested** → host dispatches **address-findings** to work the open finding(s) from this entry, then re-dispatches **review-code**. Diff is not pushed until a pre-push review returns approved.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-05 13:50 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: approved
+
+**Branch**: feature/issue-30 at `fc72e02`
+**Mode**: pre-push
+**Depth**: Deep (reason: safety-relevant navigation-costmap cost logic + cross-layer ADR-0010 D10 coordination with bathymetry_layer)
+**Must-fix**: 0 | **Suggestions**: 2
+**Round**: 3 | **Ship**: recommended — round-2 safety must-fix (soundingless charted hazards → NO_INFORMATION) resolved via awash-hazard rasterization for UWTROC/WRECKS + documented PIPSOL caveat; 0 must-fix (falling from 1); dual-lens adversarial + governance + plan-drift clean, only doc/test-seam suggestions remain.
+
+### Findings
+- [ ] (suggestion) "Default-mode byte-identical" framing is imprecise: the `i>0`→`i>=0` change and new PIPSOL `IsFieldSetAndNotNull` guard shift default-mode elevation output for two edge cases (sounding at OGR field index 0; unset DRVAL1) — both safety-positive fixes, so qualify the claim rather than change code (cross-pass confirmed: Lens A + Lens B) — `marine_charts/src/s57_dataset.cpp:287,303`
+- [ ] (suggestion) PIPSOL `IsFieldSetAndNotNull` dataset guard has no direct test — test (i) pins only the downstream layer contract on a hand-built grid; reverting the guard leaves tests green (already disclosed as a known OGR-seam gap with a follow-up candidate) — `s57_layer/test/test_depth_costs.cpp:252`
+
+### Notes
+- Round-2 open suggestion positively cleared: s57_grids serializes grids name-keyed via GridMapRosConverter with no positional layer indexing / layer-count assertions, so the new unconditional `hazard` layer is safe across the service boundary (Lens B).
+- Round-2 suggestions addressed: README unsurveyed/caution wording qualified; OBSTRN case-86 note added; explicit soundingless-hazard assertion added to test (f).
+- Static analysis: ament cpplint/uncrustify deliberately disabled in-package (Allman house style); no new enforced findings. Copilot Adversarial: off (default). Local Adversarial: skipped (local_review.sh not present in s57_tools repo).
+- Plan adherence: zero drift; all 6 planned files + test cases (a)-(i) + integration smoke present. Soundingless-awash rasterization is the in-scope resolution of the round-2 must-fix.
+- Build/test execution deferred to CI: s57_layer test build blocked by unbuilt underlay_ws (geographic_msgs/geodesy) in this worktree — the same environment gap recorded in prior rounds, not a diff defect.
+
+### Next step
+Lifecycle verdict is **approved** → push / open PR → **triage-reviews**. (PR #31 already open from prior rounds; the 5 local commits ahead of origin/feature/issue-30 carry the round-2 fix — push, then dispatch triage-reviews as a fresh-context sub-agent.)
