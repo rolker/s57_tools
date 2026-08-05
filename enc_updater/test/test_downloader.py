@@ -171,6 +171,33 @@ def test_zip_missing_cell_data_rejected(tmp_path, monkeypatch):
     assert snapshot(cfg.corpus_dir) == before
 
 
+def test_install_double_failure_names_backup(tmp_path, monkeypatch):
+    """If install and rollback both fail, the error names the preserved backup."""
+    corpus = tmp_path / 'corpus'
+    corpus.mkdir()
+    target = corpus / 'US5NH02M'
+    target.mkdir()
+    (target / 'US5NH02M.000').write_text('old cell data')
+    new_dir = corpus / '.download.new'
+    new_dir.mkdir()
+    (new_dir / 'US5NH02M.000').write_text('new cell data')
+
+    real_rename = os.rename
+    calls = {'n': 0}
+
+    def flaky_rename(src, dst):
+        """Let the first rename (target -> backup) run; fail the rest."""
+        calls['n'] += 1
+        if calls['n'] == 1:
+            return real_rename(src, dst)
+        raise OSError('disk gone')
+
+    monkeypatch.setattr(downloader.os, 'rename', flaky_rename)
+    with pytest.raises(UpdaterError, match='preserved at') as excinfo:
+        downloader._install_cell(str(corpus), 'US5NH02M', str(new_dir))
+    assert '.old.US5NH02M.' in str(excinfo.value)
+
+
 def test_configured_cell_missing_from_catalog_errors(tmp_path, monkeypatch):
     """A configured cell absent from the catalog needs a human, not silence."""
     zip_a, zip_b = make_cell_zip('US5NH02M'), make_cell_zip('US4NH01M')

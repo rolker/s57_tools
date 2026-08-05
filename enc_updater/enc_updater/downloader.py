@@ -171,7 +171,17 @@ def _install_cell(corpus_dir: str, cell: str, new_dir: str) -> None:
         os.rename(new_dir, target)
     except OSError as e:
         if backup is not None and os.path.exists(backup) and not os.path.exists(target):
-            os.rename(backup, target)
+            try:
+                os.rename(backup, target)
+            except OSError as restore_err:
+                # Both the install and the rollback failed: the previous cell
+                # data survives only in `backup`, and `target` is now missing.
+                # Name the backup dir so an operator can restore it by hand.
+                raise UpdaterError(
+                    f'download: installing {cell} into corpus failed ({e}); '
+                    f'restoring the previous data also failed ({restore_err}) — '
+                    f'the previous {cell} data is preserved at {backup}; '
+                    f'move it back to {target} manually') from e
         raise UpdaterError(f'download: installing {cell} into corpus failed: {e}')
     if backup is not None:
         shutil.rmtree(backup, ignore_errors=True)
