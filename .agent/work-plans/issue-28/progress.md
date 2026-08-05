@@ -108,11 +108,41 @@ Lifecycle: **Implementation** → **review-code** (re-review the fixes). Hand of
 **Claude Adversarial**: 2 passes (Lens A logic + Lens B systemic/safety); Copilot off (default); Local skipped (Ollama unreachable)
 
 ### Findings
-- [ ] (must-fix) Bare `float()` coercions (`timeout`, `lake_datum`, `cell_size`, `*_timeout`) escape `load_config` as an uncaught `ValueError` — crashes with a traceback instead of the documented clean exit 1; confirmed by running it — `enc_updater/enc_updater/config.py:135,150,156`
-- [ ] (must-fix) No URL scheme allow-list on catalog `zipfile_location` before `urllib.urlopen` — a spoofed catalog can use `file://`/SSRF; add `urlparse` + http/https check — `enc_updater/enc_updater/downloader.py:47,162`
-- [ ] (suggestion) Interlock fail-open not enforced: `nodes` set + `ros_domain_id` omitted is accepted; warn (or require) when nodes non-empty — `enc_updater/enc_updater/nav_liveness.py:41`
-- [ ] (suggestion) Document the probe→commit TOCTOU window in the README nav-liveness contract (nav can come up during the ~120s commit) — `enc_updater/enc_updater/regenerator.py:207`
-- [ ] (suggestion) `registry.py` docstring mis-describes `replaceChartLayer` (renames whole staged dir; does not filter non-.tif) — `enc_updater/enc_updater/registry.py:10`
-- [ ] (suggestion) All-nodata tile makes `ComputeRasterMinMax` raise → aborts swap as "corrupt"; skip-not-fail or document the assumption — `enc_updater/enc_updater/regenerator.py:88`
-- [ ] (suggestion) Release the `gdal.Open` handle explicitly (`dataset = None`) in the spot-check loop — `enc_updater/enc_updater/regenerator.py:88`
-- [ ] (suggestion) `flock` is same-host advisory only; document the single-host / no-shared-NFS-store assumption — `enc_updater/enc_updater/regenerator.py:141`
+- [x] (must-fix) Bare `float()` coercions (`timeout`, `lake_datum`, `cell_size`, `*_timeout`) escape `load_config` as an uncaught `ValueError` — crashes with a traceback instead of the documented clean exit 1; confirmed by running it — `enc_updater/enc_updater/config.py:135,150,156`
+- [x] (must-fix) No URL scheme allow-list on catalog `zipfile_location` before `urllib.urlopen` — a spoofed catalog can use `file://`/SSRF; add `urlparse` + http/https check — `enc_updater/enc_updater/downloader.py:47,162`
+- [x] (suggestion) Interlock fail-open not enforced: `nodes` set + `ros_domain_id` omitted is accepted; warn (or require) when nodes non-empty — `enc_updater/enc_updater/nav_liveness.py:41`
+- [x] (suggestion) Document the probe→commit TOCTOU window in the README nav-liveness contract (nav can come up during the ~120s commit) — `enc_updater/enc_updater/regenerator.py:207`
+- [x] (suggestion) `registry.py` docstring mis-describes `replaceChartLayer` (renames whole staged dir; does not filter non-.tif) — `enc_updater/enc_updater/registry.py:10`
+- [x] (suggestion) All-nodata tile makes `ComputeRasterMinMax` raise → aborts swap as "corrupt"; skip-not-fail or document the assumption — `enc_updater/enc_updater/regenerator.py:88`
+- [x] (suggestion) Release the `gdal.Open` handle explicitly (`dataset = None`) in the spot-check loop — `enc_updater/enc_updater/regenerator.py:88`
+- [x] (suggestion) `flock` is same-host advisory only; document the single-host / no-shared-NFS-store assumption — `enc_updater/enc_updater/regenerator.py:141`
+
+## Implementation
+**Status**: complete
+**When**: 2026-08-05 17:37 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**Branch**: feature/issue-28 at `5ac9c69`
+**Addressed**: Local Review (Pre-Push), When 2026-08-05 17:26 +00:00 / SHA `42e60a5` (2 must-fix + 6 suggestions, all open)
+**Commits**: `24c40cf` `f2ed34e` `94dc990` `12d88a2` `efc11d6` `5ac9c69`
+
+Every finding fixed with a real change (no deferrals). One atomic commit per
+finding (the two `_band1_min_max` findings share a commit — same 4-line
+function). Each touched module re-linted (ament_flake8 + ament_pep257) and the
+full package suite re-run — **57 passed** (was 44; +13 regression tests across
+config-coercion, URL-scheme, domain-warning, and real-GDAL all-nodata cases).
+
+### Actions
+- [x] (must-fix) Non-numeric numeric config fields — added `_require_float`; every `float()` coercion (`nav_liveness.timeout`, `lake_datum`, `cell_size`, `download/export/stage/commit_timeout`) now routes through it and raises `UpdaterError` (clean exit 1) instead of an uncaught `ValueError`; new `test_config.py` — `enc_updater/enc_updater/config.py:82` (`24c40cf`)
+- [x] (must-fix) URL-scheme allow-list — `_open_url` now rejects any non-http(s) scheme (`file://`/SSRF/LFI) via `urllib.parse.urlparse` before `urlopen`, guarding the untrusted catalog `zipfile_location`; new `_open_url` scheme tests — `enc_updater/enc_updater/downloader.py:47` (`f2ed34e`)
+- [x] (suggestion) Interlock domain-pin warning — `check_nav_down` now warns loudly when `nav_liveness.nodes` is set but `ros_domain_id` is unpinned (the fail-open condition); new warn/no-warn tests — `enc_updater/enc_updater/nav_liveness.py:65` (`94dc990`)
+- [x] (suggestion) All-nodata tile — `_band1_min_max` returns `None` (empty grid, skipped by the range check) when `ComputeRasterMinMax` reports no valid pixels, distinguished from a genuinely unreadable tile (still `UpdaterError`); real-GDAL `test_sanity.py` — `enc_updater/enc_updater/regenerator.py:88` (`12d88a2`)
+- [x] (suggestion) Release GDAL handle — `_band1_min_max` sets `dataset = None` in a `finally` rather than waiting on GC — `enc_updater/enc_updater/regenerator.py:88` (`12d88a2`)
+- [x] (suggestion) `registry.py` docstring — rewritten to state `replaceChartLayer` renames the whole staged `chart/` dir (so `editions.json` rides along); it only *validates* `.tif` tiles, it does not filter non-`.tif` out of the swap — `enc_updater/enc_updater/registry.py:10` (`efc11d6`)
+- [x] (suggestion) Probe→commit TOCTOU — documented the point-in-time nature of the interlock and the ~120 s commit window in the README nav-liveness contract — `enc_updater/README.md` (`5ac9c69`)
+- [x] (suggestion) `flock` scope — documented the same-host advisory-lock / single-host-per-store (no shared-NFS) assumption in the README troubleshooting entry and the `_store_lock` docstring — `enc_updater/README.md`, `enc_updater/enc_updater/regenerator.py:141` (`5ac9c69`)
+
+### Next step
+Lifecycle: **Implementation** → **review-code** (re-review the fixes). Hand off to a fresh-context sub-agent:
+
+    .agent/scripts/dispatch_subagent.sh --mode in-process --issue 28 --skill review-code
