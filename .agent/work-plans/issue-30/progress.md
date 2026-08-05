@@ -1,0 +1,275 @@
+---
+issue: 30
+---
+
+# Issue #30 — ADR-0010 D10 split: suppress depth ramp in s57_layer
+
+## Issue Review
+**Status**: complete
+**When**: 2026-08-04 00:00 +00:00
+**By**: Claude Code Agent (Claude Sonnet)
+
+**Issue**: #30
+**Comment**: (best-effort post follows this entry; not recorded inline)
+**Scope verdict**: well-scoped
+
+### Summary
+
+The issue proposes implementing the ADR-0010 D10 split: add a mode to `s57_layer` (in `s57_tools`) that suppresses its depth-ramp cost computation, retaining only non-depth semantics (land/LNDARE, `restricted`, `overhead`, `caution`/`unsurveyed`, point hazards). This is explicitly called out in ADR-0010 D10 as its own issue/PR; the field evidence from the 2026-08-03 Broadkill deployment (echoboats#408) confirms the urgency.
+
+### Scope Assessment
+
+**Well-scoped?** Yes — the change is confined to `s57_layer` (a new parameter + conditional logic in `get_cost_from_grid` + TF-optional startup path). Single PR. The boat-side echoboats config change is explicitly deferred to a separate issue, keeping scope tight.
+
+**Right repo?** Yes — `s57_layer` lives in `s57_tools`, which is a project repo. This is squarely a project-side domain change, not workspace infra.
+
+**Dependencies**:
+- ADR-0010 D10 is the authoritative design spec. Status is `Proposed`; but this issue is one of the explicitly enumerated implementation items ("lands as its own issue/PR"), so pre-adoption of D10 is clearly sanctioned.
+- `bathymetry_layer` (rolker/unh_marine_autonomy) must be the depth authority in the costmap before the echoboats config flips. This issue doesn't require that flip — the new parameter defaults to current behavior, so it's safe to merge independently.
+- The `s57_to_geotiff`-based chart layer import path (D7, #27 — merged) is a precondition for the echoboats config flip, not for this PR itself.
+
+### Principle Alignment
+
+| Principle | Status | Notes |
+|---|---|---|
+| Safety First (project) | OK | Default preserves current behavior; no regression. The suppressed mode removes a known-harmful path (chart-band blocking surveyed navigable water) |
+| Hardware Agnosticism | OK | Parameter-driven; no platform coupling |
+| Modularity and Decoupling | OK | The mode cleanly separates depth authority (→ bathymetry_layer) from obstacle authority (s57_layer) |
+| Human control and transparency | OK | Parameter must be explicit; behavior is observable via costmap topics |
+| Capture decisions, not just implementations | Watch | ADR-0010 is still "Proposed". The issue description references D10 clearly, but the plan step should verify the ADR advances to Accepted (or at minimum that the implementation notes it's tracking a Proposed ADR) |
+| A change includes its consequences | Watch | The issue lists the main consequence items (no TF warning in suppressed mode; regression test coverage for default mode). The PR should include tests for both modes and ensure README/API docs for `s57_layer` parameters are updated. The `chart_datum`/`sea_surface_frame` parameters become no-ops in suppressed mode — that should be documented |
+| Only what's needed | OK | The sketch is minimal: one parameter, conditional skip of the depth ramp, optional TF. No over-engineering |
+| Improve incrementally | OK | Default-preserve + explicit opt-in is the right incremental shape |
+| Test what breaks | Watch | Acceptance criteria include sim/replay verification and a regression test for default mode. The plan step should ensure these are included, and that the "no TF warning in suppressed mode" property is tested (currently the startup path issues a warning when `chart_datum_frame_` is set but the TF is absent — suppressed mode should either skip that or suppress it cleanly) |
+
+### ADR Applicability
+
+| ADR | Triggered | Notes |
+|---|---|---|
+| ADR-0001 — Adopt ADRs | Watch | ADR-0010 is Proposed, not Accepted. The implementation is sanctioned by D10's explicit "lands as its own issue/PR" note. Implementation should note the tracking ADR |
+| ADR-0002 — Worktree isolation | OK | Already in worktree `feature/issue-30` |
+| ADR-0008 — Follow ROS 2 conventions | OK | A new `bool` (or enum) parameter follows standard ROS 2 `declareParameter` pattern already in `s57_layer.cpp` |
+| ADR-0010 — Geospatial world model | **Triggered (primary)** | This is a direct D10 implementation item. The parameter-default (preserving current behavior) matches the ADR's sequencing note. The D5 consequence (TF not required in suppressed mode) is explicitly addressed in the issue sketch |
+| ADR-0013 — progress.md vocabulary | OK | `## Issue Review` entry written here |
+
+### Consequences (from ADR-0010 consequences map and principles review guide)
+
+- **Parameters** — two parameters (`chart_datum_frame`, `sea_surface_frame`) become no-ops in suppressed mode. Their `declareParameter` calls stay (no breaking change), but the TF lookup branch is skipped. The `s57_layer` README / API docs should document this behavior change in the same PR.
+- **`overhead` semantics** — the `overhead` channel stays active (correct per D10 / #25). The `overhead_clearance` parameter and its lookup in `get_cost_from_grid` are unaffected. Confirm no accidental regression.
+- **Test coverage** — the acceptance criteria require both modes tested; a replay/sim test with a store containing low-σ survey inside a high-σ chart band (Broadkill case) is the key validation scenario.
+- **Cross-repo follow-on** — the echoboats config change (flipping the parameter on the boat) is deferred but should be filed as a follow-up issue or linked from this PR so it doesn't get lost.
+
+### Recommendations
+
+- The `plan-task` step should check whether ADR-0010 should advance from Proposed → Accepted as part of this PR series (or at minimum add a header pointer to the tracking issue).
+- Consider naming the parameter `depth_costs` (bool, default `true`) as the issue sketch suggests, for clarity. An enum `mode` is also reasonable but adds complexity. Keep it simple.
+- The "no TF warning in suppressed mode" property (from the acceptance criteria) should be an explicit test case — it is the operational pain point from echoboats#408.
+- The `unsurveyed_cost` path in `get_cost_from_grid` (line 524 in current source) — when `depth_costs: false`, there's no `depth` variable, so the `unsurveyed` / `caution` semantics need to be preserved without the depth ramp. Clarify in the plan whether `unsurveyed_cost` applies to a cell with only `unsurveyed`/`caution` set and no elevation (currently it falls through to the elevation branch).
+
+### Actions
+- [ ] Verify ADR-0010 status handling: plan should note the issue tracks a Proposed ADR and flag if the ADR should advance as part of this work
+- [ ] Ensure `s57_layer` README/parameter docs are updated in the same PR (consequences: parameter behavior change for `chart_datum_frame`/`sea_surface_frame` in suppressed mode)
+- [ ] Include test cases for both modes: default (regression) and suppressed (no TF warning; obstacles still painted; charted land/LETHAL from LNDARE retained)
+- [ ] Clarify `unsurveyed`/`caution` cost path in suppressed mode (no `depth` variable — need to preserve the `unsurveyed_cost` guard without the ramp)
+- [ ] File or link the echoboats config-flip follow-up so it doesn't get lost after this PR merges
+
+## Plan Authored
+**Status**: complete
+**When**: 2026-08-04 00:00 +00:00
+**By**: Claude Code Agent (Claude Sonnet)
+
+**Plan**: `.agent/work-plans/issue-30/plan.md` at `0b332d7`
+**Branch**: feature/issue-30 at `0b332d7`
+**Phases**: single
+
+### Open questions
+- [ ] Should `depth_costs: false` suppress `tide_invalidate_threshold` declaration or leave it declared-but-inert? (Recommend: inert, documented.)
+- [ ] File echoboats config-flip as a new issue before this PR merges, or link in PR description and defer? (Recommend: link in PR description.)
+
+## Plan Review
+**Status**: complete
+**When**: 2026-08-04 02:54 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**Plan**: `.agent/work-plans/issue-30/plan.md` at `0b332d7`
+**PR**: PR-less (reviewed via issue #30 in worktree `feature/issue-30`)
+**Verdict**: changes-requested
+
+### Findings
+- [ ] (must-fix) Suppressed mode drops charted submerged point hazards, contradicting the plan's own retained-semantics claim — `plan.md:19` (and `plan.md:11`). UWTROC (underwater rock) and WRECKS are rasterized into the **`elevation`** channel as negative elevation (`-VALSOU` sounding); PIPSOL likewise uses `-DRVAL1` (`marine_charts/src/s57_dataset.cpp:290-301,277-286`). Step 3's rule "for submerged cells (elevation <= 0) … return `NO_INFORMATION`" therefore erases charted rocks/wrecks in suppressed mode, deferring them to `bathymetry_layer` — which only has data inside survey coverage. A charted wreck outside surveyed water vanishes from the costmap. The `elevation` channel carries no marker separating a DEPARE depth band (which D10 *wants* suppressed — the Broadkill fix) from a discrete UWTROC/WRECKS sounding (which the issue says to *retain*), so s57_layer cannot honor "retain point hazards" from within its own logic. Resolve by one of: (a) add a dedicated hazard channel upstream in `marine_charts` (expands scope → likely a separate issue); (b) explicitly scope-out and document the limitation with a linked follow-up, stating that in suppressed mode charted point hazards outside `bathymetry_layer` coverage are not painted; or (c) keep a LETHAL floor for submerged cells shallower than `minimum_depth_` even in suppressed mode (but this reintroduces depth/tide dependence, partly defeating the no-TF goal). At minimum the plan must surface this tension instead of listing point hazards as retained.
+- [ ] (suggestion) Test case (e) spec is imprecise — `plan.md:23`. For the proposed suppressed path to return `unsurveyed_cost_`, the cell must have **both** `elevation <= 0` **and** `unsurveyed`/`caution` set. The `unsurveyed`/`caution` check lives *inside* the elevation branch (`s57_layer.cpp:523`), so a caution-only cell (elevation = NaN, e.g. a bare CTNARE/UNSARE) returns `NO_INFORMATION` in both modes. Specify that case (e)'s fixture sets a submerged elevation too, and note that pure-caution/unsurveyed cells with no coincident DEPARE elevation are a pre-existing no-op (out of scope to fix, but the plan's "retain caution/unsurveyed" is only true where elevation data coexists).
+- [ ] (suggestion) `onInitialize` still logs "Tide correction enabled" (`s57_layer.cpp:91-94`) whenever the frames are set, regardless of `depth_costs_`. In suppressed mode with the frames left in config this INFO is misleading. Gate it on `depth_costs_` too, consistent with step 2's TF-lookup gating.
+- [ ] (suggestion) README table is missing `tide_invalidate_threshold`, `buffer_fraction`, `allow_uncharted`, and `get_datasets_service` as well as the two frame params. Step 4 covers only `depth_costs` + the two frames; add at least the three tide-related params together since they form the coherent set this change touches (broader gap-fill optional).
+- [ ] (positive) ADR-0010 pre-adoption is handled correctly (implementation sanctioned by D10's explicit "lands as its own issue/PR"); `review-issue` actions 1-3 and 5 are addressed; scope is well-sized (5 files, single PR); the `Documentation & Instruction Impact` section is present and non-silent.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-04 03:16 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: approved
+
+**Branch**: feature/issue-30 at `33b012e`
+**Mode**: pre-push
+**Depth**: Deep (reason: safety-relevant navigation-costmap cost logic + cross-layer ADR-0010 D10 coordination with bathymetry_layer)
+**Must-fix**: 0 | **Suggestions**: 2
+**Round**: 1 | **Ship**: recommended — 0 must-fix; clean D10 implementation, dual-lens adversarial + governance + plan-drift all clean, only two low-severity doc/robustness suggestions.
+
+### Findings
+- [ ] (suggestion) Overstated hazard guarantee — comment + README claim a charted wreck "never vanishes," but soundingless UWTROC/WRECKS/PIPSOL write no `hazard` channel and return NO_INFORMATION in suppressed mode (not a regression; qualify to "with a recorded sounding") — `s57_layer/src/s57_layer.cpp:522-528`, `s57_layer/README.md` (D10 section)
+- [ ] (suggestion) Field-index guard `if(i>0)` drops a VALSOU/DRVAL1 at field index 0 from both channels; `>= 0` correct (pre-existing file-wide pattern, inherited by the new hazard write) — `marine_charts/src/s57_dataset.cpp:284,299`
+
+### Notes
+- Static analysis: ament_cpplint/uncrustify deliberately disabled in-package (Allman house style); cppcheck shadowed-`int i` is a pre-existing file-wide pattern (none added by this diff). No new enforced findings.
+- Copilot Adversarial: off (default, not opted in). Local Adversarial: skipped (local_review.sh not present in project repo).
+- Build: marine_charts (hazard channel) compiles clean; s57_layer test build blocked by unbuilt underlay_ws (geographic_msgs/geodesy) dependency in this worktree — environment gap, not a diff defect. Test execution deferred to CI.
+- Plan adherence: zero drift; all 6 planned files + test cases (a)-(h) + integration smoke present; plan-review must-fix resolved via dedicated hazard channel (option a) as planned.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-08-03 23:41 -04:00
+**By**: Claude Code Agent (Claude Opus)
+
+**PR**: #31 at `b3575a5`
+**Sources**: 3 (Copilot R1 @ `b3575a5`, Local Review (Pre-Push) @ `33b012e`, CI rollup @ `b3575a5`)
+**Cross-source confirmations**: 0
+**CI**: all-pass (build-and-test success, copilot-pull-request-reviewer success)
+
+### Findings
+- [x] (must-fix, Copilot) PIPSOL (94) reads `DRVAL1` via `GetFieldAsDouble` without an
+  `IsFieldSetAndNotNull(i)` guard, unlike the WRECKS/UWTROC `VALSOU` block six lines
+  below. OGR returns `0.0` for an unset/null field, and `DRVAL1` is not mandatory on
+  PIPSOL in S-57 — so a depth-less charted pipeline rasterizes `elevation = -0.0` **and**
+  (new in this PR) `hazard = -0.0`. In suppressed mode `get_cost_from_grid()` returns
+  `LETHAL_OBSTACLE` for any non-NaN `hazard` cell, so the entire pipeline footprint
+  becomes an unconditional lethal band that `bathymetry_layer` cannot clear. The PR
+  did not create the unguarded read, but it newly routes it into the hazard channel,
+  which escalates a wrong depth value into a hard, uncleavable obstacle.
+  Fix: wrap both rasterize calls in `if(featurePair.feature->IsFieldSetAndNotNull(i))`,
+  matching the VALSOU block; add a test case for a PIPSOL with an unset `DRVAL1`
+  asserting no `hazard` write. — `marine_charts/src/s57_dataset.cpp:284-291`
+
+### False positives
+- (none)
+
+### Prior-round findings (resolved)
+- (Local Review (Pre-Push) @ `33b012e`) Overstated hazard guarantee in comment + README —
+  addressed in `b3575a5` (qualified to "with a recorded sounding").
+- (Local Review (Pre-Push) @ `33b012e`) `if(i>0)` dropped field index 0 — addressed in
+  `b3575a5` (`>= 0` in the touched VALSOU/DRVAL1 blocks). Copilot's finding above is a
+  *different* defect in the same block (null-value guard, not index guard), so it is not
+  a cross-source confirmation of this item.
+
+## Implementation
+**Status**: complete
+**When**: 2026-08-04 03:48 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**PR**: #31 at `fc82534`
+**Addressed**: Integrated Review (When 2026-08-03 23:41 -04:00, PR #31 @ `b3575a5`) — its single open must-fix
+**Commits**: `fc82534`
+
+### Actions
+- [x] (must-fix) PIPSOL `DRVAL1` read had no null-value guard — an unset/null field made OGR
+  return `0.0`, rasterizing `hazard = -0.0`; in D10 suppressed mode any non-NaN hazard cell is
+  LETHAL, so a depth-less charted pipeline became an unconditional lethal band `bathymetry_layer`
+  cannot clear. Wrapped both rasterize calls in `IsFieldSetAndNotNull(i)`, matching the
+  WRECKS/UWTROC VALSOU block — `marine_charts/src/s57_dataset.cpp:283-290`
+
+### Notes
+- The must-fix's requested "PIPSOL with unset `DRVAL1` asserts no `hazard` write" test is added at
+  the **layer** seam, not the dataset seam: `S57Dataset::getGrid` opens a GDAL dataset by file path
+  and has no in-memory OGR test harness (marine_charts has no test dir at all; GDAL's S-57 driver is
+  read-only, so no fixture can be synthesized). A true dataset-level test would require refactoring
+  the safety-critical feature-rasterization loop to inject a Memory-driver dataset — disproportionate
+  for a thin fix pass. Instead, test `(i)` `SuppressedUnsetPipsolDepthIsNotLethalBand`
+  (`s57_layer/test/test_depth_costs.cpp`) pins the observable contract the guard protects: with no
+  hazard write (`hazard = NaN`) the submerged pipeline cell defers to `bathymetry_layer`
+  (NO_INFORMATION), whereas the buggy `hazard = -0.0` would be LETHAL. Follow-up candidate: add a
+  Memory-driver OGR rasterization harness to `marine_charts` for direct dataset-level coverage.
+- Build/test: `marine_charts` (the guard) builds clean. `s57_layer` (the test) cannot compile in this
+  worktree — pre-existing `underlay_ws` gap (geographic_msgs/geodesy unbuilt), the same environment
+  gap the Local Review recorded; test execution deferred to CI. The test reuses adjacent tests'
+  helpers/patterns.
+
+### Next step
+Lifecycle: **Implementation** → **review-code** (re-review the fix). Dispatch a fresh-context
+sub-agent: `.agent/scripts/dispatch_subagent.sh --mode in-process --issue 30 --skill review-code`
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-04 03:55 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: changes-requested
+
+**Branch**: feature/issue-30 at `4268021`
+**Mode**: pre-push
+**Depth**: Deep (reason: safety-relevant navigation-costmap cost logic + cross-layer ADR-0010 D10 coordination with bathymetry_layer)
+**Must-fix**: 1 | **Suggestions**: 4
+**Round**: 2 | **Ship**: continue — one safety must-fix (soundingless charted hazards → NO_INFORMATION in suppressed mode), rising from 0 last round; genuine safety concern but resolution is bounded (conservative rasterization or linked follow-up + explicit README caveat).
+
+### Findings
+- [ ] (must-fix) Soundingless charted hazards (UWTROC/WRECKS unset VALSOU; PIPSOL unset DRVAL1) write neither elevation nor hazard, so in D10 suppressed mode they return NO_INFORMATION — a charted rock-awash/unknown-depth wreck outside bathymetry_layer coverage reads as open water. Highest-consequence hazard subcase; hazard-channel fix covers sounded hazards only. Disclosed in README but framed as symmetric "both modes" when suppressed mode is materially worse (strips the DEPARE band). Not a regression; default mode byte-identical. Resolve via (a) conservative-LETHAL rasterization of soundingless UWTROC/WRECKS, or (b) linked follow-up issue + elevate README parenthetical to an explicit safety caveat — `marine_charts/src/s57_dataset.cpp:281-306`
+- [ ] (suggestion) README "Unsurveyed / caution submerged areas: unsurveyed_cost" overstates coverage — floor only applies where a DEPARE elevation coexists; bare UNSARE/CTNARE cells are NO_INFORMATION in both modes (code + test (e) grid3 already correct) — `s57_layer/README.md`
+- [ ] (suggestion) OBSTRN (case 86) survives suppressed mode only via elevation=1.0 land-lethal, a different mechanism than UWTROC/WRECKS; add a note near its "TODO check if submerged" so a future edit doesn't silently drop it in suppressed mode — `marine_charts/src/s57_dataset.cpp:223`
+- [ ] (suggestion) New unconditional ret->add("hazard") is an extra grid layer served across the repo boundary; s57_layer tolerates via grid.exists(), but confirm no downstream consumer indexes layers positionally or asserts on layer count — `marine_charts/src/s57_dataset.cpp:169`
+- [ ] (suggestion) No test named for the soundingless-hazard case (hazard=NaN, elevation=NaN => NO_INFORMATION); test (i) pins it incidentally — a dedicated named test would make the residual risk visible — `s57_layer/test/test_depth_costs.cpp`
+
+### Notes
+- Static analysis: ament cpplint/uncrustify deliberately disabled in-package (Allman house style); no new enforced findings. Copilot Adversarial: off (default). Local Adversarial: skipped (local_review.sh not present in project repo).
+- Plan adherence: zero drift; all 6 planned files + test cases (a)-(i) present. Post-plan PIPSOL null-guard fix (fc82534, test case (i)) correctly in scope per prior Integrated Review.
+- The must-fix reopens the *soundingless* subcase of the plan-review must-fix ("retain point hazards"): the hazard-channel resolution covers sounded hazards only; the soundingless subcase was documented but never explicitly risk-accepted or tracked.
+
+### Next step
+Lifecycle verdict is **changes-requested** → host dispatches **address-findings** to work the open finding(s) from this entry, then re-dispatches **review-code**. Diff is not pushed until a pre-push review returns approved.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-05 13:50 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: approved
+
+**Branch**: feature/issue-30 at `fc72e02`
+**Mode**: pre-push
+**Depth**: Deep (reason: safety-relevant navigation-costmap cost logic + cross-layer ADR-0010 D10 coordination with bathymetry_layer)
+**Must-fix**: 0 | **Suggestions**: 2
+**Round**: 3 | **Ship**: recommended — round-2 safety must-fix (soundingless charted hazards → NO_INFORMATION) resolved via awash-hazard rasterization for UWTROC/WRECKS + documented PIPSOL caveat; 0 must-fix (falling from 1); dual-lens adversarial + governance + plan-drift clean, only doc/test-seam suggestions remain.
+
+### Findings
+- [ ] (suggestion) "Default-mode byte-identical" framing is imprecise: the `i>0`→`i>=0` change and new PIPSOL `IsFieldSetAndNotNull` guard shift default-mode elevation output for two edge cases (sounding at OGR field index 0; unset DRVAL1) — both safety-positive fixes, so qualify the claim rather than change code (cross-pass confirmed: Lens A + Lens B) — `marine_charts/src/s57_dataset.cpp:287,303`
+- [ ] (suggestion) PIPSOL `IsFieldSetAndNotNull` dataset guard has no direct test — test (i) pins only the downstream layer contract on a hand-built grid; reverting the guard leaves tests green (already disclosed as a known OGR-seam gap with a follow-up candidate) — `s57_layer/test/test_depth_costs.cpp:252`
+
+### Notes
+- Round-2 open suggestion positively cleared: s57_grids serializes grids name-keyed via GridMapRosConverter with no positional layer indexing / layer-count assertions, so the new unconditional `hazard` layer is safe across the service boundary (Lens B).
+- Round-2 suggestions addressed: README unsurveyed/caution wording qualified; OBSTRN case-86 note added; explicit soundingless-hazard assertion added to test (f).
+- Static analysis: ament cpplint/uncrustify deliberately disabled in-package (Allman house style); no new enforced findings. Copilot Adversarial: off (default). Local Adversarial: skipped (local_review.sh not present in s57_tools repo).
+- Plan adherence: zero drift; all 6 planned files + test cases (a)-(i) + integration smoke present. Soundingless-awash rasterization is the in-scope resolution of the round-2 must-fix.
+- Build/test execution deferred to CI: s57_layer test build blocked by unbuilt underlay_ws (geographic_msgs/geodesy) in this worktree — the same environment gap recorded in prior rounds, not a diff defect.
+
+### Next step
+Lifecycle verdict is **approved** → push / open PR → **triage-reviews**. (PR #31 already open from prior rounds; the 5 local commits ahead of origin/feature/issue-30 carry the round-2 fix — push, then dispatch triage-reviews as a fresh-context sub-agent.)
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-08-05 10:21 -04:00
+**By**: Claude Code Agent (Claude Opus)
+
+**PR**: #31 at `e9f655f`
+**Sources**: 4 (Copilot R2 @ `e9f655f`, Copilot R1 @ `b3575a5`, Local Review (Pre-Push) R3 @ `fc72e02`, CI rollup @ `e9f655f`)
+**Cross-source confirmations**: 1
+**CI**: all-pass (build-and-test success, copilot-pull-request-reviewer success)
+
+### Findings
+- [ ] (cross-confirmed, low) PR-description accuracy about soundingless/default-mode behavior: Copilot R2 (suppressed) reads "Deferred follow-ups" as saying soundingless UWTROC/WRECKS are unrasterized, and Local Review R3 flags "default-mode behavior unchanged" as imprecise given the `i>0`→`i>=0` and PIPSOL `IsFieldSetAndNotNull` guards. Body already discloses both the awash `hazard = 0.0` write and the two guard fixes, so this is a one-clause wording qualification on the PR body, not a code change — PR #31 description (no source file)
+- [ ] (suggestion) PIPSOL `IsFieldSetAndNotNull` guard has no direct OGR-seam test — `marine_charts` has no gtest target at all (CMakeLists has lint-only `BUILD_TESTING`), so a direct test needs new test infrastructure plus extraction of the rasterize switch; reverting the guard leaves the suite green. Follow-up issue in `marine_charts`, not a PR blocker — `marine_charts/src/s57_dataset.cpp:288`, `s57_layer/test/test_depth_costs.cpp:252`
+
+### False positives
+- (Copilot R1 @ `b3575a5`) "PIPSOL `DRVAL1` read without `IsFieldSetAndNotNull`" — stale, not wrong: fixed in `fc82534` (three commits after the reviewed SHA); `s57_dataset.cpp:287-288` now guards `i>=0` *and* `IsFieldSetAndNotNull(i)`. Already triaged and closed in the prior `## Integrated Review` @ `b3575a5`.
+- (Copilot R2 @ `e9f655f`, suppressed) "PR description says soundingless UWTROC/WRECKS are not rasterized" — the current body's "What changed" bullet states in bold that soundingless UWTROC/WRECKS write `hazard = 0.0` (awash); the "not rasterized" clause in Deferred follow-ups is scoped to PIPSOL only, which matches `s57_dataset.cpp:286-294`. Retained above only as the wording-precision action item.
+
+### Notes
+- No human reviewer comments and no conversation comments on PR #31; Copilot is the only GitHub-side source.
+- Round-2 must-fix (soundingless charted hazards → NO_INFORMATION in suppressed mode) verified resolved in local code at `s57_dataset.cpp:309-317` (awash `hazard = 0.0`, elevation deliberately unwritten); README §depth_costs carries the matching PIPSOL safety caveat.
+- Zero must-fix findings across all sources at head `e9f655f`. Both open items are documentation/test-seam suggestions.
+
+### Next step
+No must-fix or blocking findings remain and CI is green — PR #31 is merge-ready pending the user's content review. Optionally qualify the PR-body wording and file the `marine_charts` OGR-seam test follow-up before merging via `.agent/scripts/merge_pr.sh --issue 30`.

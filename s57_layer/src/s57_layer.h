@@ -51,6 +51,16 @@ protected:
   // private.
   double tide_offset_ = 0.0;
 
+  // ADR-0010 D10 mode switch. True (default) keeps the historical behavior:
+  // this layer computes depth costs from charted DEPARE bands via the
+  // caution-depth ramp. False suppresses the depth ramp — bathymetry_layer
+  // is the single depth authority — and this layer retains only non-depth
+  // semantics (land, restricted, overhead, caution/unsurveyed) plus discrete
+  // charted hazards (UWTROC/WRECKS/PIPSOL via the grid's "hazard" channel,
+  // kept LETHAL regardless of charted depth). Protected for the same
+  // test-fixture reason as tide_offset_.
+  bool depth_costs_ = true;
+
 private:
   using GetDatasetsClient =
     rclcpp::Client<s57_msgs::srv::GetDatasets>;
