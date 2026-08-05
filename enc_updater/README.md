@@ -95,6 +95,15 @@ interactive shell's ROS env. So:
   environment or the sourced setup (there is no config key for it; DDS
   discovery only sees peers on the same middleware).
 
+**Probe→commit window (TOCTOU)**: the interlock is a point-in-time check taken
+*immediately before* `import_geotiff --commit`, not a lock held across it. The
+commit itself takes up to `commit_timeout` (default 120 s) — if navigation
+comes up *during* that window it will not be seen, and the swap completes under
+a now-live nav stack. The window is deliberately narrow (probe is the last step
+before the rename) and the D7 contract is that regeneration runs offline/at
+maintenance time, so schedule the cron slot when navigation is reliably down
+rather than relying on the probe to catch a nav stack that starts mid-commit.
+
 ## Deployment prerequisite (uma#276)
 
 The store's chart layer only *feeds a costmap safely* on hosts whose
@@ -114,7 +123,11 @@ store that a live costmap consumes.
   lock (`.enc_updater.lock` beside the store); the second run refuses rather
   than racing on the staged layer. Space cron entries so a slow regeneration
   can't overlap the next slot. The lock file persists between runs (only the
-  advisory lock is released); do not delete it while a run is active.
+  advisory lock is released); do not delete it while a run is active. The lock
+  is a same-host `flock(2)` advisory lock: it serializes runs on **one host
+  only** and does not coordinate across machines. Do not point two hosts at a
+  shared (e.g. NFS) store and expect the lock to keep them from colliding —
+  run the updater from a single host per store.
 - **`configured cell(s) not in catalog`** — config typo, or NOAA withdrew
   the cell; fix the config either way.
 - **Exit 2 every night** — navigation genuinely up at the cron hour, the

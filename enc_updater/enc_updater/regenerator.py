@@ -174,6 +174,11 @@ def _store_lock(store_parent: str) -> Iterator[None]:
     ``<store parent>/.enc_updater.lock`` is the real interlock — a second run
     refuses immediately rather than proceeding. The lock file is created once
     and left in place; only the advisory lock is released.
+
+    ``flock`` is a *same-host advisory* lock: it serializes runs on one host
+    only. It does not coordinate across machines, so a store shared over NFS
+    between hosts is out of scope — run the updater from a single host per
+    store (documented in the README troubleshooting section).
     """
     os.makedirs(store_parent, exist_ok=True)
     lock_path = os.path.join(store_parent, '.enc_updater.lock')
