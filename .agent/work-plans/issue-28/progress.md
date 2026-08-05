@@ -92,3 +92,27 @@ package suite re-run — **36 passed** (24 → 36 with the added regression test
 Lifecycle: **Implementation** → **review-code** (re-review the fixes). Hand off to a fresh-context sub-agent:
 
     .agent/scripts/dispatch_subagent.sh --mode in-process --issue 28 --skill review-code
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-05 17:26 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: changes-requested
+
+**Branch**: feature/issue-28 at `42e60a5`
+**Mode**: pre-push
+**Depth**: Deep (reason: 2228-line new package; network download + zip extraction + cross-layer subprocess orchestration + nav-safety interlock)
+**Must-fix**: 2 | **Suggestions**: 6
+**Round**: 2 | **Ship**: continue — Round-1 interlock must-fix confirmed fixed; 2 new must-fixes are mechanical (~1-2 lines each), expect convergence in one address-findings round
+**Static analysis**: flake8 clean; 34 functional tests pass (36 with ament linter gates)
+**Claude Adversarial**: 2 passes (Lens A logic + Lens B systemic/safety); Copilot off (default); Local skipped (Ollama unreachable)
+
+### Findings
+- [ ] (must-fix) Bare `float()` coercions (`timeout`, `lake_datum`, `cell_size`, `*_timeout`) escape `load_config` as an uncaught `ValueError` — crashes with a traceback instead of the documented clean exit 1; confirmed by running it — `enc_updater/enc_updater/config.py:135,150,156`
+- [ ] (must-fix) No URL scheme allow-list on catalog `zipfile_location` before `urllib.urlopen` — a spoofed catalog can use `file://`/SSRF; add `urlparse` + http/https check — `enc_updater/enc_updater/downloader.py:47,162`
+- [ ] (suggestion) Interlock fail-open not enforced: `nodes` set + `ros_domain_id` omitted is accepted; warn (or require) when nodes non-empty — `enc_updater/enc_updater/nav_liveness.py:41`
+- [ ] (suggestion) Document the probe→commit TOCTOU window in the README nav-liveness contract (nav can come up during the ~120s commit) — `enc_updater/enc_updater/regenerator.py:207`
+- [ ] (suggestion) `registry.py` docstring mis-describes `replaceChartLayer` (renames whole staged dir; does not filter non-.tif) — `enc_updater/enc_updater/registry.py:10`
+- [ ] (suggestion) All-nodata tile makes `ComputeRasterMinMax` raise → aborts swap as "corrupt"; skip-not-fail or document the assumption — `enc_updater/enc_updater/regenerator.py:88`
+- [ ] (suggestion) Release the `gdal.Open` handle explicitly (`dataset = None`) in the spot-check loop — `enc_updater/enc_updater/regenerator.py:88`
+- [ ] (suggestion) `flock` is same-host advisory only; document the single-host / no-shared-NFS-store assumption — `enc_updater/enc_updater/regenerator.py:141`
