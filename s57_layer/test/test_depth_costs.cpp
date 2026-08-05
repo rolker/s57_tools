@@ -97,7 +97,19 @@ TEST_F(DepthCostsTest, DefaultModeDepthRampUnchanged)
 
 // (b) Suppressed mode: a submerged cell with no caution/unsurveyed marking
 // returns NO_INFORMATION — the cell is left for bathymetry_layer.
-TEST_F(DepthCostsTest, SuppressedSubmergedCellIsNoInformation)
+// Suppressed mode: a submerged cell asserts NO depth cost, but it MUST still
+// claim the cell with a real value (FREE_SPACE) rather than NO_INFORMATION.
+//
+// This previously asserted NO_INFORMATION, which codified the multi-scale
+// precedence bug fixed on 2026-08-05: generateTile composites overlapping
+// charts finest-first and writes only into cells still NO_INFORMATION, so an
+// unclaimed water cell was handed to the next-coarser chart. On an overview
+// cell a harbour basin sits inside the LNDARE polygon (elevation > 0), so whole
+// navigable basins were painted LETHAL at Lewes, DE — including the cell the
+// vehicle was floating in. Depth authority still belongs to bathymetry_layer,
+// which runs later and max-combines on top; FREE_SPACE asserts "this is water,
+// not land", not "this is safe depth".
+TEST_F(DepthCostsTest, SuppressedSubmergedCellClaimsCellAsFreeSpace)
 {
   S57LayerForTest layer;
   layer.setDepthCosts(false);
@@ -106,15 +118,69 @@ TEST_F(DepthCostsTest, SuppressedSubmergedCellIsNoInformation)
 
   for (double elevation : {-0.5, -5.0, -50.0}) {
     grid.at("elevation", idx) = elevation;
-    EXPECT_EQ(layer.testGetCost(grid, idx), nav2_costmap_2d::NO_INFORMATION)
+    EXPECT_EQ(layer.testGetCost(grid, idx), nav2_costmap_2d::FREE_SPACE)
       << "Suppressed mode: submerged cell (elevation=" << elevation
-      << ") must be NO_INFORMATION.";
+      << ") must claim the cell as FREE_SPACE so a coarser chart cannot "
+         "overwrite it with land.";
   }
 
   // elevation == 0.0 (DEPARE band with DRVAL1=0, e.g. the Broadkill 0-1.8 m
-  // band) is submerged, not land — must also defer to bathymetry_layer.
+  // band) is submerged, not land — also claimed, depth deferred to
+  // bathymetry_layer.
   grid.at("elevation", idx) = 0.0;
-  EXPECT_EQ(layer.testGetCost(grid, idx), nav2_costmap_2d::NO_INFORMATION);
+  EXPECT_EQ(layer.testGetCost(grid, idx), nav2_costmap_2d::FREE_SPACE);
+}
+
+// Suppressed mode: a cell with NO elevation data at all is genuinely
+// uninformative and must stay NO_INFORMATION, so a coarser chart that *does*
+// cover it can still contribute. This is the boundary that keeps the fix above
+// from blinding the compositor to legitimate coarse-chart data.
+TEST_F(DepthCostsTest, SuppressedAbsentElevationStaysNoInformation)
+{
+  S57LayerForTest layer;
+  layer.setDepthCosts(false);
+  auto grid = makeS57Grid();   // every channel NaN
+  grid_map::Index idx(0, 0);
+
+  EXPECT_EQ(layer.testGetCost(grid, idx), nav2_costmap_2d::NO_INFORMATION)
+    << "Suppressed mode: a cell with no elevation data must remain unclaimed.";
+}
+
+// Regression guard for the Lewes 2026-08-05 failure, at the level the bug
+// actually bit: fine-chart water must outrank coarse-chart land under
+// generateTile's first-writer-wins compositing. Emulates that rule directly —
+// the fine chart is consulted first, and only an unclaimed (NO_INFORMATION)
+// cell falls through to the coarse chart.
+TEST_F(DepthCostsTest, SuppressedFineWaterOutranksCoarseLand)
+{
+  S57LayerForTest layer;
+  layer.setDepthCosts(false);
+  grid_map::Index idx(0, 0);
+
+  // Fine harbour chart: 6 m of charted water.
+  auto fine = makeS57Grid();
+  fine.at("elevation", idx) = -6.0;
+
+  // Coarse overview chart covering the same spot: unresolved basin inside the
+  // land polygon.
+  auto coarse = makeS57Grid();
+  coarse.at("elevation", idx) = 1.0;
+
+  const unsigned char fine_cost = layer.testGetCost(fine, idx);
+  const unsigned char coarse_cost = layer.testGetCost(coarse, idx);
+
+  ASSERT_EQ(coarse_cost, nav2_costmap_2d::LETHAL_OBSTACLE)
+    << "Precondition: the coarse overview chart does read as land here.";
+
+  // First-writer-wins: the coarse chart may only write if the fine chart left
+  // the cell unclaimed.
+  const unsigned char composited =
+    (fine_cost == nav2_costmap_2d::NO_INFORMATION) ? coarse_cost : fine_cost;
+
+  EXPECT_NE(composited, nav2_costmap_2d::LETHAL_OBSTACLE)
+    << "Charted navigable water must not be overwritten as LETHAL by a "
+       "coarser-scale chart's land polygon.";
+  EXPECT_EQ(composited, nav2_costmap_2d::FREE_SPACE);
 }
 
 // (c) Suppressed mode: land (elevation > 0) stays LETHAL, independent of tide.
@@ -233,9 +299,13 @@ TEST_F(DepthCostsTest, SuppressedToleratesGridWithoutHazardLayer)
   grid_map::Index idx(0, 0);
 
   grid.at("elevation", idx) = -5.0;
-  unsigned char cost = 0;
+  unsigned char cost = nav2_costmap_2d::LETHAL_OBSTACLE;
   EXPECT_NO_THROW(cost = layer.testGetCost(grid, idx));
-  EXPECT_EQ(cost, nav2_costmap_2d::NO_INFORMATION);
+  // The point of this case is the exists() guard not throwing on a legacy grid.
+  // The value is submerged water, so it claims the cell as FREE_SPACE — see
+  // SuppressedSubmergedCellClaimsCellAsFreeSpace for why NO_INFORMATION here
+  // would re-open the coarse-chart land overwrite.
+  EXPECT_EQ(cost, nav2_costmap_2d::FREE_SPACE);
 }
 
 // (i) Regression for the PIPSOL DRVAL1 null-guard (marine_charts/src/
