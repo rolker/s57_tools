@@ -170,3 +170,33 @@ Lifecycle: **Implementation** → **review-code** (re-review the fixes). Hand of
 - [ ] (suggestion) Config-load failure returns exit 1 before any health record is written, so persistent config breakage is invisible in .updater_health.json — record a config-phase error — `enc_updater/enc_updater/__main__.py:59`
 - [ ] (suggestion) `_band1_min_max` distinguishes empty-vs-corrupt via the GDAL English substring 'no valid pixels'; a future GDAL rewording would fail all-nodata tiles as corrupt (fail-closed; a real-GDAL test would catch it) — `enc_updater/enc_updater/regenerator.py:108`
 - [ ] (suggestion) Billion-laughs guard is a raw-bytes substring scan; a UTF-16 payload could evade it while expat still expands entities — prefer defusedxml or an expat entity-rejection handler — `enc_updater/enc_updater/downloader.py:76`
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-08-05 14:19 -04:00
+**By**: Claude Code Agent (Claude Opus)
+
+**PR**: #33 at `2dfc43c`
+**Sources**: 3 (Copilot R1 @ `2dfc43c`, Local Review (Pre-Push) R3 @ `85a8df5`, CI rollup @ `2dfc43c`)
+**Cross-source confirmations**: 0
+**CI**: all-pass (build-and-test: success; copilot-pull-request-reviewer: success)
+
+### Findings
+- [ ] (low, Copilot) PR #33 body step 4 states "Empty `nodes` list = unconfigured (refuse)", but the implementation, module docstring, README nav-liveness contract, and `region_example.yaml` all define an empty/omitted `nav_liveness.nodes` as *probe disabled (skip)* — intentional for dev hosts with no nav stack. The code is right; the PR description is wrong. Fix by editing the PR body sentence to "Empty `nodes` list = interlock not configured (probe skipped; dev hosts only)". No code change. — `enc_updater/enc_updater/nav_liveness.py:65`
+- [ ] (suggestion, Copilot-adjacent / overlaps R3 finding 1) Defense-in-depth only: `_band1_min_max` could add explicit `if dataset is None` / `if band is None` guards raising `UpdaterError`, covering a hypothetical GDAL build that returns `None` from `Open` without emitting a CPLError. Not reachable on the deployed GDAL (see false positive below). — `enc_updater/enc_updater/regenerator.py:103`
+
+### False positives
+- (Copilot) "`gdal.Open(path)` can return `None`, so `dataset.GetRasterBand(1)` raises `AttributeError` that escapes the documented `UpdaterError` contract" — `_band1_min_max` calls `gdal.UseExceptions()` before `Open`, so open/format failures raise `RuntimeError`, which the function's `except RuntimeError` converts to `UpdaterError`. Verified empirically on the deployed GDAL 3.8.4 (jazzy): unrecognized-format file, missing path, and a directory path all raise `RuntimeError`, never return `None`. The behavior is also locked by a real-GDAL regression test, `test/test_sanity.py::test_band1_min_max_raises_on_unreadable_tile`, which asserts `UpdaterError` on a junk tile and passes. The `AttributeError` path the comment describes cannot be produced.
+
+### Notes
+- No human reviewer comments and no conversation comments on the PR.
+- The R3 `## Local Review (Pre-Push)` suggestions at `85a8df5` remain open by design — recorded in the PR body as non-blocking follow-up candidates; none is a must-fix and none was independently raised by Copilot.
+- No cross-source confirmation: Copilot's two comments are disjoint from the eight open R3 suggestions.
+
+### Next step
+Lifecycle: **Integrated Review** → PR-body correction (no code findings) → merge.
+No must-fix and no cross-confirmed findings remain. The single actionable item is a
+one-sentence PR-description edit (host-side `gh pr edit`); it needs no commit, no
+re-review, and does not gate merge on code grounds. After the body is corrected the PR
+is ready for `.agent/scripts/merge_pr.sh --issue 28` (merge commit, not squash) —
+subject to the operator's content review.
