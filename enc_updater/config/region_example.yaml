@@ -1,0 +1,61 @@
+# enc_updater region config — New Castle, NH / Isles of Shoals.
+#
+# Deployment prerequisite (ADR-0010 D7 / uma#276): the host whose costmap
+# reads `store_dir` must be running a bathymetry_layer build that includes
+# unh_marine_autonomy#276 (worst-case-clearance cost model + confidence gate,
+# merged 2026-08-03). Older builds render high-uncertainty chart cells LETHAL
+# under `unsurveyed_is_lethal` — rebuild such hosts before pointing this
+# updater at a store a live costmap consumes.
+#
+# Cron example (the workspace must be sourced so the s57_to_geotiff and
+# import_geotiff CLIs resolve through the ament index):
+#   0 2 * * * bash -lc 'source ~/project11/.agent/scripts/setup.bash && \
+#       enc_updater --config /etc/enc_updater/region.yaml'
+
+corpus_dir: ~/data/world/charts/ENC_ROOT
+store_dir: ~/data/world/store
+
+# NOAA ENC cells for the region (harbor + approach). Full catalog:
+# https://charts.noaa.gov/ENCs/ENCsIndv.shtml
+cells:
+  - US5NH02M   # Portsmouth Harbor (New Castle)
+  - US4NH01M   # Portsmouth approach / Isles of Shoals
+
+# catalog_url: https://charts.noaa.gov/ENCs/ENCProdCat.xml   # default
+
+# Vertical-datum grids for the export (see s57_to_geotiff README).
+geoid: /opt/vdatum/g2018u0.tif
+vdatum_dir: /opt/vdatum
+# datum_config: null
+# lake_datum: null       # constant lake-surface ellipsoidal height (m)
+
+# Staged-import overrides. The GGGS level is always passed per cell from the
+# export log; cell_size only sets the store default cell size on --stage.
+# cell_size: 0.5
+
+# Band-1 (ellipsoidal height, m) plausibility range for the staged-layer
+# sanity check. Default admits lake surfaces (e.g. Massabesic ~ +52 m).
+# depth_range: [-12000.0, 100.0]
+
+# Nav-down interlock: node names whose presence in `ros2 node list` refuses
+# the swap. An EMPTY/omitted list disables the probe — only appropriate on
+# hosts with no navigation stack (dev machines). With nodes configured, any
+# probe failure refuses the swap (fail closed).
+#
+# CRITICAL — probe environment alignment: the probe queries the DDS graph in
+# this process's environment. If ROS_DOMAIN_ID or RMW_IMPLEMENTATION differ
+# from the live nav stack's (a cron job inherits neither), the probe sees an
+# empty graph and the interlock FAILS OPEN — the swap runs while nav is up.
+# Pin ros_domain_id below, source the nav stack's setup via ros_setup, and
+# export a matching RMW_IMPLEMENTATION. See the README nav-liveness contract.
+nav_liveness:
+  nodes: []
+  # ros_domain_id: 0     # pin the probe's DDS domain to the nav stack's
+  # ros_setup: /opt/ros/jazzy/setup.bash   # sourced for the probe if set
+  # timeout: 20.0
+
+# Subprocess timeouts (seconds).
+# download_timeout: 300.0
+# export_timeout: 3600.0
+# stage_timeout: 600.0
+# commit_timeout: 120.0
