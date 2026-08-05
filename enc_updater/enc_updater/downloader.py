@@ -167,7 +167,13 @@ def _download_zip(entry: CatalogEntry, dest: str, timeout: float) -> None:
     except OSError as e:
         raise UpdaterError(f'download: {entry.name} fetch failed ({entry.url}): {e}')
     actual = os.path.getsize(dest)
-    if entry.size is not None and actual != entry.size:
+    if entry.size is None:
+        # The catalog omitted zipfile_size, so the byte-count check is skipped
+        # (CRC still runs). Log it so the degraded integrity check is visible
+        # rather than silently weaker.
+        print(f'enc_updater: {entry.name} catalog entry has no zipfile_size — '
+              'skipping byte-count check (zip CRC still enforced)')
+    elif actual != entry.size:
         raise UpdaterError(
             f'download: {entry.name} size mismatch: got {actual} bytes, '
             f'catalog says {entry.size}')

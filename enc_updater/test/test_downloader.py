@@ -207,6 +207,18 @@ def test_configured_cell_missing_from_catalog_errors(tmp_path, monkeypatch):
         downloader.update_corpus(cfg)
 
 
+def test_missing_zipfile_size_logs_and_installs(tmp_path, monkeypatch, capsys):
+    """A cell lacking zipfile_size still installs (CRC), and the skip is logged."""
+    zip_a, zip_b = make_cell_zip('US5NH02M'), make_cell_zip('US4NH01M')
+    serve(monkeypatch, catalog_bytes(zip_a, zip_b, size_a=''),
+          {'US5NH02M': zip_a})
+    cfg = make_config(tmp_path, ['US5NH02M'])
+    changed, _ = downloader.update_corpus(cfg)
+    assert changed == ['US5NH02M']
+    assert 'no zipfile_size' in capsys.readouterr().out
+    assert os.path.isfile(os.path.join(cfg.corpus_dir, 'US5NH02M', 'US5NH02M.000'))
+
+
 def test_oversized_catalog_rejected(tmp_path, monkeypatch):
     """A catalog larger than the cap is refused before parsing."""
     monkeypatch.setattr(downloader, '_MAX_CATALOG_BYTES', 8)
