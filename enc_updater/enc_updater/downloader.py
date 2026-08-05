@@ -25,6 +25,13 @@ import zipfile
 from . import registry
 from . import UpdaterError
 
+# Defense-in-depth caps against a malicious or corrupt response from the
+# external catalog host. NOAA cells are small (KB–few MB); these ceilings sit
+# far above any real cell yet bound memory/disk if a response runs away.
+_MAX_CATALOG_BYTES = 64 * 1024 * 1024                  # product catalog XML
+_MAX_ZIP_DOWNLOAD_BYTES = 1024 * 1024 * 1024           # one cell zip, on the wire
+_MAX_ZIP_UNCOMPRESSED_BYTES = 4 * 1024 * 1024 * 1024   # extracted, zip-bomb guard
+
 
 @dataclasses.dataclass
 class CatalogEntry:
@@ -46,9 +53,20 @@ def fetch_catalog(url: str, timeout: float) -> Dict[str, CatalogEntry]:
     """Fetch and parse the product catalog into {cell name: CatalogEntry}."""
     try:
         with _open_url(url, timeout) as response:
-            data = response.read()
+            data = response.read(_MAX_CATALOG_BYTES + 1)
     except OSError as e:
         raise UpdaterError(f'download: catalog fetch failed ({url}): {e}')
+    if len(data) > _MAX_CATALOG_BYTES:
+        raise UpdaterError(
+            f'download: catalog at {url} exceeds {_MAX_CATALOG_BYTES} bytes — '
+            'refusing to parse (runaway or hostile response)')
+    if b'<!DOCTYPE' in data or b'<!ENTITY' in data:
+        # ElementTree expands internal entities; a DTD with recursive entity
+        # definitions is a billion-laughs vector. The real catalog has no DTD,
+        # so reject any document that carries one rather than parse it.
+        raise UpdaterError(
+            f'download: catalog at {url} carries a DTD/entity declaration — '
+            'refusing to parse (entity-expansion guard)')
     try:
         root = ET.fromstring(data)
     except ET.ParseError as e:
@@ -106,8 +124,9 @@ def cells_to_update(
 
 
 def _safe_members(zf: zipfile.ZipFile) -> List[zipfile.ZipInfo]:
-    """Reject absolute or parent-escaping member paths (zip-slip guard)."""
+    """Reject zip-slip paths and cap total uncompressed size (zip-bomb guard)."""
     members = []
+    total = 0
     for info in zf.infolist():
         name = info.filename
         if name.startswith(('/', '\\')) or os.path.isabs(name):
@@ -115,15 +134,36 @@ def _safe_members(zf: zipfile.ZipFile) -> List[zipfile.ZipInfo]:
         parts = name.replace('\\', '/').split('/')
         if '..' in parts:
             raise UpdaterError(f'download: zip member escapes archive: {name}')
+        total += info.file_size
+        if total > _MAX_ZIP_UNCOMPRESSED_BYTES:
+            raise UpdaterError(
+                f'download: zip uncompressed size exceeds '
+                f'{_MAX_ZIP_UNCOMPRESSED_BYTES} bytes — refusing to extract '
+                '(possible zip bomb)')
         members.append(info)
     return members
+
+
+def _copy_capped(src, dst, cap: int, label: str) -> None:
+    """Stream src to dst, refusing more than `cap` bytes (runaway guard)."""
+    remaining = cap
+    while True:
+        chunk = src.read(1024 * 1024)
+        if not chunk:
+            break
+        remaining -= len(chunk)
+        if remaining < 0:
+            raise UpdaterError(
+                f'download: {label} exceeds {cap} bytes — refusing '
+                '(runaway or hostile response)')
+        dst.write(chunk)
 
 
 def _download_zip(entry: CatalogEntry, dest: str, timeout: float) -> None:
     """Stream one cell zip to dest and validate size + CRC."""
     try:
         with _open_url(entry.url, timeout) as response, open(dest, 'wb') as f:
-            shutil.copyfileobj(response, f)
+            _copy_capped(response, f, _MAX_ZIP_DOWNLOAD_BYTES, entry.name)
     except OSError as e:
         raise UpdaterError(f'download: {entry.name} fetch failed ({entry.url}): {e}')
     actual = os.path.getsize(dest)

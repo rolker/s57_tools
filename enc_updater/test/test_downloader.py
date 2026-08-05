@@ -207,6 +207,40 @@ def test_configured_cell_missing_from_catalog_errors(tmp_path, monkeypatch):
         downloader.update_corpus(cfg)
 
 
+def test_oversized_catalog_rejected(tmp_path, monkeypatch):
+    """A catalog larger than the cap is refused before parsing."""
+    monkeypatch.setattr(downloader, '_MAX_CATALOG_BYTES', 8)
+    zip_a, zip_b = make_cell_zip('US5NH02M'), make_cell_zip('US4NH01M')
+    serve(monkeypatch, catalog_bytes(zip_a, zip_b), {})
+    cfg = make_config(tmp_path, ['US5NH02M'])
+    with pytest.raises(UpdaterError, match='exceeds'):
+        downloader.update_corpus(cfg)
+
+
+def test_catalog_with_dtd_rejected(tmp_path, monkeypatch):
+    """A catalog carrying a DTD/entity declaration is refused (billion-laughs)."""
+    evil = (b'<?xml version="1.0"?>\n'
+            b'<!DOCTYPE lolz [<!ENTITY lol "lol">]>\n'
+            b'<EncProductCatalog></EncProductCatalog>\n')
+    serve(monkeypatch, evil, {})
+    cfg = make_config(tmp_path, ['US5NH02M'])
+    with pytest.raises(UpdaterError, match='entity-expansion guard'):
+        downloader.update_corpus(cfg)
+
+
+def test_zip_bomb_extract_rejected(tmp_path, monkeypatch):
+    """A zip whose uncompressed size exceeds the cap never extracts."""
+    monkeypatch.setattr(downloader, '_MAX_ZIP_UNCOMPRESSED_BYTES', 4)
+    zip_a, zip_b = make_cell_zip('US5NH02M'), make_cell_zip('US4NH01M')
+    serve(monkeypatch, catalog_bytes(zip_a, zip_b), {'US5NH02M': zip_a})
+    cfg = make_config(tmp_path, ['US5NH02M'])
+    os.makedirs(cfg.corpus_dir)
+    before = snapshot(cfg.corpus_dir)
+    with pytest.raises(UpdaterError, match='zip bomb'):
+        downloader.update_corpus(cfg)
+    assert snapshot(cfg.corpus_dir) == before
+
+
 def test_update_replaces_previous_cell_edition(tmp_path, monkeypatch):
     """A newer edition replaces the old cell dir; old files do not linger."""
     zip_a, zip_b = make_cell_zip('US5NH02M'), make_cell_zip('US4NH01M')
