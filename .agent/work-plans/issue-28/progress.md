@@ -60,9 +60,35 @@ issue: 28
 **Round**: 1 | **Ship**: continue — one safety-contract must-fix (interlock silent fail-open documentation); otherwise clean, should converge in one round
 
 ### Findings
-- [ ] (must-fix) Nav-down interlock can silently FAIL OPEN if the cron/probe environment's `ROS_DOMAIN_ID`/`RMW_IMPLEMENTATION` differ from the live nav stack's — `ros2 node list` queries the wrong DDS domain, returns empty, and the swap proceeds while nav is active; fail-closed only covers probe *errors*, not a blind-but-successful empty probe. Document the env-alignment requirement (README + region_example.yaml) and ideally pin `ROS_DOMAIN_ID` in config for the probe. — `enc_updater/nav_liveness.py:24`
-- [ ] (suggestion) Harden the probe invocation: pass `ros_setup` as a bash positional arg (`bash -c 'source "$1" ... && ros2 node list' _ "$path"`) instead of f-string interpolation into `bash -c`, so an unusual path can't be mis-executed. — `enc_updater/nav_liveness.py:27`
-- [ ] (suggestion) Overlapping-run protection is best-effort (PID-named work dirs + existence check); a stray overlapping cron invocation could double-commit. Consider a lockfile on `store_dir` and/or document "runs must not overlap". — `enc_updater/regenerator.py:149`
-- [ ] (suggestion) `_install_cell` recovery: if restoring the backup also fails, the old cell data is left in a `.old.<cell>.*` dir with the canonical cell dir missing until the next run re-downloads; surface the backup location in the raised error. — `enc_updater/downloader.py:172`
-- [ ] (suggestion) Catalog/download hardening from an external host: parse the catalog with entity-expansion protection (or cap the response size) and cap download/extract size against a zip bomb. Low risk (HTTPS + NOAA source), defense-in-depth. — `enc_updater/downloader.py:53`
-- [ ] (suggestion) A catalog `<cell>` missing `zipfile_size` silently skips the byte-count check (CRC still runs); log when size is absent so the degraded integrity check is visible. — `enc_updater/downloader.py:130`
+- [x] (must-fix) Nav-down interlock can silently FAIL OPEN if the cron/probe environment's `ROS_DOMAIN_ID`/`RMW_IMPLEMENTATION` differ from the live nav stack's — `ros2 node list` queries the wrong DDS domain, returns empty, and the swap proceeds while nav is active; fail-closed only covers probe *errors*, not a blind-but-successful empty probe. Document the env-alignment requirement (README + region_example.yaml) and ideally pin `ROS_DOMAIN_ID` in config for the probe. — `enc_updater/nav_liveness.py:24`
+- [x] (suggestion) Harden the probe invocation: pass `ros_setup` as a bash positional arg (`bash -c 'source "$1" ... && ros2 node list' _ "$path"`) instead of f-string interpolation into `bash -c`, so an unusual path can't be mis-executed. — `enc_updater/nav_liveness.py:27`
+- [x] (suggestion) Overlapping-run protection is best-effort (PID-named work dirs + existence check); a stray overlapping cron invocation could double-commit. Consider a lockfile on `store_dir` and/or document "runs must not overlap". — `enc_updater/regenerator.py:149`
+- [x] (suggestion) `_install_cell` recovery: if restoring the backup also fails, the old cell data is left in a `.old.<cell>.*` dir with the canonical cell dir missing until the next run re-downloads; surface the backup location in the raised error. — `enc_updater/downloader.py:172`
+- [x] (suggestion) Catalog/download hardening from an external host: parse the catalog with entity-expansion protection (or cap the response size) and cap download/extract size against a zip bomb. Low risk (HTTPS + NOAA source), defense-in-depth. — `enc_updater/downloader.py:53`
+- [x] (suggestion) A catalog `<cell>` missing `zipfile_size` silently skips the byte-count check (CRC still runs); log when size is absent so the degraded integrity check is visible. — `enc_updater/downloader.py:130`
+
+## Implementation
+**Status**: complete
+**When**: 2026-08-05 17:16 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**Branch**: feature/issue-28 at `5713d5a`
+**Addressed**: Local Review (Pre-Push), When 2026-08-05 17:00 +00:00 / SHA `dbb7432` (1 must-fix + 5 suggestions, all open)
+**Commits**: `caa2555` `40eb99b` `28a059f` `df4270a` `67c7070` `5713d5a`
+
+Every finding fixed with a real change (no deferrals). One atomic commit per
+finding; each touched file re-linted (ament_flake8 + ament_pep257) and the full
+package suite re-run — **36 passed** (24 → 36 with the added regression tests).
+
+### Actions
+- [x] (must-fix) Nav-interlock fail-open on DDS-domain mismatch — added `nav_liveness.ros_domain_id`, exported into the probe subprocess env to pin the query to the nav stack's domain; documented the `ROS_DOMAIN_ID` + `RMW_IMPLEMENTATION` env-alignment requirement in README + region_example.yaml + module docstring — `enc_updater/enc_updater/nav_liveness.py:24`, `config.py`, `README.md`, `config/region_example.yaml` (`caa2555`)
+- [x] (suggestion) Harden probe invocation — `ros_setup` now passed as a bash positional arg (`$1`) instead of f-string interpolation; verified real-bash sourcing + updated `test_ros_setup_wraps_probe_in_bash` — `enc_updater/enc_updater/nav_liveness.py:27` (`40eb99b`)
+- [x] (suggestion) Overlapping-run protection — added an exclusive non-blocking `flock` on `<store parent>/.enc_updater.lock` around the whole `regenerate` cycle; a second run refuses with "runs must not overlap"; documented in README troubleshooting; new `test_overlapping_run_refuses` — `enc_updater/enc_updater/regenerator.py:149` (`28a059f`)
+- [x] (suggestion) `_install_cell` rollback — if the restore rename also fails, the raised error now names the preserved `.old.<cell>.*` backup dir and the manual restore path; new `test_install_double_failure_names_backup` — `enc_updater/enc_updater/downloader.py:172` (`df4270a`)
+- [x] (suggestion) Catalog/download hardening — capped the catalog response read + reject any DTD/entity declaration (billion-laughs guard), byte-capped cell-zip streaming, and capped total uncompressed extract size (zip-bomb guard); new oversized-catalog / DTD / zip-bomb tests — `enc_updater/enc_updater/downloader.py:53` (`67c7070`)
+- [x] (suggestion) Missing `zipfile_size` — logs a line naming the cell when the byte-count check is skipped (CRC still enforced); new `test_missing_zipfile_size_logs_and_installs` — `enc_updater/enc_updater/downloader.py:130` (`5713d5a`)
+
+### Next step
+Lifecycle: **Implementation** → **review-code** (re-review the fixes). Hand off to a fresh-context sub-agent:
+
+    .agent/scripts/dispatch_subagent.sh --mode in-process --issue 28 --skill review-code
