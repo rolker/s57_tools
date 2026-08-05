@@ -46,3 +46,23 @@ issue: 28
 - [ ] (suggestion) "ADR-0010 D7" is the **unh_marine_autonomy** project ADR-0010 (per `marine_bathymetry_store/README.md`), which collides with the **workspace** ADR-0010 (git-bug). Disambiguate the citation so a reviewer doesn't look in `docs/decisions/` and find the wrong ADR. — `plan.md:123`
 - [ ] (suggestion) ADR-0009: commit to stdlib `urllib` (the plan's own fallback) to avoid a runtime dep, or if `requests` is used, declare `python3-requests` via rosdep in `package.xml` — bare pip is forbidden. — `plan.md:31`
 - [ ] (suggestion) `import_geotiff --stage` omits `--level`; it defaults from `--cell-size`. Consider pinning GGGS `--level`/`--cell-size` in config for consistent chart-tile resolution across cells. — `plan.md:58`
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-05 17:00 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: changes-requested
+
+**Branch**: feature/issue-28 at `dbb7432`
+**Mode**: pre-push
+**Depth**: Deep (reason: 1909-line new package, cross-layer subprocess orchestration + network download + safety interlock)
+**Must-fix**: 1 | **Suggestions**: 5
+**Round**: 1 | **Ship**: continue — one safety-contract must-fix (interlock silent fail-open documentation); otherwise clean, should converge in one round
+
+### Findings
+- [ ] (must-fix) Nav-down interlock can silently FAIL OPEN if the cron/probe environment's `ROS_DOMAIN_ID`/`RMW_IMPLEMENTATION` differ from the live nav stack's — `ros2 node list` queries the wrong DDS domain, returns empty, and the swap proceeds while nav is active; fail-closed only covers probe *errors*, not a blind-but-successful empty probe. Document the env-alignment requirement (README + region_example.yaml) and ideally pin `ROS_DOMAIN_ID` in config for the probe. — `enc_updater/nav_liveness.py:24`
+- [ ] (suggestion) Harden the probe invocation: pass `ros_setup` as a bash positional arg (`bash -c 'source "$1" ... && ros2 node list' _ "$path"`) instead of f-string interpolation into `bash -c`, so an unusual path can't be mis-executed. — `enc_updater/nav_liveness.py:27`
+- [ ] (suggestion) Overlapping-run protection is best-effort (PID-named work dirs + existence check); a stray overlapping cron invocation could double-commit. Consider a lockfile on `store_dir` and/or document "runs must not overlap". — `enc_updater/regenerator.py:149`
+- [ ] (suggestion) `_install_cell` recovery: if restoring the backup also fails, the old cell data is left in a `.old.<cell>.*` dir with the canonical cell dir missing until the next run re-downloads; surface the backup location in the raised error. — `enc_updater/downloader.py:172`
+- [ ] (suggestion) Catalog/download hardening from an external host: parse the catalog with entity-expansion protection (or cap the response size) and cap download/extract size against a zip bomb. Low risk (HTTPS + NOAA source), defense-in-depth. — `enc_updater/downloader.py:53`
+- [ ] (suggestion) A catalog `<cell>` missing `zipfile_size` silently skips the byte-count check (CRC still runs); log when size is absent so the degraded integrity check is visible. — `enc_updater/downloader.py:130`
