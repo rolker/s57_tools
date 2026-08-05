@@ -15,11 +15,13 @@ The staged and export directories are created **adjacent to the store**
 filesystem as the store (cross-device staging fails with EXDEV).
 """
 
+import contextlib
+import fcntl
 import os
 import re
 import shutil
 import subprocess
-from typing import List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 from . import nav_liveness
 from . import registry
@@ -136,47 +138,76 @@ def _export_args(cfg: UpdaterConfig, export_dir: str) -> List[str]:
     return argv
 
 
+@contextlib.contextmanager
+def _store_lock(store_parent: str) -> Iterator[None]:
+    """
+    Hold an exclusive, non-blocking lock so runs can't overlap.
+
+    Two concurrent cron invocations sharing a store would race on the staged
+    dir and could double-commit. The PID-named work dirs are only a
+    best-effort guard (distinct PIDs never collide); this flock on
+    ``<store parent>/.enc_updater.lock`` is the real interlock — a second run
+    refuses immediately rather than proceeding. The lock file is created once
+    and left in place; only the advisory lock is released.
+    """
+    os.makedirs(store_parent, exist_ok=True)
+    lock_path = os.path.join(store_parent, '.enc_updater.lock')
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise UpdaterError(
+                f'regenerate: another enc_updater run holds {lock_path} — '
+                'runs must not overlap; wait for it to finish')
+        yield
+    finally:
+        os.close(fd)
+
+
 def regenerate(cfg: UpdaterConfig, manifest, dry_run: bool = False) -> None:
     """
     Run the full regeneration cycle; on any failure the live layer stands.
 
     With ``dry_run`` the cycle runs through export, staging, sanity check and
-    registry write, then stops before the interlock and commit.
+    registry write, then stops before the interlock and commit. The whole
+    cycle holds a store lock (see ``_store_lock``) so overlapping runs refuse.
     """
     store_parent = os.path.dirname(os.path.abspath(cfg.store_dir))
-    staged = os.path.join(store_parent, f'.enc_updater_staging.{os.getpid()}')
-    export_dir = os.path.join(store_parent, f'.enc_updater_export.{os.getpid()}')
-    for path in (staged, export_dir):
-        if os.path.exists(path):
-            raise UpdaterError(
-                f'regenerate: work dir already exists: {path} — a previous run '
-                'may still be active; remove it only if that run is dead')
-    import_tool = _resolve_tool(
-        cfg.import_geotiff_bin, 'marine_bathymetry_store', 'import_geotiff')
-    os.makedirs(export_dir)
-    try:
-        log_text = run_cmd(_export_args(cfg, export_dir), cfg.export_timeout, 'export')
-        print(log_text, end='')
-        pairs = parse_export_log(log_text)
-        if not pairs:
-            raise UpdaterError('export: no cells exported — refusing to swap')
-        for tif_path, level in pairs:
-            argv = [import_tool, '--stage', staged, 'chart', tif_path,
-                    '--level', str(level)]
-            if cfg.cell_size is not None:
-                argv += ['--cell-size', str(cfg.cell_size)]
-            run_cmd(argv, cfg.stage_timeout, 'stage')
-        chart_dir = os.path.join(staged, 'chart')
-        sanity_check(chart_dir, cfg.depth_range)
-        registry.write_cells(registry.staged_registry_path(chart_dir), manifest)
-        if dry_run:
-            print('enc_updater: dry run — staged layer validated; '
-                  'skipping interlock and commit')
-            return
-        nav_liveness.check_nav_down(cfg.nav_liveness)
-        run_cmd([import_tool, '--commit', staged, cfg.store_dir],
-                cfg.commit_timeout, 'commit')
-        print(f'enc_updater: chart layer swapped into {cfg.store_dir}')
-    finally:
-        shutil.rmtree(export_dir, ignore_errors=True)
-        shutil.rmtree(staged, ignore_errors=True)
+    with _store_lock(store_parent):
+        staged = os.path.join(store_parent, f'.enc_updater_staging.{os.getpid()}')
+        export_dir = os.path.join(store_parent, f'.enc_updater_export.{os.getpid()}')
+        for path in (staged, export_dir):
+            if os.path.exists(path):
+                raise UpdaterError(
+                    f'regenerate: work dir already exists: {path} — a previous run '
+                    'may still be active; remove it only if that run is dead')
+        import_tool = _resolve_tool(
+            cfg.import_geotiff_bin, 'marine_bathymetry_store', 'import_geotiff')
+        os.makedirs(export_dir)
+        try:
+            log_text = run_cmd(_export_args(cfg, export_dir), cfg.export_timeout, 'export')
+            print(log_text, end='')
+            pairs = parse_export_log(log_text)
+            if not pairs:
+                raise UpdaterError('export: no cells exported — refusing to swap')
+            for tif_path, level in pairs:
+                argv = [import_tool, '--stage', staged, 'chart', tif_path,
+                        '--level', str(level)]
+                if cfg.cell_size is not None:
+                    argv += ['--cell-size', str(cfg.cell_size)]
+                run_cmd(argv, cfg.stage_timeout, 'stage')
+            chart_dir = os.path.join(staged, 'chart')
+            sanity_check(chart_dir, cfg.depth_range)
+            registry.write_cells(registry.staged_registry_path(chart_dir), manifest)
+            if dry_run:
+                print('enc_updater: dry run — staged layer validated; '
+                      'skipping interlock and commit')
+                return
+            nav_liveness.check_nav_down(cfg.nav_liveness)
+            run_cmd([import_tool, '--commit', staged, cfg.store_dir],
+                    cfg.commit_timeout, 'commit')
+            print(f'enc_updater: chart layer swapped into {cfg.store_dir}')
+        finally:
+            shutil.rmtree(export_dir, ignore_errors=True)
+            shutil.rmtree(staged, ignore_errors=True)

@@ -1,5 +1,6 @@
 """Simulated-failure tests: every regeneration failure leaves the layer intact."""
 
+import fcntl
 import os
 
 from enc_updater import regenerator
@@ -192,6 +193,25 @@ def test_dry_run_stops_before_interlock_and_commit(tmp_path, monkeypatch):
     regenerator.regenerate(make_config(tmp_path, store), MANIFEST, dry_run=True)
     assert runner.phases() == ['export', 'stage']
     assert chart_snapshot(store) == before
+    no_leftover_workdirs(store)
+
+
+def test_overlapping_run_refuses(tmp_path, monkeypatch):
+    """A second run while the store lock is held refuses rather than racing."""
+    store = make_store(tmp_path)
+    before = chart_snapshot(store)
+    runner = FakeRunner(export_log=EXPORT_LINE.format(path='/x/US5NH02M.tif') + '\n')
+    monkeypatch.setattr(regenerator, 'run_cmd', runner)
+    lock_path = os.path.join(str(store.parent), '.enc_updater.lock')
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        with pytest.raises(UpdaterError, match='runs must not overlap'):
+            regenerator.regenerate(make_config(tmp_path, store), MANIFEST)
+        assert runner.phases() == []  # refused before touching the pipeline
+    finally:
+        os.close(fd)
+    assert chart_snapshot(store) == before  # live layer untouched
     no_leftover_workdirs(store)
 
 

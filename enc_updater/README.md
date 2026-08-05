@@ -110,6 +110,11 @@ store that a live costmap consumes.
 - **`work dir already exists`** — a previous run may still be active (or
   died hard). Verify no `enc_updater` process is running before removing the
   named `.enc_updater_staging.*` / `.enc_updater_export.*` directory.
+- **`runs must not overlap`** — a concurrent `enc_updater` holds the store
+  lock (`.enc_updater.lock` beside the store); the second run refuses rather
+  than racing on the staged layer. Space cron entries so a slow regeneration
+  can't overlap the next slot. The lock file persists between runs (only the
+  advisory lock is released); do not delete it while a run is active.
 - **`configured cell(s) not in catalog`** — config typo, or NOAA withdrew
   the cell; fix the config either way.
 - **Exit 2 every night** — navigation genuinely up at the cron hour, the
