@@ -16,6 +16,7 @@ import sys
 from typing import List, Optional
 
 from . import config as config_mod
+from . import datum_provisioner
 from . import downloader
 from . import health
 from . import InterlockRefusal, UpdaterError
@@ -57,6 +58,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         cfg = config_mod.load_config(args.config)
+    except UpdaterError as e:
+        print(f'enc_updater: {e}', file=sys.stderr)
+        return 1
+
+    # Provision the vertical-datum grids the D7 export needs before touching
+    # the corpus: absent grids would only surface as an export failure later,
+    # and the fetch records its own health error on failure.
+    try:
+        datum_provisioner.ensure_geoid(cfg)
+        datum_provisioner.ensure_vdatum(cfg)
     except UpdaterError as e:
         print(f'enc_updater: {e}', file=sys.stderr)
         return 1

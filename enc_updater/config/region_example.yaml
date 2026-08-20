@@ -24,8 +24,28 @@ cells:
 # catalog_url: https://charts.noaa.gov/ENCs/ENCProdCat.xml   # default
 
 # Vertical-datum grids for the export (see s57_to_geotiff README).
-geoid: /opt/vdatum/g2018u0.tif
-vdatum_dir: /opt/vdatum
+#
+# The updater auto-provisions these on first run (idempotent, atomic writes)
+# when configured — see the README "Datum grid provisioning" section. Existing
+# grids are trusted and never re-downloaded.
+#
+# geoid: PROJ geoid model. Downloaded from cdn.proj.org (basename of the path)
+# and verified against geoid_sha256 — a wrong or corrupt file is rejected, not
+# just a truncated one. geoid_sha256 is REQUIRED whenever geoid is set.
+# The pin below is the published SHA-256 of us_noaa_g2018u0.tif (16742155 bytes;
+# cross-checked against cdn.proj.org and the OSGeo/PROJ-data repo, 2026-08-20).
+geoid: ~/data/world/datum/geoid/us_noaa_g2018u0.tif
+geoid_sha256: fa9a407ac7ee3f5a3694008e4bcd09ce9cc250452f0c3b11700a4960340abce2
+# geoid_cdn_base_url: https://cdn.proj.org/   # default
+
+# vdatum_dir: extracted *.gtx grids land here. vdatum_bundles lists the NOAA
+# VDatum bundle names VERBATIM (no friendly-name mapping to go stale on a NOAA
+# version bump) — copy them exactly as they appear on the download page:
+# https://vdatum.noaa.gov/download.php  (bundle URL basename, without ".zip").
+vdatum_dir: ~/data/world/datum/vdatum
+vdatum_bundles:
+  - MENHMAgome23_8301   # ME/NH/MA Gulf of Maine (verified live 2026-08-20)
+# vdatum_cdn_base_url: https://vdatum.noaa.gov/download/data/   # default
 # datum_config: null
 # lake_datum: null       # constant lake-surface ellipsoidal height (m)
 

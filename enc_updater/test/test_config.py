@@ -40,3 +40,16 @@ def test_non_numeric_nav_timeout_is_clean_error(tmp_path):
     """A mistyped nav_liveness.timeout raises UpdaterError with the nested key."""
     with pytest.raises(UpdaterError, match='"nav_liveness.timeout" must be a number'):
         load_config(_write(tmp_path, nav_liveness={'timeout': 'soon'}))
+
+
+@pytest.mark.parametrize('name', ['../evil', 'sub/dir', 'back\\slash', '..'])
+def test_vdatum_bundle_path_shape_rejected(tmp_path, name):
+    """A bundle name with a path separator or `..` is a clean config error."""
+    with pytest.raises(UpdaterError, match='illegal'):
+        load_config(_write(tmp_path, vdatum_bundles=[name]))
+
+
+def test_vdatum_bundle_valid_name_accepted(tmp_path):
+    """A well-formed single-segment bundle name loads without complaint."""
+    cfg = load_config(_write(tmp_path, vdatum_bundles=['MENHMAgome23_8301']))
+    assert cfg.vdatum_bundles == ['MENHMAgome23_8301']
