@@ -496,3 +496,38 @@ def test_unsafe_catalog_cell_name_skipped(tmp_path, monkeypatch):
     catalog = downloader.fetch_catalog('https://example.invalid/catalog.xml', 5.0)
     assert 'US5/../evil' not in catalog
     assert 'US5INSIDE' in catalog
+
+
+def test_prune_refuses_symlinked_cell_dir(tmp_path, monkeypatch):
+    """A symlinked corpus cell errors by name; nothing is deleted or unlinked."""
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {'US5INSIDE': zip_inside})
+    cfg = region_config(tmp_path)
+    os.makedirs(cfg.corpus_dir)
+    real_target = tmp_path / 'elsewhere'
+    real_target.mkdir()
+    (real_target / 'US5LEGACY.000').write_bytes(b'data outside the corpus')
+    os.symlink(str(real_target), os.path.join(cfg.corpus_dir, 'US5LEGACY'))
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5LEGACY': {'edition': 9, 'update': 9}})
+    with pytest.raises(UpdaterError, match='symlink'):
+        downloader.update_corpus(cfg)
+    assert os.path.islink(os.path.join(cfg.corpus_dir, 'US5LEGACY'))
+    assert (real_target / 'US5LEGACY.000').exists()
+
+
+def test_prune_warns_on_stray_non_directory(tmp_path, monkeypatch, capsys):
+    """A stray file at a deselected cell's path is reported, entry still drops."""
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {'US5INSIDE': zip_inside})
+    cfg = region_config(tmp_path)
+    os.makedirs(cfg.corpus_dir)
+    stray = os.path.join(cfg.corpus_dir, 'US5LEGACY')
+    with open(stray, 'w', encoding='utf-8') as f:
+        f.write('not a cell dir')
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5LEGACY': {'edition': 9, 'update': 9}})
+    _, manifest = downloader.update_corpus(cfg)
+    assert 'US5LEGACY' not in manifest
+    assert os.path.isfile(stray)
+    assert 'is not a directory' in capsys.readouterr().out

@@ -251,12 +251,27 @@ def prune_corpus(
                   '(no longer selected / withdrawn by NOAA)')
             continue
         cell_dir = os.path.join(corpus_dir, name)
+        if os.path.islink(cell_dir):
+            # rmtree refuses symlinks anyway (OSError), but name the problem
+            # instead of surfacing its generic message: a linked cell dir is
+            # an operator arrangement this updater must not delete through
+            # or silently unlink. Manifest entry stays until a human acts.
+            raise UpdaterError(
+                f'download: corpus entry {name} is a symlink — refusing to '
+                'prune it (corpus cells must be real directories; remove '
+                'the link by hand)')
         if os.path.isdir(cell_dir):
             try:
                 shutil.rmtree(cell_dir)
             except OSError as e:
                 raise UpdaterError(
                     f'download: pruning {name} from corpus failed: {e}')
+        elif os.path.exists(cell_dir):
+            # Deselected entry whose path is a stray non-directory: the
+            # manifest entry still goes (the cell is deselected), but say
+            # what was left behind rather than skipping it silently.
+            print(f'enc_updater: warning: corpus entry {name} is not a '
+                  f'directory; leaving {cell_dir} in place')
         del manifest[name]
         registry.write_cells(registry.manifest_path(corpus_dir), manifest)
         print(f'enc_updater: pruned {name} from corpus '
