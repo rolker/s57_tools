@@ -87,3 +87,23 @@ def test_interlock_refusal_exits_2(workspace, monkeypatch):
         raise InterlockRefusal('interlock: navigation active')
     monkeypatch.setattr(regenerator, 'regenerate', refuse)
     assert cli.main(['--config', str(config_path), '--force']) == 2
+
+
+def test_fresh_store_dir_created_up_front(workspace, monkeypatch, tmp_path):
+    """
+    A missing store_dir is created before any work (#39).
+
+    The old behavior failed at the final commit, after the whole
+    download/export cycle had already run.
+    """
+    import os
+    import shutil
+    config_path, store = workspace
+    shutil.rmtree(store)
+
+    def fake_regenerate(cfg, manifest, dry_run=False):
+        """Stand-in swap: the store dir must already exist by now."""
+        assert os.path.isdir(cfg.store_dir)
+    monkeypatch.setattr(regenerator, 'regenerate', fake_regenerate)
+    assert cli.main(['--config', str(config_path)]) == 0
+    assert os.path.isdir(store)

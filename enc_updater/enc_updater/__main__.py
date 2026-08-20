@@ -63,6 +63,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f'enc_updater: {e}', file=sys.stderr)
         return 1
 
+    # Bootstrap the store dir up front (#39): the commit's replaceChartLayer
+    # swaps into an existing store and refuses a missing one — which used to
+    # surface only at the very last step, after minutes of download/export
+    # work. A store_dir path occupied by a plain file still fails here, as a
+    # clean config-shaped error rather than a traceback.
+    if not os.path.isdir(cfg.store_dir):
+        try:
+            os.makedirs(cfg.store_dir)
+        except OSError as e:
+            print(f'enc_updater: cannot create store dir {cfg.store_dir}: {e}',
+                  file=sys.stderr)
+            return 1
+        print(f'enc_updater: created store dir {cfg.store_dir}')
+
     # Provision the vertical-datum grids the D7 export needs before touching
     # the corpus: absent grids would only surface as an export failure later,
     # and the fetch records its own health error on failure.
