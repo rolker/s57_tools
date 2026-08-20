@@ -138,6 +138,15 @@ def load_config(path: str) -> UpdaterConfig:
             or not all(isinstance(b, str) and b for b in bundles)):
         raise UpdaterError(
             'config: "vdatum_bundles" must be a list of NOAA bundle names')
+    # A bundle name is interpolated straight into a download URL and into
+    # on-disk paths (the marker file and extraction dir); a path separator or
+    # ``..`` would escape vdatum_dir (or yield an opaque FileNotFoundError), so
+    # reject those shapes here as a clean config error.
+    illegal = [b for b in bundles if '/' in b or '\\' in b or '..' in b]
+    if illegal:
+        raise UpdaterError(
+            f'config: "vdatum_bundles" name(s) {illegal} contain an illegal '
+            "'/', '\\\\', or '..' (bundle names must be a single path segment)")
 
     depth_range = raw.get('depth_range', list(DEFAULT_DEPTH_RANGE))
     if (not isinstance(depth_range, (list, tuple)) or len(depth_range) != 2
