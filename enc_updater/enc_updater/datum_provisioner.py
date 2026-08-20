@@ -100,16 +100,23 @@ def ensure_geoid(cfg) -> None:
     """
     Download ``cfg.geoid`` from the PROJ CDN if absent; verify against geoid_sha256.
 
-    No-op when ``cfg.geoid`` is unset or the file already exists (an existing
-    geoid is trusted because it can only have arrived via the atomic rename
-    below — a partial download lives at a temp path and is removed on any
-    failure). Fails loud if provisioning is active but ``geoid_sha256`` is
-    unset rather than installing an unverified grid.
+    No-op when ``cfg.geoid`` is unset or a regular file already exists at the
+    path (an existing geoid is trusted because it can only have arrived via the
+    atomic rename below — a partial download lives at a temp path and is removed
+    on any failure). If the path exists but is *not* a regular file (e.g. a
+    misconfiguration pointing at a directory), fails loud rather than silently
+    skipping provisioning only to fail later at export. Fails loud, too, if
+    provisioning is active but ``geoid_sha256`` is unset rather than installing
+    an unverified grid.
     """
     if not cfg.geoid:
         return
-    if os.path.exists(cfg.geoid):
+    if os.path.isfile(cfg.geoid):
         return
+    if os.path.exists(cfg.geoid):
+        _fail(cfg,
+              f'provision: geoid path {cfg.geoid} exists but is not a regular '
+              'file — refusing to provision over it')
     try:
         _install_geoid(cfg)
     except UpdaterError as e:

@@ -116,6 +116,16 @@ def test_geoid_idempotent_when_present(tmp_path, monkeypatch):
         assert f.read() == b'already here'
 
 
+def test_geoid_path_is_directory_fails_loud(tmp_path, monkeypatch):
+    """A geoid path that exists as a directory is a hard error, not a silent skip."""
+    serve(monkeypatch, {GEOID_NAME: OSError('must not download')})
+    cfg = make_config(tmp_path)
+    os.makedirs(cfg.geoid)  # the configured geoid path is a directory
+    with pytest.raises(UpdaterError, match='not a regular file'):
+        datum_provisioner.ensure_geoid(cfg)
+    assert health_error(cfg.corpus_dir)['phase'] == 'provision'
+
+
 def test_geoid_unset_is_noop(tmp_path, monkeypatch):
     """No geoid configured means nothing to provision."""
     serve(monkeypatch, {GEOID_NAME: OSError('must not download')})
