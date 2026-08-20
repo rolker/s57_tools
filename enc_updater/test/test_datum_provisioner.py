@@ -161,6 +161,9 @@ def test_geoid_rejects_non_http_scheme(tmp_path):
     assert not os.path.exists(cfg.geoid)
     # The temp file created before the scheme check must be cleaned up.
     assert os.listdir(os.path.dirname(cfg.geoid)) == []
+    # A guard failure (not just a network error) is still recorded as a
+    # provisioning failure in the health file.
+    assert health_error(cfg.corpus_dir)['phase'] == 'provision'
 
 
 # --- vdatum --------------------------------------------------------------
@@ -237,6 +240,9 @@ def test_vdatum_zip_slip_rejected(tmp_path, monkeypatch):
         datum_provisioner.ensure_vdatum(cfg)
     assert not os.path.exists(os.path.join(cfg.vdatum_dir, f'.{BUNDLE}_installed'))
     assert not os.path.exists(tmp_path / 'datum' / 'escape.gtx')
+    # The zip-slip guard raises UpdaterError directly; it must still be
+    # recorded as a provisioning failure in the health file.
+    assert health_error(cfg.corpus_dir)['phase'] == 'provision'
 
 
 def test_vdatum_corrupt_zip_rejected(tmp_path, monkeypatch):

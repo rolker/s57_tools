@@ -28,6 +28,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+from typing import Optional
 import zipfile
 
 from . import downloader
@@ -41,10 +42,27 @@ _MAX_GEOID_BYTES = 512 * 1024 * 1024
 _MAX_VDATUM_ZIP_BYTES = 2 * 1024 * 1024 * 1024
 
 
+def _record(cfg, err: UpdaterError) -> None:
+    """
+    Record a provisioning failure in the health file exactly once.
+
+    Tags the exception so that an error already recorded by ``_fail`` is not
+    double-recorded when it is re-raised past an outer ``except UpdaterError``
+    handler — that handler is what catches guard failures (scheme allow-list,
+    size cap, zip-slip/bomb) raised directly by ``downloader`` helpers, which
+    would otherwise never reach the health file.
+    """
+    if getattr(err, '_provision_recorded', False):
+        return
+    health.record_error(cfg.corpus_dir, 'provision', str(err))
+    err._provision_recorded = True
+
+
 def _fail(cfg, message: str) -> None:
     """Record a provisioning failure in the health file and raise UpdaterError."""
-    health.record_error(cfg.corpus_dir, 'provision', message)
-    raise UpdaterError(message)
+    err = UpdaterError(message)
+    _record(cfg, err)
+    raise err
 
 
 def _remove_quietly(path: str) -> None:
@@ -64,7 +82,7 @@ def _sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
-def _content_length(response) -> int:
+def _content_length(response) -> Optional[int]:
     """Return the response's Content-Length, or None if absent/unparseable."""
     headers = getattr(response, 'headers', None)
     if headers is None:
@@ -92,6 +110,15 @@ def ensure_geoid(cfg) -> None:
         return
     if os.path.exists(cfg.geoid):
         return
+    try:
+        _install_geoid(cfg)
+    except UpdaterError as e:
+        _record(cfg, e)
+        raise
+
+
+def _install_geoid(cfg) -> None:
+    """Fetch, verify against ``geoid_sha256``, and atomically install the geoid."""
     if not cfg.geoid_sha256:
         _fail(cfg,
               'provision: geoid provisioning is configured (geoid set) but '
@@ -147,7 +174,11 @@ def ensure_vdatum(cfg) -> None:
         marker = os.path.join(cfg.vdatum_dir, f'.{bundle}_installed')
         if os.path.exists(marker):
             continue
-        _provision_vdatum_bundle(cfg, bundle, marker)
+        try:
+            _provision_vdatum_bundle(cfg, bundle, marker)
+        except UpdaterError as e:
+            _record(cfg, e)
+            raise
 
 
 def _provision_vdatum_bundle(cfg, bundle: str, marker: str) -> None:
