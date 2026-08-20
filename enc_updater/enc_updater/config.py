@@ -10,6 +10,11 @@ from . import UpdaterError
 
 DEFAULT_CATALOG_URL = 'https://charts.noaa.gov/ENCs/ENCProdCat.xml'
 
+# PROJ grid CDN (geoid models) and NOAA VDatum bundle download roots. Base URLs
+# end in '/' so a bundle/geoid filename appends directly (see datum_provisioner).
+DEFAULT_GEOID_CDN_BASE_URL = 'https://cdn.proj.org/'
+DEFAULT_VDATUM_CDN_BASE_URL = 'https://vdatum.noaa.gov/download/data/'
+
 # Band 1 is WGS84 ellipsoidal height (up-positive). The +100 m upper bound
 # deliberately admits inland/lake surfaces (e.g. Lake Massabesic sits near
 # +52 m ellipsoidal); the -12000 m lower bound is deeper than any ocean.
@@ -48,7 +53,11 @@ class UpdaterConfig:
     cells: List[str]
     catalog_url: str = DEFAULT_CATALOG_URL
     geoid: Optional[str] = None
+    geoid_sha256: Optional[str] = None
+    geoid_cdn_base_url: str = DEFAULT_GEOID_CDN_BASE_URL
     vdatum_dir: Optional[str] = None
+    vdatum_bundles: List[str] = dataclasses.field(default_factory=list)
+    vdatum_cdn_base_url: str = DEFAULT_VDATUM_CDN_BASE_URL
     datum_config: Optional[str] = None
     lake_datum: Optional[float] = None
     cell_size: Optional[float] = None
@@ -64,7 +73,9 @@ class UpdaterConfig:
 
 _TOP_LEVEL_KEYS = {
     'corpus_dir', 'store_dir', 'cells', 'catalog_url',
-    'geoid', 'vdatum_dir', 'datum_config', 'lake_datum',
+    'geoid', 'geoid_sha256', 'geoid_cdn_base_url',
+    'vdatum_dir', 'vdatum_bundles', 'vdatum_cdn_base_url',
+    'datum_config', 'lake_datum',
     'cell_size', 'depth_range', 'nav_liveness',
     's57_to_geotiff_bin', 'import_geotiff_bin',
     'download_timeout', 'export_timeout', 'stage_timeout', 'commit_timeout',
@@ -122,6 +133,12 @@ def load_config(path: str) -> UpdaterConfig:
             or not all(isinstance(c, str) and c for c in cells)):
         raise UpdaterError('config: "cells" must be a non-empty list of cell names')
 
+    bundles = raw.get('vdatum_bundles', []) or []
+    if (not isinstance(bundles, list)
+            or not all(isinstance(b, str) and b for b in bundles)):
+        raise UpdaterError(
+            'config: "vdatum_bundles" must be a list of NOAA bundle names')
+
     depth_range = raw.get('depth_range', list(DEFAULT_DEPTH_RANGE))
     if (not isinstance(depth_range, (list, tuple)) or len(depth_range) != 2
             or not all(isinstance(v, (int, float)) for v in depth_range)
@@ -160,7 +177,14 @@ def load_config(path: str) -> UpdaterConfig:
         cells=[str(c) for c in cells],
         catalog_url=str(raw.get('catalog_url', DEFAULT_CATALOG_URL)),
         geoid=_expand(raw.get('geoid')),
+        geoid_sha256=(str(raw['geoid_sha256']) if raw.get('geoid_sha256')
+                      else None),
+        geoid_cdn_base_url=str(
+            raw.get('geoid_cdn_base_url', DEFAULT_GEOID_CDN_BASE_URL)),
         vdatum_dir=_expand(raw.get('vdatum_dir')),
+        vdatum_bundles=[str(b) for b in bundles],
+        vdatum_cdn_base_url=str(
+            raw.get('vdatum_cdn_base_url', DEFAULT_VDATUM_CDN_BASE_URL)),
         datum_config=_expand(raw.get('datum_config')),
         lake_datum=_float_or_none('lake_datum'),
         cell_size=_float_or_none('cell_size'),
