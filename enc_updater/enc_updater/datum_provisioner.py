@@ -140,7 +140,10 @@ def _install_geoid(cfg) -> None:
         _fail(cfg, f'provision: cannot create geoid directory {dest_dir}: {e}')
 
     expected = cfg.geoid_sha256.lower()
-    fd, tmp = tempfile.mkstemp(prefix='.geoid.', dir=dest_dir)
+    try:
+        fd, tmp = tempfile.mkstemp(prefix='.geoid.', dir=dest_dir)
+    except OSError as e:
+        _fail(cfg, f'provision: cannot create geoid temp file in {dest_dir}: {e}')
     try:
         try:
             with os.fdopen(fd, 'wb') as out, \
@@ -197,7 +200,11 @@ def ensure_vdatum(cfg) -> None:
 def _provision_vdatum_bundle(cfg, bundle: str, marker: str) -> None:
     """Fetch one VDatum bundle zip, extract its ``*.gtx`` grids, then write the marker."""
     url = cfg.vdatum_cdn_base_url + bundle + '.zip'
-    workdir = tempfile.mkdtemp(prefix=f'.vdatum.{bundle}.', dir=cfg.vdatum_dir)
+    try:
+        workdir = tempfile.mkdtemp(prefix=f'.vdatum.{bundle}.', dir=cfg.vdatum_dir)
+    except OSError as e:
+        _fail(cfg,
+              f'provision: cannot create vdatum work dir in {cfg.vdatum_dir}: {e}')
     try:
         zip_path = os.path.join(workdir, bundle + '.zip')
         try:
@@ -209,7 +216,10 @@ def _provision_vdatum_bundle(cfg, bundle: str, marker: str) -> None:
         except OSError as e:
             _fail(cfg, f'provision: vdatum {bundle} fetch failed ({url}): {e}')
 
-        actual = os.path.getsize(zip_path)
+        try:
+            actual = os.path.getsize(zip_path)
+        except OSError as e:
+            _fail(cfg, f'provision: vdatum {bundle} zip stat failed: {e}')
         if declared is None:
             print(f'enc_updater: vdatum {bundle} response has no Content-Length '
                   '— skipping byte-count check (zip CRC still enforced)')

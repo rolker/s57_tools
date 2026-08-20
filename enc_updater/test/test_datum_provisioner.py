@@ -8,6 +8,7 @@ is monkeypatched to serve canned responses, so nothing touches the network.
 import hashlib
 import io
 import os
+import tempfile
 import zipfile
 
 from enc_updater import datum_provisioner
@@ -265,7 +266,8 @@ def test_vdatum_corrupt_zip_rejected(tmp_path, monkeypatch):
 
 
 def _fail_replace_for(monkeypatch, predicate):
-    """Make os.replace raise for destinations matching ``predicate``.
+    """
+    Make os.replace raise for destinations matching ``predicate``.
 
     Selective on purpose: health.py also uses os.replace for its atomic
     write, and a blanket failure would break the very recording under test.
@@ -296,6 +298,58 @@ def test_vdatum_grid_install_failure_recorded(tmp_path, monkeypatch):
     cfg = make_config(tmp_path)
     _fail_replace_for(monkeypatch, lambda dst: dst.endswith('.gtx'))
     with pytest.raises(UpdaterError, match='install of'):
+        datum_provisioner.ensure_vdatum(cfg)
+    assert not os.path.exists(os.path.join(cfg.vdatum_dir, f'.{BUNDLE}_installed'))
+    assert health_error(cfg.corpus_dir)['phase'] == 'provision'
+
+
+def test_geoid_tempfile_failure_recorded(tmp_path, monkeypatch):
+    """
+    An OSError creating the geoid temp file is recorded, not escaped.
+
+    Selective on the ``.geoid.`` prefix: health.py also uses mkstemp for its
+    atomic write, and a blanket failure would break the recording under test.
+    """
+    serve(monkeypatch, {GEOID_NAME: GEOID_BYTES})
+    cfg = make_config(tmp_path)
+    real_mkstemp = tempfile.mkstemp
+
+    def failing_mkstemp(*args, **kwargs):
+        if kwargs.get('prefix') == '.geoid.':
+            raise OSError('no space left on device')
+        return real_mkstemp(*args, **kwargs)
+    monkeypatch.setattr(tempfile, 'mkstemp', failing_mkstemp)
+    with pytest.raises(UpdaterError, match='cannot create geoid temp file'):
+        datum_provisioner.ensure_geoid(cfg)
+    assert health_error(cfg.corpus_dir)['phase'] == 'provision'
+
+
+def test_vdatum_tempdir_failure_recorded(tmp_path, monkeypatch):
+    """An OSError creating the vdatum work dir is recorded; no marker written."""
+    serve(monkeypatch, {BUNDLE + '.zip': make_vdatum_zip()})
+    cfg = make_config(tmp_path)
+
+    def failing_mkdtemp(*args, **kwargs):
+        raise OSError('no space left on device')
+    monkeypatch.setattr(tempfile, 'mkdtemp', failing_mkdtemp)
+    with pytest.raises(UpdaterError, match='cannot create vdatum work dir'):
+        datum_provisioner.ensure_vdatum(cfg)
+    assert not os.path.exists(os.path.join(cfg.vdatum_dir, f'.{BUNDLE}_installed'))
+    assert health_error(cfg.corpus_dir)['phase'] == 'provision'
+
+
+def test_vdatum_zip_stat_failure_recorded(tmp_path, monkeypatch):
+    """An OSError stat-ing the downloaded vdatum zip is recorded, not escaped."""
+    serve(monkeypatch, {BUNDLE + '.zip': make_vdatum_zip()})
+    cfg = make_config(tmp_path)
+    real_getsize = os.path.getsize
+
+    def failing_getsize(path):
+        if str(path).endswith('.zip'):
+            raise OSError('stat failed')
+        return real_getsize(path)
+    monkeypatch.setattr(os.path, 'getsize', failing_getsize)
+    with pytest.raises(UpdaterError, match='zip stat failed'):
         datum_provisioner.ensure_vdatum(cfg)
     assert not os.path.exists(os.path.join(cfg.vdatum_dir, f'.{BUNDLE}_installed'))
     assert health_error(cfg.corpus_dir)['phase'] == 'provision'
