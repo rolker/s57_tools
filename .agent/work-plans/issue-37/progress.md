@@ -110,6 +110,33 @@ gabby+salmon deploy logs showing `world/datum/` population — out of scope here
 **Round**: 1 | **Ship**: continue — one mechanical must-fix; otherwise shippable
 
 ### Findings
-- [ ] (must-fix) Scheme/size-cap/zip-slip/zip-bomb failures raise UpdaterError but sit under `except OSError` / `except zipfile.BadZipFile`, so they bypass `_fail()` and record no `last_error.phase="provision"` — contradicts README/docstring "any provisioning failure is recorded" — `enc_updater/enc_updater/datum_provisioner.py:115,165,191`
-- [ ] (suggestion) Validate VDatum bundle-name shape (reject `/` `\` `..`); a slash yields an uncaught FileNotFoundError instead of a clean UpdaterError — `enc_updater/enc_updater/config.py:136`
-- [ ] (suggestion) `_content_length` return hint should be `Optional[int]` (returns None when header absent) — `enc_updater/enc_updater/datum_provisioner.py:67`
+- [x] (must-fix) Scheme/size-cap/zip-slip/zip-bomb failures raise UpdaterError but sit under `except OSError` / `except zipfile.BadZipFile`, so they bypass `_fail()` and record no `last_error.phase="provision"` — contradicts README/docstring "any provisioning failure is recorded" — `enc_updater/enc_updater/datum_provisioner.py:115,165,191`
+- [x] (suggestion) Validate VDatum bundle-name shape (reject `/` `\` `..`); a slash yields an uncaught FileNotFoundError instead of a clean UpdaterError — `enc_updater/enc_updater/config.py:136`
+- [x] (suggestion) `_content_length` return hint should be `Optional[int]` (returns None when header absent) — `enc_updater/enc_updater/datum_provisioner.py:67`
+
+## Implementation
+**Status**: complete
+**When**: 2026-08-20 15:37 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**Branch**: feature/issue-37 at `726dae5`
+**Addressed**: Local Review (Pre-Push) — 2026-08-20 15:30 +00:00 at `4b5bed9`
+**Commits**: `a406ea9`, `726dae5`
+
+### Actions
+- [x] (must-fix) Guard failures (scheme allow-list, size cap, zip-slip/zip-bomb) raised `UpdaterError` past the `except OSError`/`except zipfile.BadZipFile` handlers and so were never recorded to the health file. Wrapped each public entry (`ensure_geoid`, `ensure_vdatum`) in an `except UpdaterError` that routes through a new `_record()`; a `_provision_recorded` sentinel set by `_fail()` keeps already-logged errors from being double-recorded — `enc_updater/enc_updater/datum_provisioner.py` (commit `a406ea9`)
+- [x] (suggestion) `_content_length` return type annotated `Optional[int]` (with `from typing import Optional`) — `enc_updater/enc_updater/datum_provisioner.py:67` (commit `a406ea9`)
+- [x] (suggestion) VDatum bundle-name shape validated at config load — a `/`, `\`, or `..` now fails as a clean `UpdaterError` instead of an opaque `FileNotFoundError` — `enc_updater/enc_updater/config.py` (commit `726dae5`)
+
+### Tests
+Extended coverage: `test_geoid_rejects_non_http_scheme` and
+`test_vdatum_zip_slip_rejected` now assert the guard failure lands in the
+health file with `phase="provision"`; new `test_config.py` cases cover
+rejected path-shaped bundle names and an accepted single-segment name. Full
+package suite green: **77 passed** (`pytest enc_updater/test/`), flake8 +
+pep257 gates included. No network access used.
+
+### Next step
+Ready for re-review (`review-code`, pre-push) of the fix commits — a
+fresh-context sub-agent reads the diff cold and confirms the three findings
+are genuinely resolved. No findings deferred.
