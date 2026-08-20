@@ -47,3 +47,52 @@ issue: 37
 - [ ] (suggestion) Make the geoid write atomic — the approach relies on idempotency-by-presence ("skip if file exists"), but a partial file from an interrupted run would then be treated as complete. Specify download-to-temp + rename (mirrors `downloader._install_cell`) — `plan.md:36-38,83`
 - [ ] (suggestion) Verify the concrete VDatum download URL and region-bundle naming before implementation. `https://vdatum.noaa.gov/download/data/vdatum_{region}.zip` and `NewEngland` are asserted but unverified; NOAA VDatum regional bundles use specific codes and the URL scheme may differ. The plan flags the *geoid* mechanism as an operator checkpoint but treats the VDatum URL as settled — fold it into the same checkpoint / Open Questions — `plan.md:44,67-70`
 - [ ] (suggestion) Map health recording to the existing API — the plan says "Record download in the corpus-dir health file", but `health.py` exposes `record_download_attempt/ok`, `record_regen_ok`, and `record_error(corpus_dir, phase, message)`; there is no generic record-download call. Use `record_error(cfg.corpus_dir, 'provision', ...)` on failure and decide whether success needs a record at all — `plan.md:38`
+
+## Implementation
+**Status**: complete
+**When**: 2026-08-20 00:00 +00:00
+**By**: Claude Opus
+
+**Branch**: feature/issue-37 at `6d95033`
+**Plan**: `.agent/work-plans/issue-37/plan.md` (followed as written; no divergence — no plan edits needed)
+
+### What was done
+Implemented datum grid provisioning for `enc_updater` per the settled plan, in
+three atomic commits under the agent identity:
+
+- `c7942e3` — **config**: four optional keys on `UpdaterConfig` + allowlist:
+  `geoid_sha256`, `geoid_cdn_base_url` (default `https://cdn.proj.org/`),
+  `vdatum_bundles` (validated list of non-empty names), `vdatum_cdn_base_url`
+  (default `https://vdatum.noaa.gov/download/data/`).
+- `b06637c` — **module + wiring + tests**: new `enc_updater/datum_provisioner.py`
+  with `ensure_geoid(cfg)` / `ensure_vdatum(cfg)`, called from `__main__` right
+  after `load_config` and before `downloader.update_corpus`. geoid = direct
+  cdn.proj.org HTTP → temp file in dest dir → SHA-256 verify → atomic
+  `os.replace`; unset pin while active is a hard error. VDatum = verbatim bundle
+  names, `.{bundle}_installed` marker (written last), Content-Length + zip CRC +
+  `_safe_members` zip-slip/bomb guards, only `*.gtx` extracted. Both reuse
+  `downloader._open_url` / `_copy_capped` and `health.record_error(cfg.corpus_dir,
+  'provision', ...)` on failure, raising `UpdaterError` (exit 1, previous layer
+  intact).
+- `6d95033` — **docs**: README "Datum grid provisioning" section;
+  `region_example.yaml` moved to `~/data/world/datum/` layout with the
+  host-verified pin `us_noaa_g2018u0.tif =
+  fa9a407ac7ee3f5a3694008e4bcd09ce9cc250452f0c3b11700a4960340abce2` and
+  `vdatum_bundles: [MENHMAgome23_8301]`.
+
+### Tests
+`enc_updater/test/test_datum_provisioner.py` — 15 mock-HTTP tests (monkeypatch
+`downloader._open_url`, same pattern as `test_downloader.py`): geoid happy path,
+idempotency, unset-config no-op, failed download (no partial left), SHA mismatch,
+unset pin fails loud, non-http scheme guard; VDatum happy path (only `*.gtx`
+installed + marker), marker idempotency, unset no-op, Content-Length mismatch,
+missing-gtx, failed download (no marker), zip-slip, corrupt zip.
+
+Full suite green: **72 passed** (`pytest enc_updater/test/`), including the
+`flake8` and `pep257` lint gates over the new module and tests. No network
+access used; the SHA pin was provided host-verified.
+
+### Next step
+Ready for code review (`review-code`). No follow-ups outstanding; the
+CMake-download removal in `mru_transform` (uma#288 item 6) remains gated on
+gabby+salmon deploy logs showing `world/datum/` population — out of scope here.
