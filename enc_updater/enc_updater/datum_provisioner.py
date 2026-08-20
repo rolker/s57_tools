@@ -141,12 +141,18 @@ def _install_geoid(cfg) -> None:
                 downloader._copy_capped(response, out, _MAX_GEOID_BYTES, filename)
         except OSError as e:
             _fail(cfg, f'provision: geoid fetch failed ({url}): {e}')
-        actual = _sha256_file(tmp)
+        try:
+            actual = _sha256_file(tmp)
+        except OSError as e:
+            _fail(cfg, f'provision: geoid {filename} read-back failed: {e}')
         if actual != expected:
             _fail(cfg,
                   f'provision: geoid {filename} SHA-256 mismatch: got {actual}, '
                   f'expected {expected}')
-        os.replace(tmp, cfg.geoid)
+        try:
+            os.replace(tmp, cfg.geoid)
+        except OSError as e:
+            _fail(cfg, f'provision: geoid install to {cfg.geoid} failed: {e}')
         tmp = None
     finally:
         if tmp is not None:
@@ -222,14 +228,25 @@ def _provision_vdatum_bundle(cfg, bundle: str, marker: str) -> None:
         except zipfile.BadZipFile as e:
             _fail(cfg, f'provision: vdatum {bundle} is not a valid zip: {e}')
 
+        # NOAA bundles ship bundle-prefixed grid names inside one top-level dir
+        # (verified 2026-08-20: MENHMAgome23_8301/MENHMAgome23_8301_mllw.gtx),
+        # so flattening to basename cannot collide across bundles and keeps the
+        # *_mllw*.gtx / *_mhhw*.gtx names marine_vertical_datum scans for.
         for member in gtx:
             src = os.path.join(extract_root, member.filename)
-            dst = os.path.join(cfg.vdatum_dir, os.path.basename(member.filename))
-            os.replace(src, dst)
+            name = os.path.basename(member.filename)
+            try:
+                os.replace(src, os.path.join(cfg.vdatum_dir, name))
+            except OSError as e:
+                _fail(cfg,
+                      f'provision: vdatum {bundle} install of {name} failed: {e}')
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
-    with open(marker, 'w', encoding='utf-8') as f:
-        f.write('')
+    try:
+        with open(marker, 'w', encoding='utf-8') as f:
+            f.write('')
+    except OSError as e:
+        _fail(cfg, f'provision: vdatum {bundle} marker write failed: {e}')
     print(f'enc_updater: provisioned vdatum bundle {bundle} '
           f'({len(gtx)} grid(s))')

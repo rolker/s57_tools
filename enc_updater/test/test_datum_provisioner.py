@@ -252,3 +252,40 @@ def test_vdatum_corrupt_zip_rejected(tmp_path, monkeypatch):
     with pytest.raises(UpdaterError, match='not a valid zip'):
         datum_provisioner.ensure_vdatum(cfg)
     assert not os.path.exists(os.path.join(cfg.vdatum_dir, f'.{BUNDLE}_installed'))
+
+
+def _fail_replace_for(monkeypatch, predicate):
+    """Make os.replace raise for destinations matching ``predicate``.
+
+    Selective on purpose: health.py also uses os.replace for its atomic
+    write, and a blanket failure would break the very recording under test.
+    """
+    real_replace = os.replace
+
+    def failing_replace(src, dst):
+        if predicate(str(dst)):
+            raise OSError('disk full')
+        return real_replace(src, dst)
+    monkeypatch.setattr(os, 'replace', failing_replace)
+
+
+def test_geoid_install_failure_recorded(tmp_path, monkeypatch):
+    """An OSError installing the verified geoid is recorded, not escaped."""
+    serve(monkeypatch, {GEOID_NAME: GEOID_BYTES})
+    cfg = make_config(tmp_path)
+    _fail_replace_for(monkeypatch, lambda dst: dst == cfg.geoid)
+    with pytest.raises(UpdaterError, match='geoid install'):
+        datum_provisioner.ensure_geoid(cfg)
+    assert not os.path.exists(cfg.geoid)
+    assert health_error(cfg.corpus_dir)['phase'] == 'provision'
+
+
+def test_vdatum_grid_install_failure_recorded(tmp_path, monkeypatch):
+    """An OSError installing an extracted grid is recorded; no marker written."""
+    serve(monkeypatch, {BUNDLE + '.zip': make_vdatum_zip()})
+    cfg = make_config(tmp_path)
+    _fail_replace_for(monkeypatch, lambda dst: dst.endswith('.gtx'))
+    with pytest.raises(UpdaterError, match='install of'):
+        datum_provisioner.ensure_vdatum(cfg)
+    assert not os.path.exists(os.path.join(cfg.vdatum_dir, f'.{BUNDLE}_installed'))
+    assert health_error(cfg.corpus_dir)['phase'] == 'provision'
