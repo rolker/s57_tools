@@ -52,6 +52,14 @@ def make_config(tmp_path, cells):
     )
 
 
+def seed_corpus_cell(corpus_dir, cell):
+    """Create an installed-looking corpus cell dir (<cell>/<cell>.000)."""
+    cell_dir = os.path.join(corpus_dir, cell)
+    os.makedirs(cell_dir, exist_ok=True)
+    with open(os.path.join(cell_dir, cell + '.000'), 'wb') as f:
+        f.write(b'seeded ENC base cell data')
+
+
 def snapshot(corpus_dir):
     """Corpus dir listing + manifest content, for before/after comparison."""
     listing = sorted(os.listdir(corpus_dir)) if os.path.isdir(corpus_dir) else []
@@ -108,6 +116,8 @@ def test_no_change_is_noop(tmp_path, monkeypatch):
            'US4NH01M': OSError('must not download')})
     cfg = make_config(tmp_path, ['US5NH02M', 'US4NH01M'])
     os.makedirs(cfg.corpus_dir)
+    for cell in ('US5NH02M', 'US4NH01M'):
+        seed_corpus_cell(cfg.corpus_dir, cell)
     registry.write_cells(registry.manifest_path(cfg.corpus_dir), {
         'US5NH02M': {'edition': 25, 'update': 3},
         'US4NH01M': {'edition': 12, 'update': 0},
@@ -295,3 +305,229 @@ def test_update_replaces_previous_cell_edition(tmp_path, monkeypatch):
     assert manifest['US5NH02M'] == {'edition': 25, 'update': 3}
     assert not os.path.exists(stale_file)
     assert os.path.isfile(os.path.join(stale_dir, 'US5NH02M.000'))
+
+
+REGION_CATALOG_XML = b"""<?xml version="1.0" encoding="UTF-8" ?>
+<EncProductCatalog>
+  <cell>
+    <name>US5INSIDE</name>
+    <status>Active</status>
+    <zipfile_location>https://www.charts.noaa.gov/ENCs/US5INSIDE.zip</zipfile_location>
+    <edtn>2</edtn>
+    <updn>0</updn>
+    <cov><panel><panel_no>1</panel_no><type>E</type>
+      <vertex><lat>42.95</lat><long>-70.70</long></vertex>
+      <vertex><lat>42.95</lat><long>-70.60</long></vertex>
+      <vertex><lat>43.05</lat><long>-70.60</long></vertex>
+      <vertex><lat>43.05</lat><long>-70.70</long></vertex>
+    </panel></cov>
+  </cell>
+  <cell>
+    <name>US5OUTSIDE</name>
+    <status>Active</status>
+    <zipfile_location>https://www.charts.noaa.gov/ENCs/US5OUTSIDE.zip</zipfile_location>
+    <edtn>1</edtn>
+    <updn>0</updn>
+    <cov><panel><panel_no>1</panel_no><type>E</type>
+      <vertex><lat>44.95</lat><long>-68.70</long></vertex>
+      <vertex><lat>44.95</lat><long>-68.60</long></vertex>
+      <vertex><lat>45.05</lat><long>-68.60</long></vertex>
+    </panel></cov>
+  </cell>
+  <cell>
+    <name>US5HOLLOW</name>
+    <status>Active</status>
+    <zipfile_location>https://www.charts.noaa.gov/ENCs/US5HOLLOW.zip</zipfile_location>
+    <edtn>1</edtn>
+    <updn>0</updn>
+    <cov><panel><panel_no>1</panel_no><type>I</type>
+      <vertex><lat>42.95</lat><long>-70.70</long></vertex>
+      <vertex><lat>42.95</lat><long>-70.60</long></vertex>
+      <vertex><lat>43.05</lat><long>-70.60</long></vertex>
+    </panel></cov>
+  </cell>
+</EncProductCatalog>
+"""
+
+
+def test_catalog_parse_carries_status_and_exterior_panels(tmp_path, monkeypatch):
+    """fetch_catalog surfaces status + type-E panels as (lon, lat) polygons."""
+    serve(monkeypatch, REGION_CATALOG_XML, {})
+    catalog = downloader.fetch_catalog('https://example.invalid/catalog.xml', 5.0)
+    inside = catalog['US5INSIDE']
+    assert inside.status == 'Active'
+    assert inside.panels == [[(-70.70, 42.95), (-70.60, 42.95),
+                              (-70.60, 43.05), (-70.70, 43.05)]]
+    # The type-I hole panel is not a selection polygon.
+    assert catalog['US5HOLLOW'].panels == []
+
+
+def region_config(tmp_path):
+    """Build a region-mode UpdaterConfig over tmp_path (Shoals-shaped bbox)."""
+    return UpdaterConfig(
+        corpus_dir=str(tmp_path / 'corpus'),
+        store_dir=str(tmp_path / 'store'),
+        region=[(-70.85, 42.93), (-70.55, 42.93),
+                (-70.55, 43.11), (-70.85, 43.11)],
+        catalog_url='https://example.invalid/catalog.xml',
+    )
+
+
+def test_region_mode_selects_and_downloads_only_covering_cells(tmp_path, monkeypatch):
+    """update_corpus in region mode fetches exactly the cells covering the region."""
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {
+        'US5INSIDE': zip_inside,
+        'US5OUTSIDE': OSError('must not download'),
+        'US5HOLLOW': OSError('must not download'),
+    })
+    cfg = region_config(tmp_path)
+    changed, manifest = downloader.update_corpus(cfg)
+    assert changed == ['US5INSIDE']
+    assert sorted(manifest) == ['US5INSIDE']
+
+
+def test_prune_removes_deselected_cell_from_corpus_and_manifest(tmp_path, monkeypatch):
+    """
+    A cell that leaves the selection leaves the corpus.
+
+    Otherwise the whole-corpus export keeps feeding its stale tiles into
+    every future chart layer.
+    """
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {'US5INSIDE': zip_inside})
+    cfg = region_config(tmp_path)
+    # Seed the corpus as if a pre-rescheme run had installed a now-gone cell.
+    stale_dir = os.path.join(cfg.corpus_dir, 'US5LEGACY')
+    os.makedirs(stale_dir)
+    with open(os.path.join(stale_dir, 'US5LEGACY.000'), 'wb') as f:
+        f.write(b'stale')
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5LEGACY': {'edition': 9, 'update': 9}})
+    _, manifest = downloader.update_corpus(cfg)
+    assert 'US5LEGACY' not in manifest
+    assert not os.path.exists(stale_dir)
+    _, saved = snapshot(cfg.corpus_dir)
+    assert sorted(saved) == ['US5INSIDE']
+
+
+def test_degraded_catalog_row_refuses_prune(tmp_path, monkeypatch):
+    """
+    An installed cell whose row is Active with unparseable coverage errors.
+
+    Pruning on that signature would turn a transient catalog defect into
+    removed navigation coverage with a successful exit.
+    """
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {'US5INSIDE': zip_inside})
+    cfg = region_config(tmp_path)
+    # US5HOLLOW's only panel is type-I, so it parses to zero usable panels
+    # while its status stays Active — the degraded-row signature. Install it.
+    os.makedirs(cfg.corpus_dir)
+    seed_corpus_cell(cfg.corpus_dir, 'US5HOLLOW')
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5HOLLOW': {'edition': 1, 'update': 0}})
+    before = snapshot(cfg.corpus_dir)
+    with pytest.raises(UpdaterError, match='refusing to prune'):
+        downloader.update_corpus(cfg)
+    assert snapshot(cfg.corpus_dir) == before
+
+
+def test_cells_mode_typo_fails_before_pruning(tmp_path, monkeypatch):
+    """
+    A config typo errors with the previous corpus and manifest intact.
+
+    Prune runs after validation + downloads, so swapping a good cell name
+    for a bad one must not destroy the good cell's data first.
+    """
+    serve(monkeypatch, REGION_CATALOG_XML, {})
+    cfg = make_config(tmp_path, ['US5TYPO'])
+    os.makedirs(cfg.corpus_dir)
+    seed_corpus_cell(cfg.corpus_dir, 'US5INSIDE')
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5INSIDE': {'edition': 2, 'update': 0}})
+    before = snapshot(cfg.corpus_dir)
+    with pytest.raises(UpdaterError, match='not in catalog'):
+        downloader.update_corpus(cfg)
+    assert snapshot(cfg.corpus_dir) == before
+
+
+def test_dry_run_does_not_prune(tmp_path, monkeypatch):
+    """--dry-run previews a region change without deleting corpus data."""
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {'US5INSIDE': zip_inside})
+    cfg = region_config(tmp_path)
+    os.makedirs(cfg.corpus_dir)
+    seed_corpus_cell(cfg.corpus_dir, 'US5LEGACY')
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5LEGACY': {'edition': 9, 'update': 9}})
+    _, manifest = downloader.update_corpus(cfg, dry_run=True)
+    assert 'US5LEGACY' in manifest
+    assert os.path.isdir(os.path.join(cfg.corpus_dir, 'US5LEGACY'))
+
+
+def test_manifest_entry_with_missing_corpus_data_redownloads(tmp_path, monkeypatch):
+    """
+    A manifest entry whose corpus dir is gone counts as changed (self-heal).
+
+    Otherwise a crash between prune steps (or a manual deletion) would leave
+    the manifest claiming coverage that every future export silently lacks.
+    """
+    zip_a, zip_b = make_cell_zip('US5NH02M'), make_cell_zip('US4NH01M')
+    serve(monkeypatch, catalog_bytes(zip_a, zip_b),
+          {'US5NH02M': zip_a, 'US4NH01M': OSError('must not download')})
+    cfg = make_config(tmp_path, ['US5NH02M', 'US4NH01M'])
+    os.makedirs(cfg.corpus_dir)
+    seed_corpus_cell(cfg.corpus_dir, 'US4NH01M')  # intact — not re-fetched
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir), {
+        'US5NH02M': {'edition': 25, 'update': 3},   # entry, but no dir
+        'US4NH01M': {'edition': 12, 'update': 0},
+    })
+    changed, _ = downloader.update_corpus(cfg)
+    assert changed == ['US5NH02M']
+    assert os.path.isfile(
+        os.path.join(cfg.corpus_dir, 'US5NH02M', 'US5NH02M.000'))
+
+
+def test_unsafe_catalog_cell_name_skipped(tmp_path, monkeypatch):
+    """A catalog row whose name is not a plain [A-Z0-9] segment is dropped."""
+    evil = REGION_CATALOG_XML.replace(b'US5OUTSIDE', b'US5/../evil')
+    serve(monkeypatch, evil, {})
+    catalog = downloader.fetch_catalog('https://example.invalid/catalog.xml', 5.0)
+    assert 'US5/../evil' not in catalog
+    assert 'US5INSIDE' in catalog
+
+
+def test_prune_refuses_symlinked_cell_dir(tmp_path, monkeypatch):
+    """A symlinked corpus cell errors by name; nothing is deleted or unlinked."""
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {'US5INSIDE': zip_inside})
+    cfg = region_config(tmp_path)
+    os.makedirs(cfg.corpus_dir)
+    real_target = tmp_path / 'elsewhere'
+    real_target.mkdir()
+    (real_target / 'US5LEGACY.000').write_bytes(b'data outside the corpus')
+    os.symlink(str(real_target), os.path.join(cfg.corpus_dir, 'US5LEGACY'))
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5LEGACY': {'edition': 9, 'update': 9}})
+    with pytest.raises(UpdaterError, match='symlink'):
+        downloader.update_corpus(cfg)
+    assert os.path.islink(os.path.join(cfg.corpus_dir, 'US5LEGACY'))
+    assert (real_target / 'US5LEGACY.000').exists()
+
+
+def test_prune_warns_on_stray_non_directory(tmp_path, monkeypatch, capsys):
+    """A stray file at a deselected cell's path is reported, entry still drops."""
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {'US5INSIDE': zip_inside})
+    cfg = region_config(tmp_path)
+    os.makedirs(cfg.corpus_dir)
+    stray = os.path.join(cfg.corpus_dir, 'US5LEGACY')
+    with open(stray, 'w', encoding='utf-8') as f:
+        f.write('not a cell dir')
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5LEGACY': {'edition': 9, 'update': 9}})
+    _, manifest = downloader.update_corpus(cfg)
+    assert 'US5LEGACY' not in manifest
+    assert os.path.isfile(stray)
+    assert 'is not a directory' in capsys.readouterr().out

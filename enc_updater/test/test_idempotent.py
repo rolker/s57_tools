@@ -22,6 +22,9 @@ def workspace(tmp_path, monkeypatch):
     """Config file + corpus/store where corpus, manifest and catalog agree."""
     corpus = tmp_path / 'corpus'
     corpus.mkdir()
+    cell_dir = corpus / 'US5NH02M'
+    cell_dir.mkdir()
+    (cell_dir / 'US5NH02M.000').write_bytes(b'seeded ENC base cell data')
     registry.write_cells(registry.manifest_path(str(corpus)), dict(CELLS))
     store = tmp_path / 'store'
     (store / 'chart').mkdir(parents=True)
@@ -87,3 +90,87 @@ def test_interlock_refusal_exits_2(workspace, monkeypatch):
         raise InterlockRefusal('interlock: navigation active')
     monkeypatch.setattr(regenerator, 'regenerate', refuse)
     assert cli.main(['--config', str(config_path), '--force']) == 2
+
+
+def test_fresh_store_dir_created_up_front(workspace, monkeypatch, tmp_path):
+    """
+    A missing store_dir is created before any work (#39).
+
+    The old behavior failed at the final commit, after the whole
+    download/export cycle had already run.
+    """
+    import os
+    import shutil
+    config_path, store = workspace
+    shutil.rmtree(store)
+
+    def fake_regenerate(cfg, manifest, dry_run=False):
+        """Stand-in swap: the store dir must already exist by now."""
+        assert os.path.isdir(cfg.store_dir)
+    monkeypatch.setattr(regenerator, 'regenerate', fake_regenerate)
+    assert cli.main(['--config', str(config_path)]) == 0
+    assert os.path.isdir(store)
+
+
+def test_corrupt_manifest_is_clean_exit_1(workspace, monkeypatch, capsys):
+    """A corrupt .manifest.json exits 1 with a message, never a traceback."""
+    config_path, store = workspace
+    corpus = store.parent / 'corpus'
+    registry.manifest_path(str(corpus))
+    (corpus / '.manifest.json').write_text('{not json')
+    assert cli.main(['--config', str(config_path)]) == 1
+    assert 'enc_updater:' in capsys.readouterr().err
+
+
+def test_missing_store_parent_is_clean_refusal(workspace, tmp_path):
+    """
+    Only the store leaf is created; a missing parent refuses cleanly.
+
+    An unmounted data volume or mistyped store_dir must fail loudly, not
+    silently fork the pipeline onto a shadow store (makedirs would).
+    """
+    config_path, store = workspace
+    import shutil
+    import yaml as yaml_mod
+    doc = yaml_mod.safe_load(config_path.read_text())
+    doc['store_dir'] = str(tmp_path / 'not-mounted' / 'store')
+    config_path.write_text(yaml_mod.safe_dump(doc))
+    shutil.rmtree(store)
+    assert cli.main(['--config', str(config_path)]) == 1
+
+
+def test_store_dir_as_plain_file_names_the_real_problem(workspace, tmp_path, capsys):
+    """A store_dir occupied by a file gets its own message, not 'missing parent'."""
+    import shutil
+    config_path, store = workspace
+    shutil.rmtree(store)
+    store.write_text('not a directory')
+    assert cli.main(['--config', str(config_path)]) == 1
+    err = capsys.readouterr().err
+    assert 'not a directory' in err
+    assert 'parent must already exist' not in err
+
+
+def test_dry_run_skips_selection_change_record(workspace, monkeypatch, capsys):
+    """
+    A dry run never reports or records a cell-set change.
+
+    Pruning is skipped in dry-run, so the manifest diff would miss removals;
+    a preview must not write last_selection_change to the health file.
+    """
+    import json
+    import os
+    config_path, store = workspace
+    grown = dict(CELLS)
+    grown['US5NEW01'] = {'edition': 1, 'update': 0}
+    monkeypatch.setattr(downloader, 'update_corpus',
+                        lambda cfg, dry_run=False: (['US5NEW01'], grown))
+    monkeypatch.setattr(regenerator, 'regenerate',
+                        lambda cfg, manifest, dry_run=False: None)
+    assert cli.main(['--config', str(config_path), '--dry-run']) == 0
+    assert 'cell set changed' not in capsys.readouterr().out
+    corpus = store.parent / 'corpus'
+    health_path = os.path.join(str(corpus), '.updater_health.json')
+    with open(health_path, encoding='utf-8') as f:
+        health_data = json.load(f)
+    assert 'last_selection_change' not in health_data

@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 
 import yaml
 
+from . import selection
 from . import UpdaterError
 
 DEFAULT_CATALOG_URL = 'https://charts.noaa.gov/ENCs/ENCProdCat.xml'
@@ -50,7 +51,16 @@ class UpdaterConfig:
 
     corpus_dir: str
     store_dir: str
-    cells: List[str]
+    # Cell selection: exactly one of `cells` (explicit pin list, fail-loud on
+    # a name the catalog drops) or `region` (a lon/lat polygon; the cell set
+    # is derived from the live catalog's coverage panels each cycle — the
+    # rescheme-proof mode, #40). `bands` and `max_cells` apply to region
+    # mode only; see selection.py for their semantics and defaults.
+    cells: List[str] = dataclasses.field(default_factory=list)
+    region: Optional[List[Tuple[float, float]]] = None
+    bands: List[int] = dataclasses.field(
+        default_factory=lambda: list(selection.DEFAULT_BANDS))
+    max_cells: int = selection.DEFAULT_MAX_CELLS
     catalog_url: str = DEFAULT_CATALOG_URL
     geoid: Optional[str] = None
     geoid_sha256: Optional[str] = None
@@ -72,7 +82,8 @@ class UpdaterConfig:
 
 
 _TOP_LEVEL_KEYS = {
-    'corpus_dir', 'store_dir', 'cells', 'catalog_url',
+    'corpus_dir', 'store_dir', 'cells', 'region', 'bands', 'max_cells',
+    'catalog_url',
     'geoid', 'geoid_sha256', 'geoid_cdn_base_url',
     'vdatum_dir', 'vdatum_bundles', 'vdatum_cdn_base_url',
     'datum_config', 'lake_datum',
@@ -105,6 +116,59 @@ def _require_float(value, label: str) -> float:
         raise UpdaterError(f'config: "{label}" must be a number, got {value!r}')
 
 
+def _parse_region(raw) -> List[Tuple[float, float]]:
+    """
+    Normalize a config ``region`` to a lon/lat polygon (vertex list).
+
+    Two accepted shapes: a flat 4-number bbox ``[lon_min, lat_min, lon_max,
+    lat_max]`` (expanded to its corner polygon), or a polygon as a list of
+    3+ ``[lon, lat]`` pairs. Coordinates are validated to lon [-180, 180] /
+    lat [-90, 90] — which also enforces the planar no-antimeridian-wrap
+    assumption selection.py documents.
+    """
+    def _coord(value, label):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise UpdaterError(f'config: region {label} must be a number, '
+                               f'got {value!r}')
+        return float(value)
+
+    def _check_lon_lat(lon, lat):
+        if not -180.0 <= lon <= 180.0 or not -90.0 <= lat <= 90.0:
+            raise UpdaterError(
+                f'config: region coordinate ({lon}, {lat}) outside '
+                'lon [-180, 180] / lat [-90, 90] — vertices are [lon, lat] '
+                'pairs (x first), bbox is [lon_min, lat_min, lon_max, lat_max]')
+
+    if (isinstance(raw, list) and len(raw) == 4
+            and all(not isinstance(v, (list, tuple)) for v in raw)):
+        lon_min = _coord(raw[0], 'bbox lon_min')
+        lat_min = _coord(raw[1], 'bbox lat_min')
+        lon_max = _coord(raw[2], 'bbox lon_max')
+        lat_max = _coord(raw[3], 'bbox lat_max')
+        if not (lon_min < lon_max and lat_min < lat_max):
+            raise UpdaterError(
+                'config: region bbox must satisfy lon_min < lon_max and '
+                'lat_min < lat_max ([lon_min, lat_min, lon_max, lat_max])')
+        for lon, lat in ((lon_min, lat_min), (lon_max, lat_max)):
+            _check_lon_lat(lon, lat)
+        return [(lon_min, lat_min), (lon_max, lat_min),
+                (lon_max, lat_max), (lon_min, lat_max)]
+
+    if (isinstance(raw, list) and len(raw) >= 3
+            and all(isinstance(v, (list, tuple)) and len(v) == 2 for v in raw)):
+        polygon = []
+        for pair in raw:
+            lon = _coord(pair[0], 'vertex lon')
+            lat = _coord(pair[1], 'vertex lat')
+            _check_lon_lat(lon, lat)
+            polygon.append((lon, lat))
+        return polygon
+
+    raise UpdaterError(
+        'config: "region" must be a bbox [lon_min, lat_min, lon_max, lat_max] '
+        'or a polygon of 3+ [lon, lat] pairs')
+
+
 def load_config(path: str) -> UpdaterConfig:
     """
     Load and validate a region config; raise UpdaterError on any problem.
@@ -124,14 +188,38 @@ def load_config(path: str) -> UpdaterConfig:
     unknown = set(raw) - _TOP_LEVEL_KEYS
     if unknown:
         raise UpdaterError(f'config: unknown key(s) {sorted(unknown)} in {path}')
-    for key in ('corpus_dir', 'store_dir', 'cells'):
+    for key in ('corpus_dir', 'store_dir'):
         if key not in raw:
             raise UpdaterError(f'config: missing required key "{key}" in {path}')
 
-    cells = raw['cells']
-    if (not isinstance(cells, list) or not cells
+    if ('cells' in raw) == ('region' in raw):
+        raise UpdaterError(
+            'config: exactly one of "cells" (explicit pin list) or "region" '
+            f'(lon/lat area, catalog-driven selection) is required in {path}')
+
+    cells = raw.get('cells', [])
+    if 'cells' in raw and (
+            not isinstance(cells, list) or not cells
             or not all(isinstance(c, str) and c for c in cells)):
         raise UpdaterError('config: "cells" must be a non-empty list of cell names')
+
+    region = _parse_region(raw.get('region')) if 'region' in raw else None
+    for key in ('bands', 'max_cells'):
+        if key in raw and region is None:
+            raise UpdaterError(
+                f'config: "{key}" applies to region-driven selection only — '
+                'it has no effect with an explicit "cells" list')
+    bands = raw.get('bands', list(selection.DEFAULT_BANDS))
+    if (not isinstance(bands, list) or not bands
+            or not all(isinstance(b, int) and not isinstance(b, bool)
+                       and 1 <= b <= 6 for b in bands)):
+        raise UpdaterError(
+            'config: "bands" must be a non-empty list of ENC usage bands '
+            '(integers 1-6)')
+    max_cells = raw.get('max_cells', selection.DEFAULT_MAX_CELLS)
+    if (isinstance(max_cells, bool) or not isinstance(max_cells, int)
+            or max_cells < 1):
+        raise UpdaterError('config: "max_cells" must be a positive integer')
 
     bundles = raw.get('vdatum_bundles', []) or []
     if (not isinstance(bundles, list)
@@ -184,6 +272,9 @@ def load_config(path: str) -> UpdaterConfig:
         corpus_dir=_expand(raw['corpus_dir']),
         store_dir=_expand(raw['store_dir']),
         cells=[str(c) for c in cells],
+        region=region,
+        bands=[int(b) for b in bands],
+        max_cells=int(max_cells),
         catalog_url=str(raw.get('catalog_url', DEFAULT_CATALOG_URL)),
         geoid=_expand(raw.get('geoid')),
         geoid_sha256=(str(raw['geoid_sha256']) if raw.get('geoid_sha256')
