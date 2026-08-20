@@ -536,7 +536,25 @@ unsigned char S57Layer::get_cost_from_grid(grid_map::GridMap &grid, const grid_m
         return nav2_costmap_2d::LETHAL_OBSTACLE;
       if(!std::isnan(grid.at("unsurveyed", index)) || !std::isnan(grid.at("caution", index)))
         return unsurveyed_cost_;
+      // Known-navigable water. MUST return a real cost, not NO_INFORMATION.
+      // generateTile composites overlapping charts finest-resolution-first and
+      // writes only where the tile cell is still NO_INFORMATION (first writer
+      // wins), which is what makes the finest chart authoritative. Returning
+      // NO_INFORMATION here would leave a water cell UNCLAIMED by the fine
+      // harbour chart, so the next-coarser chart in the same tile gets to write
+      // it — and on an overview cell (e.g. 1:2,000,000 US2ATLPC) a harbour basin
+      // is far below the resolvable feature size and falls inside the LNDARE
+      // polygon, i.e. elevation > 0 => LETHAL. That painted whole navigable
+      // basins lethal at Lewes, DE on 2026-08-05, including the cell the vehicle
+      // was floating in. FREE_SPACE claims the cell without asserting any depth
+      // opinion: bathymetry_layer runs after this layer and max-combines
+      // (raise-only), so it remains the sole depth authority per ADR-0010 D10.
+      return nav2_costmap_2d::FREE_SPACE;
     }
+    // Elevation is NaN at this cell (the channel itself is read
+    // unconditionally above — a chart without it never reaches here): the
+    // chart genuinely says nothing about the cell; leave it unclaimed so a
+    // coarser chart can supply data.
     return nav2_costmap_2d::NO_INFORMATION;
   }
   if(!std::isnan(elevation))
