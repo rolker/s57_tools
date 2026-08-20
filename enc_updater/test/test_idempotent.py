@@ -137,3 +137,40 @@ def test_missing_store_parent_is_clean_refusal(workspace, tmp_path):
     config_path.write_text(yaml_mod.safe_dump(doc))
     shutil.rmtree(store)
     assert cli.main(['--config', str(config_path)]) == 1
+
+
+def test_store_dir_as_plain_file_names_the_real_problem(workspace, tmp_path, capsys):
+    """A store_dir occupied by a file gets its own message, not 'missing parent'."""
+    import shutil
+    config_path, store = workspace
+    shutil.rmtree(store)
+    store.write_text('not a directory')
+    assert cli.main(['--config', str(config_path)]) == 1
+    err = capsys.readouterr().err
+    assert 'not a directory' in err
+    assert 'parent must already exist' not in err
+
+
+def test_dry_run_skips_selection_change_record(workspace, monkeypatch, capsys):
+    """
+    A dry run never reports or records a cell-set change.
+
+    Pruning is skipped in dry-run, so the manifest diff would miss removals;
+    a preview must not write last_selection_change to the health file.
+    """
+    import json
+    import os
+    config_path, store = workspace
+    grown = dict(CELLS)
+    grown['US5NEW01'] = {'edition': 1, 'update': 0}
+    monkeypatch.setattr(downloader, 'update_corpus',
+                        lambda cfg, dry_run=False: (['US5NEW01'], grown))
+    monkeypatch.setattr(regenerator, 'regenerate',
+                        lambda cfg, manifest, dry_run=False: None)
+    assert cli.main(['--config', str(config_path), '--dry-run']) == 0
+    assert 'cell set changed' not in capsys.readouterr().out
+    corpus = store.parent / 'corpus'
+    health_path = os.path.join(str(corpus), '.updater_health.json')
+    with open(health_path, encoding='utf-8') as f:
+        health_data = json.load(f)
+    assert 'last_selection_change' not in health_data

@@ -136,8 +136,12 @@ approach/harbor/berthing; overview bands would import at uselessly coarse
 store levels), and `max_cells:` (default 50) is a sanity cap so a
 fat-fingered region fails loudly instead of downloading the coast. An empty
 selection is a hard error, matching the fail-loud contract of the explicit
-list. Regions crossing the antimeridian are unsupported (validation keeps
-longitudes in [-180, 180]).
+list. Regions crossing the antimeridian are unsupported: coordinates are
+validated per-vertex to lon [-180, 180] and the geometry is planar, so a
+bbox cannot express a crossing at all, and a polygon straddling ±180 is
+*not rejected* — it is interpreted the long way around and would select a
+huge unintended area (in practice tripping the `max_cells` cap). NOAA ENC
+coverage sits nowhere near ±180.
 
 **Nav-liveness contract**: `nav_liveness.nodes` lists the exact node names
 (as printed by `ros2 node list`, e.g. `/bizzy/controller`) whose presence

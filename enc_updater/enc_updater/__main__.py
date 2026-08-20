@@ -71,7 +71,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     # so an unmounted data volume or mistyped path (missing parents) still
     # fails loudly here instead of silently forking the whole pipeline onto
     # a shadow store on the wrong filesystem. A store_dir path occupied by
-    # a plain file also fails here, as a clean error rather than a traceback.
+    # a plain file also fails here, with its own message — folding it into
+    # the mkdir failure would blame a "missing parent" for what is really a
+    # config error, sending the operator debugging the wrong thing.
+    if os.path.exists(cfg.store_dir) and not os.path.isdir(cfg.store_dir):
+        print(f'enc_updater: store_dir {cfg.store_dir} exists but is not a '
+              'directory — fix the config (or remove the file)',
+              file=sys.stderr)
+        return 1
     if not os.path.isdir(cfg.store_dir):
         try:
             os.mkdir(cfg.store_dir)
@@ -93,11 +100,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     health.record_download_attempt(cfg.corpus_dir)
-    # The pre-update manifest keys are the previous cycle's cell set; after
-    # update_corpus (which prunes deselected cells) the manifest holds
-    # exactly the current set, so the diff below surfaces membership changes
-    # — a NOAA rescheme in region mode, a config edit in cells mode. The
-    # load sits inside the try: a corrupt manifest is a download-phase
+    # The pre-update manifest keys are the previous cycle's cell set; after a
+    # real update_corpus run (which prunes deselected cells) the manifest
+    # holds exactly the current set, so the diff below surfaces membership
+    # changes — a NOAA rescheme in region mode, a config edit in cells mode.
+    # The load sits inside the try: a corrupt manifest is a download-phase
     # failure like any other (clean exit 1 + health record, no traceback).
     try:
         previous = set(
@@ -108,12 +115,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         health.record_error(cfg.corpus_dir, 'download', str(e))
         return 1
     health.record_download_ok(cfg.corpus_dir)
-    current = set(manifest)
-    if current != previous:
-        added, removed = current - previous, previous - current
-        print('enc_updater: cell set changed: '
-              f'+{sorted(added)} -{sorted(removed)}')
-        health.record_selection_change(cfg.corpus_dir, current, added, removed)
+    # Not in dry-run: pruning is skipped there, so the manifest still carries
+    # deselected cells (removals would be silently missed) and a preview run
+    # must not write a last_selection_change record — the would-prune lines
+    # from prune_corpus already show the membership changes a real run would
+    # make.
+    if not args.dry_run:
+        current = set(manifest)
+        if current != previous:
+            added, removed = current - previous, previous - current
+            print('enc_updater: cell set changed: '
+                  f'+{sorted(added)} -{sorted(removed)}')
+            health.record_selection_change(
+                cfg.corpus_dir, current, added, removed)
 
     reason = _need_regeneration(cfg, changed, manifest, args.force)
     if reason is None:
