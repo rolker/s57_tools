@@ -176,8 +176,8 @@ Approved pre-push review. Lifecycle: Local Review → push / open PR → triage-
 **CI**: all-pass (hosted build-and-test green at head)
 
 ### Findings
-- [ ] (valid, Copilot) `ensure_geoid` treats any existing path as installed (`os.path.exists`); a `geoid` misconfigured to an existing directory silently skips provisioning and only fails later at export — use `os.path.isfile` and fail loud (record + UpdaterError) when the path exists but is not a regular file — `enc_updater/enc_updater/datum_provisioner.py:112`
-- [ ] (valid, Copilot) `tempfile.mkstemp`/`mkdtemp` can raise raw `OSError`, escaping unrecorded (bypasses `_fail`) — wrap the three sites in the established `_fail` pattern — `enc_updater/enc_updater/datum_provisioner.py:137,191,205`
+- [x] (valid, Copilot) `ensure_geoid` treats any existing path as installed (`os.path.exists`); a `geoid` misconfigured to an existing directory silently skips provisioning and only fails later at export — use `os.path.isfile` and fail loud (record + UpdaterError) when the path exists but is not a regular file — `enc_updater/enc_updater/datum_provisioner.py:112`
+- [x] (valid, Copilot) `tempfile.mkstemp`/`mkdtemp` can raise raw `OSError`, escaping unrecorded (bypasses `_fail`) — wrap the three sites in the established `_fail` pattern — `enc_updater/enc_updater/datum_provisioner.py:137,191,205`
 
 ### False positives
 - (none)
@@ -186,3 +186,42 @@ Approved pre-push review. Lifecycle: Local Review → push / open PR → triage-
 R2 suggestions (post-download fs ops, flatten justification) all resolved
 before publish; Copilot found two *new* sites in the same contract family —
 treat as the completing sweep of that class (add matching tests).
+
+## Implementation
+**Status**: complete
+**When**: 2026-08-20 16:29 +00:00
+**By**: Claude Code Agent (Claude Opus)
+
+**Branch**: feature/issue-37 at `a79a32f`
+**Addressed**: Integrated Review — 2026-08-20 12:20 -04:00 at `428711c` (PR #38)
+**Commits**: `45bce88`, `a79a32f`
+
+Completing sweep of the "raw OSError bypasses the record-and-raise contract"
+class the pre-push rounds opened and Copilot extended — both Integrated Review
+findings fixed, each in an atomic commit with matching mock tests. No findings
+deferred.
+
+### Actions
+- [x] (valid, Copilot) `ensure_geoid` treated any existing path as installed (`os.path.exists`), so a geoid path pointing at a directory silently skipped provisioning and only failed later at export. Now trusts only a regular file (`os.path.isfile`); an existing non-regular-file path fails loud via `_fail` (recorded + `UpdaterError`) — `enc_updater/enc_updater/datum_provisioner.py:111-117` (commit `45bce88`)
+- [x] (valid, Copilot) `tempfile.mkstemp` (geoid), `tempfile.mkdtemp` (vdatum), and `os.path.getsize` (vdatum zip) could raise raw `OSError` outside any handler, escaping `_fail` and going unrecorded. Wrapped all three in the established `except OSError → _fail` pattern so a filesystem failure is recorded to the health file (`phase="provision"`) and raised as `UpdaterError` — `enc_updater/enc_updater/datum_provisioner.py:136-138,193-197,205-208` (commit `a79a32f`)
+
+### Tests
+Added four mock-HTTP tests (same monkeypatch pattern as the suite):
+`test_geoid_path_is_directory_fails_loud` (finding 1), and
+`test_geoid_tempfile_failure_recorded`, `test_vdatum_tempdir_failure_recorded`,
+`test_vdatum_zip_stat_failure_recorded` (finding 2) — each asserts the failure
+lands in the health file with `phase="provision"`. Full package suite green:
+**83 passed** (`pytest enc_updater/test/`), `ament_flake8` + `ament_pep257`
+gate tests included. No network access used.
+
+Incidental (disclosed): reformatted the pre-existing `_fail_replace_for`
+docstring in `test_datum_provisioner.py` to D213 style (ament ignores D212 but
+enforces D213 — summary on the second line) so the `ament_pep257` gate is green
+alongside the new multi-line test docstrings; no behavior change.
+
+### Next step
+Lifecycle: Implementation → review-code (re-review the fixes). Hand off to a
+fresh-context sub-agent to read the diff cold and confirm both findings are
+genuinely resolved:
+
+    .agent/scripts/dispatch_subagent.sh --mode in-process --issue 37 --skill review-code
