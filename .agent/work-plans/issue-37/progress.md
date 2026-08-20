@@ -140,3 +140,27 @@ pep257 gates included. No network access used.
 Ready for re-review (`review-code`, pre-push) of the fix commits — a
 fresh-context sub-agent reads the diff cold and confirms the three findings
 are genuinely resolved. No findings deferred.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-20 15:46 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: approved
+
+**Branch**: feature/issue-37 at `9aa4fba`
+**Mode**: pre-push
+**Depth**: Deep (reason: remote download + zip extraction, security-relevant)
+**Must-fix**: 0 | **Suggestions**: 2
+**Round**: 2 | **Ship**: recommended — round-1 must-fix resolved and regression-tested; only two low-severity suggestions remain
+
+### Findings
+- [ ] No must-fix findings. Round-1 must-fix (guard failures not recorded to health file) is resolved: `ensure_geoid`/`ensure_vdatum` route guard `UpdaterError`s through `_record` (double-record-guarded by `_provision_recorded`), and tests assert `phase="provision"` lands in the health file — `datum_provisioner.py:115-117,179-181`; `test_datum_provisioner.py:166,245`
+- [ ] (suggestion) Post-download fs ops (`_sha256_file`, `os.replace`, marker `open`) sit outside any `except`, so an `OSError` (disk failure, or geoid/vdatum_dir pointing at a directory) escapes uncaught and unrecorded — contradicts the "any failure raises UpdaterError and records it" contract; low probability, still fails loud — `enc_updater/enc_updater/datum_provisioner.py:144,149,228,232`
+- [ ] (suggestion) VDatum `.gtx` install flattens via `os.path.basename`, so same-named grids across bundles/nested dirs silently overwrite via `os.replace` (contained within vdatum_dir; no path escape) — `enc_updater/enc_updater/datum_provisioner.py:227-228`
+
+### Notes
+- Static analysis: `ament_flake8` + `ament_pep257` clean; full suite 77/77 green (no network used).
+- Claude Adversarial: 2 passes (Lens A logic, Lens B systemic/security) — no must-fix from either. Copilot: off (default). Local: skipped (no `local_review.sh` helper in this repo; Ollama not responding).
+
+### Next step
+Approved pre-push review. Lifecycle: Local Review → push / open PR → triage-reviews. The two suggestions are optional robustness hardening; neither blocks the push.
