@@ -164,3 +164,25 @@ are genuinely resolved. No findings deferred.
 
 ### Next step
 Approved pre-push review. Lifecycle: Local Review → push / open PR → triage-reviews. The two suggestions are optional robustness hardening; neither blocks the push.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-08-20 12:20 -04:00
+**By**: Claude Code Agent (Claude Fable 5)
+
+**PR**: #38 at `428711c`
+**Sources**: 3 (Copilot R1 @ `428711c`, Local Review (Pre-Push) R1–R2 @ prior SHAs, CI rollup)
+**Cross-source confirmations**: 0 strict (but both Copilot findings extend the round-2 "fs OSError bypasses the record-and-raise contract" family to new sites — same class, different lines/SHA)
+**CI**: all-pass (hosted build-and-test green at head)
+
+### Findings
+- [ ] (valid, Copilot) `ensure_geoid` treats any existing path as installed (`os.path.exists`); a `geoid` misconfigured to an existing directory silently skips provisioning and only fails later at export — use `os.path.isfile` and fail loud (record + UpdaterError) when the path exists but is not a regular file — `enc_updater/enc_updater/datum_provisioner.py:112`
+- [ ] (valid, Copilot) `tempfile.mkstemp`/`mkdtemp` can raise raw `OSError`, escaping unrecorded (bypasses `_fail`) — wrap the three sites in the established `_fail` pattern — `enc_updater/enc_updater/datum_provisioner.py:137,191,205`
+
+### False positives
+- (none)
+
+**Local-timeline reconciliation**: pre-push R1 must-fix (guard recording) and
+R2 suggestions (post-download fs ops, flatten justification) all resolved
+before publish; Copilot found two *new* sites in the same contract family —
+treat as the completing sweep of that class (add matching tests).
