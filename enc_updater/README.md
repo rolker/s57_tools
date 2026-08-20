@@ -57,7 +57,10 @@ surface as an export failure later.
   correct grid from a wrong or corrupt one — `geoid_sha256` is **required**
   whenever `geoid` is set (an unset pin is a hard error, not a silent skip).
   A partial download lives only at the temp path and is removed on any failure,
-  so a geoid already on disk is trusted and never re-downloaded.
+  so a geoid already on disk is trusted and never re-downloaded. That trust
+  also means **changing `geoid_sha256` does not re-verify an existing file** —
+  to switch grids or force re-verification, delete the on-disk geoid and let
+  the next run re-provision it.
 - **VDatum** — each name in `vdatum_bundles` is treated as a **verbatim** NOAA
   bundle name (copy it exactly from the
   [VDatum download page](https://vdatum.noaa.gov/download.php); no friendly-name
