@@ -551,8 +551,10 @@ unsigned char S57Layer::get_cost_from_grid(grid_map::GridMap &grid, const grid_m
       // (raise-only), so it remains the sole depth authority per ADR-0010 D10.
       return nav2_costmap_2d::FREE_SPACE;
     }
-    // No elevation channel here at all => this chart genuinely says nothing
-    // about the cell; leave it unclaimed so a coarser chart can supply data.
+    // Elevation is NaN at this cell (the channel itself is read
+    // unconditionally above — a chart without it never reaches here): the
+    // chart genuinely says nothing about the cell; leave it unclaimed so a
+    // coarser chart can supply data.
     return nav2_costmap_2d::NO_INFORMATION;
   }
   if(!std::isnan(elevation))

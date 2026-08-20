@@ -95,9 +95,7 @@ TEST_F(DepthCostsTest, DefaultModeDepthRampUnchanged)
   EXPECT_LT(cost, nav2_costmap_2d::LETHAL_OBSTACLE);
 }
 
-// (b) Suppressed mode: a submerged cell with no caution/unsurveyed marking
-// returns NO_INFORMATION — the cell is left for bathymetry_layer.
-// Suppressed mode: a submerged cell asserts NO depth cost, but it MUST still
+// (b) Suppressed mode: a submerged cell asserts NO depth cost, but it MUST still
 // claim the cell with a real value (FREE_SPACE) rather than NO_INFORMATION.
 //
 // This previously asserted NO_INFORMATION, which codified the multi-scale
