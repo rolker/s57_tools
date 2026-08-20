@@ -28,3 +28,21 @@ Static analysis: covered by the package's own ament flake8/pep257 colcon tests (
 
 ### False positives
 - (none)
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-08-20 16:40 -04:00
+**By**: Claude Code Agent (Claude Fable 5)
+
+**PR**: #43 at `a217dc8`
+**Sources**: 3 (Copilot R1 @ `a217dc8`, Local Review (Pre-Push) @ `8559579` — all 6 findings closed, CI rollup)
+**Cross-source confirmations**: 0
+**CI**: all-pass (build-and-test success)
+
+### Findings
+- [ ] (minor, Copilot) store-bootstrap error says "parent must already exist" even when store_dir exists as a plain file — detect exists-as-non-dir with a distinct message — `enc_updater/enc_updater/__main__.py:83`
+- [ ] (minor, Copilot) dry-run selection diff/health record is wrong: prune skipped so removals are missed, and a preview run writes last_selection_change — skip the diff + health write under dry-run — `enc_updater/enc_updater/__main__.py:116`
+- [ ] (minor, Copilot) README antimeridian claim inaccurate for polygons: per-vertex validation does not prevent a ±180-straddling polygon (interpreted planar, long-way-around) — state the real limitation — `enc_updater/README.md:140`
+
+### False positives
+- (none)
