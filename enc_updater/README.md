@@ -40,6 +40,39 @@ boat), never inside the ROS runtime.
    `last_download_attempt`, `last_download_ok`, `last_regen_ok` and
    `last_error`, so repeated silent cron failures age the layer loudly.
 
+## Datum grid provisioning
+
+The D7 export needs a geoid model (`--geoid`) and a directory of NOAA VDatum
+`*.gtx` grids (`--vdatum-dir`). When `geoid` (+ `geoid_sha256`), `vdatum_dir`,
+and `vdatum_bundles` are configured, the updater **auto-provisions** these on
+first run, before the download step, so an operator never stages them by hand.
+Provisioning is idempotent and fail-loud: a missing grid would otherwise only
+surface as an export failure later.
+
+- **Geoid** — if the file is absent, it is downloaded from `cdn.proj.org`
+  (the path's basename, e.g. `us_noaa_g2018u0.tif`) to a temp file in the
+  destination directory, **verified against the pinned `geoid_sha256`**, and
+  only then atomically renamed into place. cdn.proj.org publishes no
+  independent size or self-CRC, so the SHA-256 pin is what distinguishes a
+  correct grid from a wrong or corrupt one — `geoid_sha256` is **required**
+  whenever `geoid` is set (an unset pin is a hard error, not a silent skip).
+  A partial download lives only at the temp path and is removed on any failure,
+  so a geoid already on disk is trusted and never re-downloaded.
+- **VDatum** — each name in `vdatum_bundles` is treated as a **verbatim** NOAA
+  bundle name (copy it exactly from the
+  [VDatum download page](https://vdatum.noaa.gov/download.php); no friendly-name
+  mapping that could drift on a NOAA version bump). A bundle whose
+  `<vdatum_dir>/.{bundle}_installed` marker is absent is downloaded from
+  `vdatum.noaa.gov`, validated (Content-Length when sent, full zip CRC,
+  zip-slip/zip-bomb member checks), its `*.gtx` grids extracted into
+  `vdatum_dir`, and the **marker written last**. A populated `vdatum_dir` with
+  no marker (an interrupted extraction) re-provisions rather than being trusted
+  as complete.
+
+Any provisioning failure raises the same clean error and exit code 1 as a
+download failure — the previous chart layer stays intact — and is recorded in
+`.updater_health.json` under `last_error.phase = "provision"`.
+
 ## Usage
 
 ```bash
