@@ -225,3 +225,23 @@ fresh-context sub-agent to read the diff cold and confirm both findings are
 genuinely resolved:
 
     .agent/scripts/dispatch_subagent.sh --mode in-process --issue 37 --skill review-code
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-20 16:38 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: approved
+
+**Branch**: feature/issue-37 at `34b754a`
+**Mode**: pre-push
+**Depth**: Deep (reason: new network-fetching module with integrity/SSRF/zip-slip/zip-bomb security surface)
+**Must-fix**: 0 | **Suggestions**: 4
+**Round**: 3 | **Ship**: recommended — both Integrated-Review (Copilot) fixes confirmed resolved and regression-tested; all gates green (83 passed, ament_flake8/pep257 clean); only defense-in-depth suggestions remain
+
+### Findings
+- [ ] (suggestion) Grid basename collision is silent — two bundles/members sharing a basename overwrite each other, markers still written — add a collision guard — `enc_updater/enc_updater/datum_provisioner.py:252`
+- [ ] (suggestion) Zip-bomb cap (`_safe_members`) runs after `zf.testzip()` fully decompresses — reorder so the cap precedes decompression — `enc_updater/enc_updater/datum_provisioner.py:233`
+- [ ] (suggestion) VDatum install not fully atomic — grids `os.replace`d one-by-one before marker; stage-and-move for full atomicity — `enc_updater/enc_updater/datum_provisioner.py:246`
+- [ ] (suggestion) Existing geoid trusted without re-verification; changing geoid_sha256 has no effect on on-disk file — note operators must delete grid to re-verify — `enc_updater/enc_updater/datum_provisioner.py:113`
+
+**Note**: Diffed against local `origin/jazzy` (`f17b2ce`); fetch failed offline, but history is linear so the diff is trustworthy. Copilot/Local adversarial off (offline host); coverage from two disjoint-lens Claude passes, which cross-confirmed finding 1.
