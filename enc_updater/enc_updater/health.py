@@ -68,6 +68,21 @@ def record_regen_ok(corpus_dir: str) -> None:
     _record(corpus_dir, last_regen_ok=_utc_now_iso(), last_error=None)
 
 
+def record_selection_change(corpus_dir, selected, added, removed) -> None:
+    """
+    Record the current cell set and what changed since the previous cycle.
+
+    Written only when membership actually changes, so a cron run that
+    silently gains or loses cells (a NOAA rescheme in region mode, a config
+    edit in cells mode) leaves a visible trace next to the health timestamps.
+    """
+    _record(corpus_dir, selection=sorted(selected), last_selection_change={
+        'when': _utc_now_iso(),
+        'added': sorted(added),
+        'removed': sorted(removed),
+    })
+
+
 def record_error(corpus_dir: str, phase: str, message: str) -> None:
     """Record a failure with its phase; kept until the next successful swap."""
     _record(corpus_dir, last_error={

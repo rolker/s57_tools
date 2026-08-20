@@ -24,6 +24,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from . import registry
+from . import selection
 from . import UpdaterError
 
 # Defense-in-depth caps against a malicious or corrupt response from the
@@ -43,6 +44,13 @@ class CatalogEntry:
     update: int
     url: str
     size: Optional[int]
+    # Region-selection fields (see selection.py). status is 'Active' /
+    # 'Cancelled'; panels holds the type-'E' exterior coverage polygons as
+    # (lon, lat) vertex lists. Both default to the values a pre-#40 caller
+    # (or test) implied, so existing constructions stay valid.
+    status: str = 'Active'
+    panels: List[List[Tuple[float, float]]] = dataclasses.field(
+        default_factory=list)
 
 
 _ALLOWED_URL_SCHEMES = ('http', 'https')
@@ -101,6 +109,8 @@ def fetch_catalog(url: str, timeout: float) -> Dict[str, CatalogEntry]:
                 update=int(update),
                 url=location,
                 size=int(size) if size else None,
+                status=(cell.findtext('status') or 'Active').strip(),
+                panels=_parse_panels(cell),
             )
         except ValueError:
             # Non-numeric edition/update/size: skip the row rather than trust it.
@@ -108,6 +118,80 @@ def fetch_catalog(url: str, timeout: float) -> Dict[str, CatalogEntry]:
     if not entries:
         raise UpdaterError(f'download: catalog at {url} contained no usable cells')
     return entries
+
+
+def _parse_panels(cell: ET.Element) -> List[List[Tuple[float, float]]]:
+    """
+    Type-'E' exterior coverage polygons of one catalog cell, as (lon, lat).
+
+    Interior-hole panels (type 'I') are skipped — see selection.py for why
+    that over-selection is harmless. A panel with a malformed vertex or fewer
+    than 3 usable vertices is skipped rather than trusted: region selection
+    then simply cannot match on it, and the explicit-cells mode never reads
+    panels at all.
+    """
+    panels = []
+    cov = cell.find('cov')
+    if cov is None:
+        return panels
+    for panel in cov.findall('panel'):
+        if (panel.findtext('type') or 'E').strip() != 'E':
+            continue
+        vertices = []
+        for vertex in panel.findall('vertex'):
+            lat = vertex.findtext('lat')
+            lon = vertex.findtext('long')
+            try:
+                vertices.append((float(lon), float(lat)))
+            except (TypeError, ValueError):
+                vertices = []
+                break
+        if len(vertices) >= 3:
+            panels.append(vertices)
+    return panels
+
+
+def resolve_cells(cfg, catalog: Dict[str, CatalogEntry]) -> List[str]:
+    """
+    Resolve the cycle's cell set: configured pins, or a region query.
+
+    Explicit ``cells:`` mode passes the configured list through unchanged
+    (``cells_to_update`` still fail-louds on a name the catalog dropped).
+    ``region:`` mode derives the set from the fetched catalog's coverage
+    polygons — the rescheme-proof path (#40).
+    """
+    if cfg.region is not None:
+        return selection.select_cells(
+            catalog, cfg.region, cfg.bands, cfg.max_cells)
+    return list(cfg.cells)
+
+
+def prune_corpus(
+    corpus_dir: str,
+    keep: List[str],
+    manifest: Dict[str, dict],
+) -> List[str]:
+    """
+    Drop manifest cells (and their corpus dirs) not in this cycle's set.
+
+    Required for correctness, not tidiness: the D7 export runs over the
+    *whole corpus*, so a deselected or NOAA-withdrawn cell left on disk keeps
+    contributing stale tiles to every future chart layer. Pruning the
+    manifest also makes ``_need_regeneration``'s manifest-vs-active-registry
+    comparison trigger the wholesale regeneration that forgets the cell.
+    Returns the pruned names; the manifest dict is mutated and saved.
+    """
+    stale = sorted(set(manifest) - set(keep))
+    for name in stale:
+        cell_dir = os.path.join(corpus_dir, name)
+        if os.path.isdir(cell_dir):
+            shutil.rmtree(cell_dir)
+        del manifest[name]
+        print(f'enc_updater: pruned {name} from corpus '
+              '(no longer selected / withdrawn by NOAA)')
+    if stale:
+        registry.write_cells(registry.manifest_path(corpus_dir), manifest)
+    return stale
 
 
 def cells_to_update(
@@ -257,7 +341,9 @@ def update_corpus(cfg) -> Tuple[List[str], Dict[str, dict]]:
     os.makedirs(cfg.corpus_dir, exist_ok=True)
     catalog = fetch_catalog(cfg.catalog_url, cfg.download_timeout)
     manifest = registry.load_cells(registry.manifest_path(cfg.corpus_dir))
-    changed = cells_to_update(catalog, manifest, cfg.cells)
+    cells = resolve_cells(cfg, catalog)
+    prune_corpus(cfg.corpus_dir, cells, manifest)
+    changed = cells_to_update(catalog, manifest, cells)
     for cell in changed:
         entry = catalog[cell]
         workdir = tempfile.mkdtemp(prefix=f'.download.{cell}.', dir=cfg.corpus_dir)

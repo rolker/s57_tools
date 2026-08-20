@@ -12,14 +12,37 @@
 #   0 2 * * * bash -lc 'source ~/project11/.agent/scripts/setup.bash && \
 #       enc_updater --config /etc/enc_updater/region.yaml'
 
+# store_dir is created on first run if absent (a fresh store bootstraps
+# cleanly); corpus_dir likewise.
 corpus_dir: ~/data/world/charts/ENC_ROOT
 store_dir: ~/data/world/store
 
-# NOAA ENC cells for the region (harbor + approach). Full catalog:
+# Cell selection — exactly one of `region` or `cells`.
+#
+# Prefer `region`: the cell set is derived from the live catalog's coverage
+# polygons each cycle, so NOAA's periodic ENC rescheming (renames, splits,
+# new cells, withdrawals) is tracked automatically — hard-coded cell names
+# went stale exactly that way in 2026 (#39/#40). A bbox is
+# [lon_min, lat_min, lon_max, lat_max]; a polygon is 3+ [lon, lat] pairs.
+# This bbox covers Portsmouth Harbor + the Isles of Shoals.
+region: [-70.85, 42.93, -70.55, 43.11]
+
+# Usage-band filter for region selection (default [4, 5, 6] —
+# approach/harbor/berthing; overview bands would import at uselessly coarse
+# store levels).
+# bands: [4, 5, 6]
+
+# Sanity cap on region selection (default 50): a region matching more cells
+# than this fails loudly instead of downloading the coast.
+# max_cells: 50
+
+# Explicit pin mode (mutually exclusive with `region`): exact cell names,
+# fail-loud when the catalog drops one. Full catalog:
 # https://charts.noaa.gov/ENCs/ENCsIndv.shtml
-cells:
-  - US5NH02M   # Portsmouth Harbor (New Castle)
-  - US4NH01M   # Portsmouth approach / Isles of Shoals
+# cells:
+#   - US4NH1BD   # approach band — Portsmouth approach + Isles of Shoals
+#   - US5PSMBE   # harbor band — Isles of Shoals
+#   - US5PSMCC   # harbor band — Portsmouth Harbor (New Castle)
 
 # catalog_url: https://charts.noaa.gov/ENCs/ENCProdCat.xml   # default
 

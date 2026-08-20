@@ -295,3 +295,107 @@ def test_update_replaces_previous_cell_edition(tmp_path, monkeypatch):
     assert manifest['US5NH02M'] == {'edition': 25, 'update': 3}
     assert not os.path.exists(stale_file)
     assert os.path.isfile(os.path.join(stale_dir, 'US5NH02M.000'))
+
+
+REGION_CATALOG_XML = b"""<?xml version="1.0" encoding="UTF-8" ?>
+<EncProductCatalog>
+  <cell>
+    <name>US5INSIDE</name>
+    <status>Active</status>
+    <zipfile_location>https://www.charts.noaa.gov/ENCs/US5INSIDE.zip</zipfile_location>
+    <edtn>2</edtn>
+    <updn>0</updn>
+    <cov><panel><panel_no>1</panel_no><type>E</type>
+      <vertex><lat>42.95</lat><long>-70.70</long></vertex>
+      <vertex><lat>42.95</lat><long>-70.60</long></vertex>
+      <vertex><lat>43.05</lat><long>-70.60</long></vertex>
+      <vertex><lat>43.05</lat><long>-70.70</long></vertex>
+    </panel></cov>
+  </cell>
+  <cell>
+    <name>US5OUTSIDE</name>
+    <status>Active</status>
+    <zipfile_location>https://www.charts.noaa.gov/ENCs/US5OUTSIDE.zip</zipfile_location>
+    <edtn>1</edtn>
+    <updn>0</updn>
+    <cov><panel><panel_no>1</panel_no><type>E</type>
+      <vertex><lat>44.95</lat><long>-68.70</long></vertex>
+      <vertex><lat>44.95</lat><long>-68.60</long></vertex>
+      <vertex><lat>45.05</lat><long>-68.60</long></vertex>
+    </panel></cov>
+  </cell>
+  <cell>
+    <name>US5HOLLOW</name>
+    <status>Active</status>
+    <zipfile_location>https://www.charts.noaa.gov/ENCs/US5HOLLOW.zip</zipfile_location>
+    <edtn>1</edtn>
+    <updn>0</updn>
+    <cov><panel><panel_no>1</panel_no><type>I</type>
+      <vertex><lat>42.95</lat><long>-70.70</long></vertex>
+      <vertex><lat>42.95</lat><long>-70.60</long></vertex>
+      <vertex><lat>43.05</lat><long>-70.60</long></vertex>
+    </panel></cov>
+  </cell>
+</EncProductCatalog>
+"""
+
+
+def test_catalog_parse_carries_status_and_exterior_panels(tmp_path, monkeypatch):
+    """fetch_catalog surfaces status + type-E panels as (lon, lat) polygons."""
+    serve(monkeypatch, REGION_CATALOG_XML, {})
+    catalog = downloader.fetch_catalog('https://example.invalid/catalog.xml', 5.0)
+    inside = catalog['US5INSIDE']
+    assert inside.status == 'Active'
+    assert inside.panels == [[(-70.70, 42.95), (-70.60, 42.95),
+                              (-70.60, 43.05), (-70.70, 43.05)]]
+    # The type-I hole panel is not a selection polygon.
+    assert catalog['US5HOLLOW'].panels == []
+
+
+def region_config(tmp_path):
+    """Build a region-mode UpdaterConfig over tmp_path (Shoals-shaped bbox)."""
+    return UpdaterConfig(
+        corpus_dir=str(tmp_path / 'corpus'),
+        store_dir=str(tmp_path / 'store'),
+        region=[(-70.85, 42.93), (-70.55, 42.93),
+                (-70.55, 43.11), (-70.85, 43.11)],
+        catalog_url='https://example.invalid/catalog.xml',
+    )
+
+
+def test_region_mode_selects_and_downloads_only_covering_cells(tmp_path, monkeypatch):
+    """update_corpus in region mode fetches exactly the cells covering the region."""
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {
+        'US5INSIDE': zip_inside,
+        'US5OUTSIDE': OSError('must not download'),
+        'US5HOLLOW': OSError('must not download'),
+    })
+    cfg = region_config(tmp_path)
+    changed, manifest = downloader.update_corpus(cfg)
+    assert changed == ['US5INSIDE']
+    assert sorted(manifest) == ['US5INSIDE']
+
+
+def test_prune_removes_deselected_cell_from_corpus_and_manifest(tmp_path, monkeypatch):
+    """
+    A cell that leaves the selection leaves the corpus.
+
+    Otherwise the whole-corpus export keeps feeding its stale tiles into
+    every future chart layer.
+    """
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {'US5INSIDE': zip_inside})
+    cfg = region_config(tmp_path)
+    # Seed the corpus as if a pre-rescheme run had installed a now-gone cell.
+    stale_dir = os.path.join(cfg.corpus_dir, 'US5LEGACY')
+    os.makedirs(stale_dir)
+    with open(os.path.join(stale_dir, 'US5LEGACY.000'), 'wb') as f:
+        f.write(b'stale')
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5LEGACY': {'edition': 9, 'update': 9}})
+    _, manifest = downloader.update_corpus(cfg)
+    assert 'US5LEGACY' not in manifest
+    assert not os.path.exists(stale_dir)
+    _, saved = snapshot(cfg.corpus_dir)
+    assert sorted(saved) == ['US5INSIDE']

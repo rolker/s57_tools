@@ -9,8 +9,21 @@ boat), never inside the ROS runtime.
 
 ## Update cycle
 
+0. **Select** — resolve the cycle's cell set. With `region:` (the default
+   mode to prefer, #40) the set is derived fresh from the catalog's
+   coverage panels: every `Active` cell in the configured usage `bands`
+   whose coverage intersects the region polygon/bbox. NOAA's periodic ENC
+   rescheming (renames, splits, new cells) is then picked up automatically,
+   and withdrawn cells drop out. With an explicit `cells:` pin list the set
+   is exactly what you wrote (a name the catalog dropped is a hard error).
+   Either way, corpus cells no longer in the set are **pruned** — the D7
+   export runs over the whole corpus, so a stale cell left behind would
+   keep feeding tiles into every future chart layer. Membership changes are
+   printed and recorded in `.updater_health.json`
+   (`last_selection_change`); a fresh `store_dir` is created up front so a
+   first run can't fail at the final commit.
 1. **Download** — fetch the [NOAA ENC product catalog](https://charts.noaa.gov/ENCs/ENCProdCat.xml)
-   and compare each configured cell's edition/update against the corpus
+   and compare each selected cell's edition/update against the corpus
    manifest (`<corpus_dir>/.manifest.json`). Changed cells are downloaded and
    validated — byte count against the catalog's `zipfile_size` plus a full
    zip CRC pass (the catalog publishes no checksums) — before anything is
@@ -102,10 +115,22 @@ and the interlock's `ros2` CLI comes from the same environment (or set
 ## Configuration
 
 See [`config/region_example.yaml`](config/region_example.yaml) (New Castle /
-Isles of Shoals cells) for the full annotated schema: corpus/store paths,
-cell list, vertical-datum grids for the export, `depth_range` sanity bounds
-(the default upper bound +100 m admits lake surfaces), tool-path overrides,
-and subprocess timeouts.
+Isles of Shoals area) for the full annotated schema: corpus/store paths,
+cell selection (`region` + `bands` + `max_cells`, or an explicit `cells`
+pin list — exactly one of the two), vertical-datum grids for the export,
+`depth_range` sanity bounds (the default upper bound +100 m admits lake
+surfaces), tool-path overrides, and subprocess timeouts.
+
+**Cell selection**: prefer `region:` — a `[lon_min, lat_min, lon_max,
+lat_max]` bbox or a polygon of `[lon, lat]` pairs. The cell set is resolved
+against each fetched catalog, so it tracks NOAA rescheming without config
+edits. `bands:` filters usage bands (default `[4, 5, 6]` —
+approach/harbor/berthing; overview bands would import at uselessly coarse
+store levels), and `max_cells:` (default 50) is a sanity cap so a
+fat-fingered region fails loudly instead of downloading the coast. An empty
+selection is a hard error, matching the fail-loud contract of the explicit
+list. Regions crossing the antimeridian are unsupported (validation keeps
+longitudes in [-180, 180]).
 
 **Nav-liveness contract**: `nav_liveness.nodes` lists the exact node names
 (as printed by `ros2 node list`, e.g. `/bizzy/controller`) whose presence
