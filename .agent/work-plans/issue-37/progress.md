@@ -96,3 +96,20 @@ access used; the SHA pin was provided host-verified.
 Ready for code review (`review-code`). No follow-ups outstanding; the
 CMake-download removal in `mru_transform` (uma#288 item 6) remains gated on
 gabby+salmon deploy logs showing `world/datum/` population — out of scope here.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-08-20 15:30 +00:00
+**By**: Claude Code Agent (Claude Opus)
+**Verdict**: changes-requested
+
+**Branch**: feature/issue-37 at `4b5bed9`
+**Mode**: pre-push
+**Depth**: Deep (reason: remote download + archive extraction, security-relevant)
+**Must-fix**: 1 | **Suggestions**: 2
+**Round**: 1 | **Ship**: continue — one mechanical must-fix; otherwise shippable
+
+### Findings
+- [ ] (must-fix) Scheme/size-cap/zip-slip/zip-bomb failures raise UpdaterError but sit under `except OSError` / `except zipfile.BadZipFile`, so they bypass `_fail()` and record no `last_error.phase="provision"` — contradicts README/docstring "any provisioning failure is recorded" — `enc_updater/enc_updater/datum_provisioner.py:115,165,191`
+- [ ] (suggestion) Validate VDatum bundle-name shape (reject `/` `\` `..`); a slash yields an uncaught FileNotFoundError instead of a clean UpdaterError — `enc_updater/enc_updater/config.py:136`
+- [ ] (suggestion) `_content_length` return hint should be `Optional[int]` (returns None when header absent) — `enc_updater/enc_updater/datum_provisioner.py:67`
