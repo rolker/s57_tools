@@ -46,3 +46,19 @@ Static analysis: covered by the package's own ament flake8/pep257 colcon tests (
 
 ### False positives
 - (none)
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-08-20 16:47 -04:00
+**By**: Claude Code Agent (Claude Fable 5)
+
+**PR**: #43 at `a6c69a2` (round 3; fixes committed on top)
+**Sources**: 2 (Copilot R2 @ `a6c69a2`, CI rollup; round-2 findings all closed at `a6c69a2`)
+**Cross-source confirmations**: 0
+**CI**: all-pass (build-and-test success on `a6c69a2`)
+
+### Findings
+- [x] (minor, Copilot) prune should name a symlinked cell dir explicitly and report a stray non-directory instead of silently skipping it — fixed with named refusal + warning, 2 regression tests — `enc_updater/enc_updater/downloader.py:259`
+
+### False positives
+- (Copilot) "rmtree can delete outside the corpus through a symlink" — impossible: shutil.rmtree raises OSError on a top-level symlink by documented contract, and prune's round-1 wrapper converts that to a clean UpdaterError before the manifest is touched; no traversal or deletion can occur (now also pre-empted by an explicit islink refusal).
