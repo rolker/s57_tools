@@ -52,6 +52,14 @@ def make_config(tmp_path, cells):
     )
 
 
+def seed_corpus_cell(corpus_dir, cell):
+    """Create an installed-looking corpus cell dir (<cell>/<cell>.000)."""
+    cell_dir = os.path.join(corpus_dir, cell)
+    os.makedirs(cell_dir, exist_ok=True)
+    with open(os.path.join(cell_dir, cell + '.000'), 'wb') as f:
+        f.write(b'seeded ENC base cell data')
+
+
 def snapshot(corpus_dir):
     """Corpus dir listing + manifest content, for before/after comparison."""
     listing = sorted(os.listdir(corpus_dir)) if os.path.isdir(corpus_dir) else []
@@ -108,6 +116,8 @@ def test_no_change_is_noop(tmp_path, monkeypatch):
            'US4NH01M': OSError('must not download')})
     cfg = make_config(tmp_path, ['US5NH02M', 'US4NH01M'])
     os.makedirs(cfg.corpus_dir)
+    for cell in ('US5NH02M', 'US4NH01M'):
+        seed_corpus_cell(cfg.corpus_dir, cell)
     registry.write_cells(registry.manifest_path(cfg.corpus_dir), {
         'US5NH02M': {'edition': 25, 'update': 3},
         'US4NH01M': {'edition': 12, 'update': 0},
@@ -399,3 +409,90 @@ def test_prune_removes_deselected_cell_from_corpus_and_manifest(tmp_path, monkey
     assert not os.path.exists(stale_dir)
     _, saved = snapshot(cfg.corpus_dir)
     assert sorted(saved) == ['US5INSIDE']
+
+
+def test_degraded_catalog_row_refuses_prune(tmp_path, monkeypatch):
+    """
+    An installed cell whose row is Active with unparseable coverage errors.
+
+    Pruning on that signature would turn a transient catalog defect into
+    removed navigation coverage with a successful exit.
+    """
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {'US5INSIDE': zip_inside})
+    cfg = region_config(tmp_path)
+    # US5HOLLOW's only panel is type-I, so it parses to zero usable panels
+    # while its status stays Active — the degraded-row signature. Install it.
+    os.makedirs(cfg.corpus_dir)
+    seed_corpus_cell(cfg.corpus_dir, 'US5HOLLOW')
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5HOLLOW': {'edition': 1, 'update': 0}})
+    before = snapshot(cfg.corpus_dir)
+    with pytest.raises(UpdaterError, match='refusing to prune'):
+        downloader.update_corpus(cfg)
+    assert snapshot(cfg.corpus_dir) == before
+
+
+def test_cells_mode_typo_fails_before_pruning(tmp_path, monkeypatch):
+    """
+    A config typo errors with the previous corpus and manifest intact.
+
+    Prune runs after validation + downloads, so swapping a good cell name
+    for a bad one must not destroy the good cell's data first.
+    """
+    serve(monkeypatch, REGION_CATALOG_XML, {})
+    cfg = make_config(tmp_path, ['US5TYPO'])
+    os.makedirs(cfg.corpus_dir)
+    seed_corpus_cell(cfg.corpus_dir, 'US5INSIDE')
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5INSIDE': {'edition': 2, 'update': 0}})
+    before = snapshot(cfg.corpus_dir)
+    with pytest.raises(UpdaterError, match='not in catalog'):
+        downloader.update_corpus(cfg)
+    assert snapshot(cfg.corpus_dir) == before
+
+
+def test_dry_run_does_not_prune(tmp_path, monkeypatch):
+    """--dry-run previews a region change without deleting corpus data."""
+    zip_inside = make_cell_zip('US5INSIDE')
+    serve(monkeypatch, REGION_CATALOG_XML, {'US5INSIDE': zip_inside})
+    cfg = region_config(tmp_path)
+    os.makedirs(cfg.corpus_dir)
+    seed_corpus_cell(cfg.corpus_dir, 'US5LEGACY')
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir),
+                         {'US5LEGACY': {'edition': 9, 'update': 9}})
+    _, manifest = downloader.update_corpus(cfg, dry_run=True)
+    assert 'US5LEGACY' in manifest
+    assert os.path.isdir(os.path.join(cfg.corpus_dir, 'US5LEGACY'))
+
+
+def test_manifest_entry_with_missing_corpus_data_redownloads(tmp_path, monkeypatch):
+    """
+    A manifest entry whose corpus dir is gone counts as changed (self-heal).
+
+    Otherwise a crash between prune steps (or a manual deletion) would leave
+    the manifest claiming coverage that every future export silently lacks.
+    """
+    zip_a, zip_b = make_cell_zip('US5NH02M'), make_cell_zip('US4NH01M')
+    serve(monkeypatch, catalog_bytes(zip_a, zip_b),
+          {'US5NH02M': zip_a, 'US4NH01M': OSError('must not download')})
+    cfg = make_config(tmp_path, ['US5NH02M', 'US4NH01M'])
+    os.makedirs(cfg.corpus_dir)
+    seed_corpus_cell(cfg.corpus_dir, 'US4NH01M')  # intact — not re-fetched
+    registry.write_cells(registry.manifest_path(cfg.corpus_dir), {
+        'US5NH02M': {'edition': 25, 'update': 3},   # entry, but no dir
+        'US4NH01M': {'edition': 12, 'update': 0},
+    })
+    changed, _ = downloader.update_corpus(cfg)
+    assert changed == ['US5NH02M']
+    assert os.path.isfile(
+        os.path.join(cfg.corpus_dir, 'US5NH02M', 'US5NH02M.000'))
+
+
+def test_unsafe_catalog_cell_name_skipped(tmp_path, monkeypatch):
+    """A catalog row whose name is not a plain [A-Z0-9] segment is dropped."""
+    evil = REGION_CATALOG_XML.replace(b'US5OUTSIDE', b'US5/../evil')
+    serve(monkeypatch, evil, {})
+    catalog = downloader.fetch_catalog('https://example.invalid/catalog.xml', 5.0)
+    assert 'US5/../evil' not in catalog
+    assert 'US5INSIDE' in catalog

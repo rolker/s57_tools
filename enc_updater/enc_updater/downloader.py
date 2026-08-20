@@ -15,6 +15,7 @@ the same run keep their (genuinely current) manifest entries.
 
 import dataclasses
 import os
+import re
 import shutil
 import tempfile
 from typing import Dict, List, Optional, Tuple
@@ -54,6 +55,14 @@ class CatalogEntry:
 
 
 _ALLOWED_URL_SCHEMES = ('http', 'https')
+
+# Catalog cell names become filesystem path segments (corpus install/prune
+# targets, tempdir prefixes) and — in region mode (#40) — arrive from the
+# untrusted catalog rather than the operator's config. Constrain them to a
+# single safe segment; real NOAA names are 8 chars of [A-Z0-9]. A row with
+# any other shape is skipped at parse like the other malformed-row cases,
+# so it can never reach os.path.join or shutil.rmtree.
+_CELL_NAME_RE = re.compile(r'[A-Z0-9]{3,32}')
 
 
 def _open_url(url: str, timeout: float):
@@ -102,6 +111,10 @@ def fetch_catalog(url: str, timeout: float) -> Dict[str, CatalogEntry]:
         size = cell.findtext('zipfile_size')
         if not name or edition is None or update is None or not location:
             continue
+        if not _CELL_NAME_RE.fullmatch(name):
+            # A name that isn't a plain [A-Z0-9] segment can't be a real NOAA
+            # cell and must never become a filesystem path component.
+            continue
         try:
             entries[name] = CatalogEntry(
                 name=name,
@@ -126,9 +139,11 @@ def _parse_panels(cell: ET.Element) -> List[List[Tuple[float, float]]]:
 
     Interior-hole panels (type 'I') are skipped — see selection.py for why
     that over-selection is harmless. A panel with a malformed vertex or fewer
-    than 3 usable vertices is skipped rather than trusted: region selection
-    then simply cannot match on it, and the explicit-cells mode never reads
-    panels at all.
+    than 3 usable vertices is skipped rather than trusted. For a cell not yet
+    installed that just means region selection cannot match on it; for an
+    *installed* cell, an Active row with zero usable panels is refused as a
+    degraded catalog by ``guard_degenerate_deselections`` rather than pruned.
+    The explicit-cells mode never reads panels at all.
     """
     panels = []
     cov = cell.find('cov')
@@ -166,10 +181,51 @@ def resolve_cells(cfg, catalog: Dict[str, CatalogEntry]) -> List[str]:
     return list(cfg.cells)
 
 
+def guard_degenerate_deselections(
+    cfg,
+    catalog: Dict[str, CatalogEntry],
+    manifest: Dict[str, dict],
+    keep: List[str],
+) -> None:
+    """
+    Refuse to prune an installed cell whose catalog row looks broken.
+
+    Region mode cannot ask NOAA "did you really withdraw this cell?" — but it
+    can distinguish positive evidence of withdrawal (the row is gone, or its
+    status is ``Cancelled``) from the signature of a degraded catalog: a row
+    still ``Active`` whose coverage panels all failed to parse, or a status
+    string this code doesn't recognize. Pruning on that signature would turn
+    a transient upstream data defect into removed navigation coverage with a
+    successful exit — so it is a hard error instead (previous layer stands;
+    the next good catalog resumes normally). An Active row with *usable*
+    panels that genuinely stopped intersecting the region still prunes: that
+    is a real coverage/config change, not a parse failure. Cells-mode
+    deselection is always an operator config edit and is never guarded.
+    """
+    if cfg.region is None:
+        return
+    for name in sorted(set(manifest) - set(keep)):
+        entry = catalog.get(name)
+        if entry is None:
+            continue  # gone from the catalog entirely — the withdrawal path
+        if entry.status == 'Active' and not entry.panels:
+            raise UpdaterError(
+                f'selection: installed cell {name} is Active in the catalog '
+                'but its coverage panels failed to parse — refusing to prune '
+                'on a degraded catalog (previous layer stands; will retry '
+                'next cycle)')
+        if entry.status not in ('Active', 'Cancelled'):
+            raise UpdaterError(
+                f'selection: installed cell {name} has unrecognized catalog '
+                f'status {entry.status!r} — refusing to prune without '
+                'positive evidence of withdrawal')
+
+
 def prune_corpus(
     corpus_dir: str,
     keep: List[str],
     manifest: Dict[str, dict],
+    dry_run: bool = False,
 ) -> List[str]:
     """
     Drop manifest cells (and their corpus dirs) not in this cycle's set.
@@ -179,18 +235,32 @@ def prune_corpus(
     contributing stale tiles to every future chart layer. Pruning the
     manifest also makes ``_need_regeneration``'s manifest-vs-active-registry
     comparison trigger the wholesale regeneration that forgets the cell.
-    Returns the pruned names; the manifest dict is mutated and saved.
+
+    With ``dry_run`` nothing is deleted — the would-be prunes are printed and
+    returned, keeping ``--dry-run`` free of irreversible corpus mutation (its
+    whole point is previewing a candidate ``region:`` safely). The manifest
+    is re-saved after every individual removal so a crash mid-prune can never
+    leave the manifest claiming a cell whose corpus dir is already gone.
+    Returns the (would-be) pruned names; the manifest dict is mutated and
+    saved only in a real run.
     """
     stale = sorted(set(manifest) - set(keep))
     for name in stale:
+        if dry_run:
+            print(f'enc_updater: dry run — would prune {name} from corpus '
+                  '(no longer selected / withdrawn by NOAA)')
+            continue
         cell_dir = os.path.join(corpus_dir, name)
         if os.path.isdir(cell_dir):
-            shutil.rmtree(cell_dir)
+            try:
+                shutil.rmtree(cell_dir)
+            except OSError as e:
+                raise UpdaterError(
+                    f'download: pruning {name} from corpus failed: {e}')
         del manifest[name]
+        registry.write_cells(registry.manifest_path(corpus_dir), manifest)
         print(f'enc_updater: pruned {name} from corpus '
               '(no longer selected / withdrawn by NOAA)')
-    if stale:
-        registry.write_cells(registry.manifest_path(corpus_dir), manifest)
     return stale
 
 
@@ -198,12 +268,18 @@ def cells_to_update(
     catalog: Dict[str, CatalogEntry],
     manifest: Dict[str, dict],
     cells: List[str],
+    corpus_dir: str,
 ) -> List[str]:
     """
-    Return configured cells whose catalog edition/update differ from the manifest.
+    Return selected cells whose catalog edition/update differ from the manifest.
 
-    A configured cell absent from the catalog is an error — either a config
-    typo or a cell NOAA has withdrawn; both need a human.
+    A selected cell absent from the catalog is an error — either a config
+    typo or a cell NOAA has withdrawn; both need a human. (Region-derived
+    cells came *from* the catalog, so this only fires in explicit-cells
+    mode.) A manifest entry whose corpus data is missing on disk (crash
+    aftermath, manual deletion) also counts as changed — the re-download
+    heals any corpus/manifest divergence instead of exporting a hole while
+    the manifest claims coverage.
     """
     missing = [c for c in cells if c not in catalog]
     if missing:
@@ -214,8 +290,10 @@ def cells_to_update(
     for name in cells:
         have = manifest.get(name)
         entry = catalog[name]
+        base_file = os.path.join(corpus_dir, name, name + '.000')
         if (have is None or have.get('edition') != entry.edition
-                or have.get('update') != entry.update):
+                or have.get('update') != entry.update
+                or not os.path.isfile(base_file)):
             changed.append(name)
     return changed
 
@@ -330,20 +408,29 @@ def _install_cell(corpus_dir: str, cell: str, new_dir: str) -> None:
         shutil.rmtree(backup, ignore_errors=True)
 
 
-def update_corpus(cfg) -> Tuple[List[str], Dict[str, dict]]:
+def update_corpus(cfg, dry_run: bool = False) -> Tuple[List[str], Dict[str, dict]]:
     """
     Bring the corpus up to the catalog; return (changed cells, manifest).
 
     Cells are updated one at a time; the manifest is saved after each
     successful install so a mid-run failure never misattributes what is on
     disk. Raises UpdaterError on the first failing cell.
+
+    Ordering is validate → download → prune, deliberately: pruning last
+    means a failing run (config typo caught by ``cells_to_update``, a
+    transient download failure, a degenerate-catalog refusal from
+    ``guard_degenerate_deselections``) exits with the previous corpus and
+    manifest fully intact — pruning first would delete valid data before
+    the failure surfaced, and a rescheme whose replacement download failed
+    would leave a coverage hole. ``dry_run`` reaches ``prune_corpus`` so a
+    preview run never mutates the corpus.
     """
     os.makedirs(cfg.corpus_dir, exist_ok=True)
     catalog = fetch_catalog(cfg.catalog_url, cfg.download_timeout)
     manifest = registry.load_cells(registry.manifest_path(cfg.corpus_dir))
     cells = resolve_cells(cfg, catalog)
-    prune_corpus(cfg.corpus_dir, cells, manifest)
-    changed = cells_to_update(catalog, manifest, cells)
+    guard_degenerate_deselections(cfg, catalog, manifest, cells)
+    changed = cells_to_update(catalog, manifest, cells, cfg.corpus_dir)
     for cell in changed:
         entry = catalog[cell]
         workdir = tempfile.mkdtemp(prefix=f'.download.{cell}.', dir=cfg.corpus_dir)
@@ -361,4 +448,5 @@ def update_corpus(cfg) -> Tuple[List[str], Dict[str, dict]]:
         registry.write_cells(registry.manifest_path(cfg.corpus_dir), manifest)
         print(f'enc_updater: updated {cell} to edition {entry.edition} '
               f'update {entry.update}')
+    prune_corpus(cfg.corpus_dir, cells, manifest, dry_run=dry_run)
     return changed, manifest

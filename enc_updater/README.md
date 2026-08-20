@@ -18,10 +18,17 @@ boat), never inside the ROS runtime.
    is exactly what you wrote (a name the catalog dropped is a hard error).
    Either way, corpus cells no longer in the set are **pruned** — the D7
    export runs over the whole corpus, so a stale cell left behind would
-   keep feeding tiles into every future chart layer. Membership changes are
-   printed and recorded in `.updater_health.json`
-   (`last_selection_change`); a fresh `store_dir` is created up front so a
-   first run can't fail at the final commit.
+   keep feeding tiles into every future chart layer. Pruning runs *after*
+   a successful validate + download pass (a failing run leaves corpus and
+   manifest intact), is **refused** when an installed cell's still-Active
+   catalog row has no parseable coverage or an unrecognized status (a
+   degraded catalog must not shrink the layer — hard error, previous layer
+   stands), and is **skipped in `--dry-run`**, which prints the would-be
+   prunes instead. Membership changes are printed and recorded in
+   `.updater_health.json` (`last_selection_change`); a fresh `store_dir`
+   (leaf only — the parent must exist, so an unmounted data volume still
+   fails loudly) is created up front so a first run can't fail at the
+   final commit.
 1. **Download** — fetch the [NOAA ENC product catalog](https://charts.noaa.gov/ENCs/ENCProdCat.xml)
    and compare each selected cell's edition/update against the corpus
    manifest (`<corpus_dir>/.manifest.json`). Changed cells are downloaded and

@@ -52,7 +52,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument('--config', required=True, help='region config YAML')
     parser.add_argument('--dry-run', action='store_true',
                         help='download, export, stage and validate, but do not '
-                             'probe the interlock or swap')
+                             'prune the corpus, probe the interlock, or swap '
+                             '(would-be prunes are printed)')
     parser.add_argument('--force', action='store_true',
                         help='regenerate even if change detection sees no change')
     args = parser.parse_args(argv)
@@ -66,13 +67,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Bootstrap the store dir up front (#39): the commit's replaceChartLayer
     # swaps into an existing store and refuses a missing one — which used to
     # surface only at the very last step, after minutes of download/export
-    # work. A store_dir path occupied by a plain file still fails here, as a
-    # clean config-shaped error rather than a traceback.
+    # work. Deliberately os.mkdir, NOT makedirs: only the leaf is created,
+    # so an unmounted data volume or mistyped path (missing parents) still
+    # fails loudly here instead of silently forking the whole pipeline onto
+    # a shadow store on the wrong filesystem. A store_dir path occupied by
+    # a plain file also fails here, as a clean error rather than a traceback.
     if not os.path.isdir(cfg.store_dir):
         try:
-            os.makedirs(cfg.store_dir)
+            os.mkdir(cfg.store_dir)
         except OSError as e:
-            print(f'enc_updater: cannot create store dir {cfg.store_dir}: {e}',
+            print(f'enc_updater: cannot create store dir {cfg.store_dir}: {e}'
+                  ' — parent must already exist (is the data volume mounted?)',
                   file=sys.stderr)
             return 1
         print(f'enc_updater: created store dir {cfg.store_dir}')
@@ -91,10 +96,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     # The pre-update manifest keys are the previous cycle's cell set; after
     # update_corpus (which prunes deselected cells) the manifest holds
     # exactly the current set, so the diff below surfaces membership changes
-    # — a NOAA rescheme in region mode, a config edit in cells mode.
-    previous = set(registry.load_cells(registry.manifest_path(cfg.corpus_dir)))
+    # — a NOAA rescheme in region mode, a config edit in cells mode. The
+    # load sits inside the try: a corrupt manifest is a download-phase
+    # failure like any other (clean exit 1 + health record, no traceback).
     try:
-        changed, manifest = downloader.update_corpus(cfg)
+        previous = set(
+            registry.load_cells(registry.manifest_path(cfg.corpus_dir)))
+        changed, manifest = downloader.update_corpus(cfg, dry_run=args.dry_run)
     except UpdaterError as e:
         print(f'enc_updater: {e}', file=sys.stderr)
         health.record_error(cfg.corpus_dir, 'download', str(e))
