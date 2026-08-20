@@ -231,11 +231,14 @@ def _provision_vdatum_bundle(cfg, bundle: str, marker: str) -> None:
         extract_root = os.path.join(workdir, 'extract')
         try:
             with zipfile.ZipFile(zip_path) as zf:
+                # Slip/size-cap checks first — they read only the central
+                # directory; testzip() decompresses every member, so the bomb
+                # cap must already have passed before any decompression runs.
+                members = downloader._safe_members(zf)
                 bad = zf.testzip()
                 if bad is not None:
                     _fail(cfg,
                           f'provision: vdatum {bundle} CRC failure in member {bad}')
-                members = downloader._safe_members(zf)
                 gtx = [m for m in members
                        if m.filename.lower().endswith('.gtx')]
                 if not gtx:
