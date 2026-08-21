@@ -14,8 +14,19 @@
 
 # store_dir is created on first run if absent (a fresh store bootstraps
 # cleanly); corpus_dir likewise.
+#
+# store_dir MUST be the ADR-0010 D3 bathymetry store root — `~/data/world/depths`
+# — not a sibling of your own naming. The updater writes the store's `chart/`
+# layer under it, and on a boat cube_bathymetry writes `draft/` under the SAME
+# root (its `draft_dir`). Point the two at different roots and the costmap reads
+# the chart prior while the live CUBE tiles land somewhere it never looks.
+#
+# Nothing catches that for you: this key auto-creates a fresh empty store rather
+# than failing on an unknown path, and bathymetry_layer logs once and no-ops on a
+# store it cannot find. A drifted name is silent at both ends. (This example
+# shipped `~/data/world/store` until 2026-08-20 and drifted a boat config with it.)
 corpus_dir: ~/data/world/charts/ENC_ROOT
-store_dir: ~/data/world/store
+store_dir: ~/data/world/depths
 
 # Cell selection — exactly one of `region` or `cells`.
 #
