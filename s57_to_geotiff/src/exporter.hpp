@@ -46,13 +46,18 @@ struct CellExport
 // in metres, NaN no-data; WGS84 geographic), following ADR-0010 D7.
 //
 // `chart_scale` is the cell's compilation scale denominator (drives GGGS level
-// selection). `datum` resolves the chart datum per pixel. `clip_geoms` are the
-// coverage footprints of all finer-scale cells: any pixel they cover is dropped
-// so the largest scale governs (empty = keep everything). Returns false and
+// selection). `datum` resolves the chart datum per pixel. Returns false and
 // fills `error` on failure; on success fills `stats` when non-null.
+//
+// The cell is exported ENTIRE. Coarse charts are no longer clipped by finer
+// cells' coverage footprints (s57_tools#49): that deleted exactly the coarser
+// levels `uma-ADR-0013` D5 upsamples from and D3's corollary fills gaps from,
+// leaving a wide view with no ancestor to draw. Precedence between scales is a
+// consumer concern — the display draws finer over coarser, and the safety walk
+// takes the shallowest reliable value across all levels.
 bool exportCell(
   GDALDataset & dataset, double chart_scale, const DatumFn & datum,
-  const std::vector<OGRGeometry *> & clip_geoms, const std::string & out_path,
+  const std::string & out_path,
   std::string & error, CellExport * stats = nullptr);
 
 // Options for a full corpus run.
@@ -66,8 +71,8 @@ struct ExporterOptions
   std::optional<double> lake_datum;   // optional lake-surface ellipsoidal height (m)
 };
 
-// Discover every cell under opts.enc_root, build the datum query once, compute
-// each cell's finer-scale clip, and export it. Progress and warnings go to
+// Discover every cell under opts.enc_root, build the datum query once, and
+// export each cell entire. Progress and warnings go to
 // `log`. Returns the number of cells written; 0 for a genuinely empty corpus
 // (no charts found); or -1 on a fatal setup error, or when a non-empty corpus
 // produced no output at all (every cell failed or was all no-data).
