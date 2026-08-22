@@ -74,8 +74,6 @@ def test_region_bbox_expands_to_corner_polygon(tmp_path):
     assert cfg.region == [(-70.85, 42.93), (-70.55, 42.93),
                           (-70.55, 43.11), (-70.85, 43.11)]
     assert cfg.cells == []
-    assert cfg.bands == [4, 5, 6]
-    assert cfg.max_cells == 50
 
 
 def test_region_polygon_accepted(tmp_path):
@@ -101,10 +99,17 @@ def test_neither_cells_nor_region_rejected(tmp_path):
 
 
 @pytest.mark.parametrize('key,value', [('bands', [4, 5]), ('max_cells', 10)])
-def test_region_only_keys_rejected_with_cells(tmp_path, key, value):
-    """Reject bands / max_cells alongside `cells` — they would silently no-op."""
-    with pytest.raises(UpdaterError, match='region-driven selection only'):
-        load_config(_write(tmp_path, **{key: value}))
+def test_retired_selection_keys_rejected(tmp_path, key, value):
+    """
+    Retired selection keys must fail loudly, never be ignored.
+
+    `bands` and `max_cells` are gone (s57_tools#47). A config still carrying
+    one must be rejected as an unknown key: silently ignoring it would let an
+    operator believe a filter is in force when every band is fetched.
+    """
+    with pytest.raises(UpdaterError):
+        load_config(_write_region(
+            tmp_path, [-70.85, 42.93, -70.55, 43.11], **{key: value}))
 
 
 @pytest.mark.parametrize('region', [
@@ -120,19 +125,3 @@ def test_malformed_region_rejected(tmp_path, region):
     """Every malformed region shape surfaces as a clean UpdaterError."""
     with pytest.raises(UpdaterError, match='region'):
         load_config(_write_region(tmp_path, region))
-
-
-@pytest.mark.parametrize('bands', [[], [0], [7], ['4'], [True], 'all'])
-def test_malformed_bands_rejected(tmp_path, bands):
-    """Reject bands that are not a non-empty list of integer usage bands 1-6."""
-    with pytest.raises(UpdaterError, match='"bands"'):
-        load_config(_write_region(
-            tmp_path, [-70.85, 42.93, -70.55, 43.11], bands=bands))
-
-
-@pytest.mark.parametrize('max_cells', [0, -3, 'many', True])
-def test_malformed_max_cells_rejected(tmp_path, max_cells):
-    """max_cells must be a positive integer."""
-    with pytest.raises(UpdaterError, match='"max_cells"'):
-        load_config(_write_region(
-            tmp_path, [-70.85, 42.93, -70.55, 43.11], max_cells=max_cells))

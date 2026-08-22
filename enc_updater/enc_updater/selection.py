@@ -20,28 +20,11 @@ treated planar (no antimeridian wrap): NOAA ENC coverage sits far from
 ±180°, and config validation keeps region longitudes in [-180, 180].
 """
 
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 from . import UpdaterError
 
 Point = Tuple[float, float]
-
-# Region mode defaults: approach/harbor/berthing usage bands. Overview bands
-# (1-3, down to 1:2M scale) would import at store levels far coarser than any
-# consumer wants; a config `bands:` list overrides.
-DEFAULT_BANDS = (4, 5, 6)
-
-# Sanity cap on region selection: a fat-fingered polygon that matches this
-# many cells is almost certainly wrong (whole-coast scale), and each cell
-# costs a download + export. A config `max_cells:` overrides.
-DEFAULT_MAX_CELLS = 50
-
-
-def usage_band(cell_name: str) -> Optional[int]:
-    """ENC usage band from the cell name's third character (``US5...`` -> 5)."""
-    if len(cell_name) >= 3 and cell_name[2].isdigit():
-        return int(cell_name[2])
-    return None
 
 
 def _point_in_polygon(point: Point, polygon: Sequence[Point]) -> bool:
@@ -120,38 +103,31 @@ def polygons_intersect(a: Sequence[Point], b: Sequence[Point]) -> bool:
 def select_cells(
     catalog: Dict[str, 'CatalogEntry'],  # noqa: F821 (see downloader)
     region: Sequence[Point],
-    bands: Sequence[int],
-    max_cells: int,
 ) -> List[str]:
     """
-    Cells whose coverage intersects ``region``, filtered to ``bands``.
+    Every Active catalog cell whose coverage intersects ``region``.
 
-    Only ``Active`` catalog rows participate (Cancelled cells carry no
-    coverage anyway). Raises UpdaterError on an empty selection — for a
-    non-empty region that means the region is wrong (or NOAA coverage
-    genuinely ends there), and silently regenerating an empty chart layer is
-    exactly what the sanity check exists to refuse — and on a selection
-    larger than ``max_cells`` (a fat-fingered region must fail before it
-    downloads the coast). The result is sorted for run-to-run determinism.
+    **At every usage band.** The coarse bands (Overview/General/Coastal) are
+    the ancestors `uma-ADR-0013` D5 upsamples from for "always a valid, if
+    blurry, picture", and the source D3's corollary fills coverage gaps from;
+    excluding them is what leaves a zoomed-out display blank. They also cost
+    almost nothing — a Boston-to-Isles-of-Shoals region matches 3 of them
+    against 77 approach/harbour cells.
+
+    Raises UpdaterError on an empty selection: for a non-empty region that
+    means the region is wrong (or NOAA coverage genuinely ends there), and
+    silently regenerating an empty chart layer is exactly what the sanity
+    check exists to refuse. The result is sorted for run-to-run determinism.
     """
-    wanted_bands = set(bands)
     selected = []
     for name in catalog:
         entry = catalog[name]
         if entry.status != 'Active':
             continue
-        if usage_band(name) not in wanted_bands:
-            continue
         if any(polygons_intersect(panel, region) for panel in entry.panels):
             selected.append(name)
     if not selected:
         raise UpdaterError(
-            'selection: no Active catalog cell in bands '
-            f'{sorted(wanted_bands)} intersects the configured region — '
-            'check the region coordinates (lon/lat order?) and bands')
-    if len(selected) > max_cells:
-        raise UpdaterError(
-            f'selection: region matches {len(selected)} cells, over the '
-            f'max_cells cap of {max_cells} — the region is likely far larger '
-            'than intended; shrink it or raise max_cells deliberately')
+            'selection: no Active catalog cell intersects the configured '
+            'region — check the region coordinates (lon/lat order?)')
     return sorted(selected)

@@ -42,41 +42,55 @@ def test_edge_crossing_without_contained_vertices():
     assert selection.polygons_intersect(tall_thin, REGION)
 
 
-def test_usage_band():
-    """Band comes from the name's third character; malformed names have none."""
-    assert selection.usage_band('US5PSMBE') == 5
-    assert selection.usage_band('US4NH1BD') == 4
-    assert selection.usage_band('USXBAD') is None
-    assert selection.usage_band('U') is None
-
-
-def test_select_filters_band_status_and_coverage():
-    """Only Active cells in wanted bands with intersecting coverage select."""
+def test_select_filters_on_status_and_coverage_only():
+    """Active + intersecting coverage is the whole rule; band never filters."""
     catalog = {
         'US5AAAAA': entry('US5AAAAA', [square(0.2, 0.2, 0.8, 0.8)]),
         'US5BBBBB': entry('US5BBBBB', [square(5.0, 5.0, 6.0, 6.0)]),   # elsewhere
-        'US2CCCCC': entry('US2CCCCC', [square(0.2, 0.2, 0.8, 0.8)]),   # band 2
         'US5DDDDD': entry('US5DDDDD', [square(0.2, 0.2, 0.8, 0.8)],
                           status='Cancelled'),
         'US4EEEEE': entry('US4EEEEE', [square(5.0, 5.0, 6.0, 6.0),
                                        square(0.9, 0.9, 1.5, 1.5)]),   # 2nd panel hits
     }
-    picked = selection.select_cells(catalog, REGION, bands=(4, 5, 6), max_cells=50)
+    picked = selection.select_cells(catalog, REGION)
     assert picked == ['US4EEEEE', 'US5AAAAA']
+
+
+def test_coarse_bands_are_selected():
+    """
+    Overview/General/Coastal cells must come through.
+
+    They are the ancestors a zoomed-out display upsamples from (uma-ADR-0013
+    D5) and the source coverage gaps are filled from (D3); excluding them is
+    what left wide views blank.
+    """
+    panel = [square(0.2, 0.2, 0.8, 0.8)]
+    catalog = {
+        'US1OVRVW': entry('US1OVRVW', panel),
+        'US2GENRL': entry('US2GENRL', panel),
+        'US3COAST': entry('US3COAST', panel),
+        'US5HARBR': entry('US5HARBR', panel),
+    }
+    assert selection.select_cells(catalog, REGION) == [
+        'US1OVRVW', 'US2GENRL', 'US3COAST', 'US5HARBR']
+
+
+def test_no_cap_on_a_large_selection():
+    """
+    A large selection is downloaded, not refused.
+
+    The operator asked for the area, and a whole scale ladder over a real
+    survey area is legitimately dozens of cells.
+    """
+    catalog = {
+        f'US5MANY{i:02d}': entry(f'US5MANY{i:02d}', [square(0.2, 0.2, 0.8, 0.8)])
+        for i in range(200)
+    }
+    assert len(selection.select_cells(catalog, REGION)) == 200
 
 
 def test_empty_selection_is_hard_error():
     """No matching cell must fail loudly, never regenerate an empty layer."""
     catalog = {'US5BBBBB': entry('US5BBBBB', [square(5.0, 5.0, 6.0, 6.0)])}
     with pytest.raises(UpdaterError, match='no Active catalog cell'):
-        selection.select_cells(catalog, REGION, bands=(4, 5, 6), max_cells=50)
-
-
-def test_max_cells_cap_is_hard_error():
-    """A selection over the cap names the count — a fat-fingered region fails fast."""
-    catalog = {
-        f'US5CAP{i:02d}': entry(f'US5CAP{i:02d}', [square(0.2, 0.2, 0.8, 0.8)])
-        for i in range(4)
-    }
-    with pytest.raises(UpdaterError, match='matches 4 cells, over the max_cells cap'):
-        selection.select_cells(catalog, REGION, bands=(4, 5, 6), max_cells=3)
+        selection.select_cells(catalog, REGION)
