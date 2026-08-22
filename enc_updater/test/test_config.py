@@ -107,7 +107,7 @@ def test_retired_selection_keys_rejected(tmp_path, key, value):
     one must be rejected as an unknown key: silently ignoring it would let an
     operator believe a filter is in force when every band is fetched.
     """
-    with pytest.raises(UpdaterError):
+    with pytest.raises(UpdaterError, match='unknown key'):
         load_config(_write_region(
             tmp_path, [-70.85, 42.93, -70.55, 43.11], **{key: value}))
 

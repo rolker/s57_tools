@@ -111,8 +111,8 @@ def select_cells(
     the ancestors `uma-ADR-0013` D5 upsamples from for "always a valid, if
     blurry, picture", and the source D3's corollary fills coverage gaps from;
     excluding them is what leaves a zoomed-out display blank. They also cost
-    almost nothing — a Boston-to-Isles-of-Shoals region matches 3 of them
-    against 77 approach/harbour cells.
+    almost nothing: a survey-area region matches a handful of coarse cells
+    against dozens of approach and harbour ones.
 
     Raises UpdaterError on an empty selection: for a non-empty region that
     means the region is wrong (or NOAA coverage genuinely ends there), and

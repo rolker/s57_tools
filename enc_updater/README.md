@@ -136,7 +136,9 @@ Berthing. The coarse bands are what a zoomed-out display upsamples from
 (`uma-ADR-0013` D5) and what coverage gaps are filled from (D3), so
 excluding them is what leaves a wide view blank; they also cost a handful of
 cells against dozens of harbour ones. An empty selection is a hard error,
-matching the fail-loud contract of the explicit list. Regions crossing the antimeridian are unsupported: coordinates are
+matching the fail-loud contract of the explicit list.
+
+Regions crossing the antimeridian are unsupported: coordinates are
 validated per-vertex to lon [-180, 180] and the geometry is planar, so a
 bbox cannot express a crossing at all, and a polygon straddling ±180 is
 *not rejected* — it is interpreted the long way around and would select a
