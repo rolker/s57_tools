@@ -38,14 +38,11 @@ store_dir: ~/data/world/depths
 # This bbox covers Portsmouth Harbor + the Isles of Shoals.
 region: [-70.85, 42.93, -70.55, 43.11]
 
-# Usage-band filter for region selection (default [4, 5, 6] —
-# approach/harbor/berthing; overview bands would import at uselessly coarse
-# store levels).
-# bands: [4, 5, 6]
-
-# Sanity cap on region selection (default 50): a region matching more cells
-# than this fails loudly instead of downloading the coast.
-# max_cells: 50
+# Every chart that intersects the region is fetched, at every usage band —
+# Overview and General through Berthing. The coarse bands are the ancestors a
+# zoomed-out display upsamples from (uma-ADR-0013 D5) and the source coverage
+# gaps are filled from (D3), and they are a handful of cells against dozens of
+# harbour ones. There is no band filter and no cell cap to configure.
 
 # Explicit pin mode (mutually exclusive with `region`): exact cell names,
 # fail-loud when the catalog drops one. Full catalog:

@@ -176,8 +176,7 @@ def resolve_cells(cfg, catalog: Dict[str, CatalogEntry]) -> List[str]:
     polygons — the rescheme-proof path (#40).
     """
     if cfg.region is not None:
-        return selection.select_cells(
-            catalog, cfg.region, cfg.bands, cfg.max_cells)
+        return selection.select_cells(catalog, cfg.region)
     return list(cfg.cells)
 
 

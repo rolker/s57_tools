@@ -6,7 +6,6 @@ from typing import List, Optional, Tuple
 
 import yaml
 
-from . import selection
 from . import UpdaterError
 
 DEFAULT_CATALOG_URL = 'https://charts.noaa.gov/ENCs/ENCProdCat.xml'
@@ -54,13 +53,10 @@ class UpdaterConfig:
     # Cell selection: exactly one of `cells` (explicit pin list, fail-loud on
     # a name the catalog drops) or `region` (a lon/lat polygon; the cell set
     # is derived from the live catalog's coverage panels each cycle — the
-    # rescheme-proof mode, #40). `bands` and `max_cells` apply to region
-    # mode only; see selection.py for their semantics and defaults.
+    # rescheme-proof mode, #40). Region mode takes every band the catalog
+    # offers — see selection.select_cells.
     cells: List[str] = dataclasses.field(default_factory=list)
     region: Optional[List[Tuple[float, float]]] = None
-    bands: List[int] = dataclasses.field(
-        default_factory=lambda: list(selection.DEFAULT_BANDS))
-    max_cells: int = selection.DEFAULT_MAX_CELLS
     catalog_url: str = DEFAULT_CATALOG_URL
     geoid: Optional[str] = None
     geoid_sha256: Optional[str] = None
@@ -82,7 +78,7 @@ class UpdaterConfig:
 
 
 _TOP_LEVEL_KEYS = {
-    'corpus_dir', 'store_dir', 'cells', 'region', 'bands', 'max_cells',
+    'corpus_dir', 'store_dir', 'cells', 'region',
     'catalog_url',
     'geoid', 'geoid_sha256', 'geoid_cdn_base_url',
     'vdatum_dir', 'vdatum_bundles', 'vdatum_cdn_base_url',
@@ -204,22 +200,6 @@ def load_config(path: str) -> UpdaterConfig:
         raise UpdaterError('config: "cells" must be a non-empty list of cell names')
 
     region = _parse_region(raw.get('region')) if 'region' in raw else None
-    for key in ('bands', 'max_cells'):
-        if key in raw and region is None:
-            raise UpdaterError(
-                f'config: "{key}" applies to region-driven selection only — '
-                'it has no effect with an explicit "cells" list')
-    bands = raw.get('bands', list(selection.DEFAULT_BANDS))
-    if (not isinstance(bands, list) or not bands
-            or not all(isinstance(b, int) and not isinstance(b, bool)
-                       and 1 <= b <= 6 for b in bands)):
-        raise UpdaterError(
-            'config: "bands" must be a non-empty list of ENC usage bands '
-            '(integers 1-6)')
-    max_cells = raw.get('max_cells', selection.DEFAULT_MAX_CELLS)
-    if (isinstance(max_cells, bool) or not isinstance(max_cells, int)
-            or max_cells < 1):
-        raise UpdaterError('config: "max_cells" must be a positive integer')
 
     bundles = raw.get('vdatum_bundles', []) or []
     if (not isinstance(bundles, list)
@@ -273,8 +253,6 @@ def load_config(path: str) -> UpdaterConfig:
         store_dir=_expand(raw['store_dir']),
         cells=[str(c) for c in cells],
         region=region,
-        bands=[int(b) for b in bands],
-        max_cells=int(max_cells),
         catalog_url=str(raw.get('catalog_url', DEFAULT_CATALOG_URL)),
         geoid=_expand(raw.get('geoid')),
         geoid_sha256=(str(raw['geoid_sha256']) if raw.get('geoid_sha256')

@@ -11,8 +11,8 @@ boat), never inside the ROS runtime.
 
 0. **Select** — resolve the cycle's cell set. With `region:` (the default
    mode to prefer, #40) the set is derived fresh from the catalog's
-   coverage panels: every `Active` cell in the configured usage `bands`
-   whose coverage intersects the region polygon/bbox. NOAA's periodic ENC
+   coverage panels: every `Active` cell, at every usage band, whose
+   coverage intersects the region polygon/bbox. NOAA's periodic ENC
    rescheming (renames, splits, new cells) is then picked up automatically,
    and withdrawn cells drop out. With an explicit `cells:` pin list the set
    is exactly what you wrote (a name the catalog dropped is a hard error).
@@ -123,25 +123,26 @@ and the interlock's `ros2` CLI comes from the same environment (or set
 
 See [`config/region_example.yaml`](config/region_example.yaml) (New Castle /
 Isles of Shoals area) for the full annotated schema: corpus/store paths,
-cell selection (`region` + `bands` + `max_cells`, or an explicit `cells`
-pin list — exactly one of the two), vertical-datum grids for the export,
+cell selection (`region`, or an explicit `cells` pin list — exactly one of
+the two), vertical-datum grids for the export,
 `depth_range` sanity bounds (the default upper bound +100 m admits lake
 surfaces), tool-path overrides, and subprocess timeouts.
 
 **Cell selection**: prefer `region:` — a `[lon_min, lat_min, lon_max,
 lat_max]` bbox or a polygon of `[lon, lat]` pairs. The cell set is resolved
 against each fetched catalog, so it tracks NOAA rescheming without config
-edits. `bands:` filters usage bands (default `[4, 5, 6]` —
-approach/harbor/berthing; overview bands would import at uselessly coarse
-store levels), and `max_cells:` (default 50) is a sanity cap so a
-fat-fingered region fails loudly instead of downloading the coast. An empty
-selection is a hard error, matching the fail-loud contract of the explicit
-list. Regions crossing the antimeridian are unsupported: coordinates are
+edits. **Every usage band is fetched** — Overview and General through
+Berthing. The coarse bands are what a zoomed-out display upsamples from
+(`uma-ADR-0013` D5) and what coverage gaps are filled from (D3), so
+excluding them is what leaves a wide view blank; they also cost a handful of
+cells against dozens of harbour ones. An empty selection is a hard error,
+matching the fail-loud contract of the explicit list.
+
+Regions crossing the antimeridian are unsupported: coordinates are
 validated per-vertex to lon [-180, 180] and the geometry is planar, so a
 bbox cannot express a crossing at all, and a polygon straddling ±180 is
 *not rejected* — it is interpreted the long way around and would select a
-huge unintended area (in practice tripping the `max_cells` cap). NOAA ENC
-coverage sits nowhere near ±180.
+huge unintended area. NOAA ENC coverage sits nowhere near ±180.
 
 **Nav-liveness contract**: `nav_liveness.nodes` lists the exact node names
 (as printed by `ros2 node list`, e.g. `/bizzy/controller`) whose presence
