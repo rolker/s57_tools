@@ -185,7 +185,7 @@ TEST(Exporter, BandMidpointAndHalfBandSigmaFloor)
   std::string error;
   s57_to_geotiff::CellExport stats;
   ASSERT_TRUE(
-    s57_to_geotiff::exportCell(cell.dataset(), 20000.0, constantDatum(), {}, out, error, &stats))
+    s57_to_geotiff::exportCell(cell.dataset(), 20000.0, constantDatum(), out, error, &stats))
     << error;
   EXPECT_GT(stats.written, 0);
 
@@ -208,7 +208,7 @@ TEST(Exporter, CatzocVariedSigma)
   const std::string out = tempPath("catzoc_varied.tif");
   std::string error;
   ASSERT_TRUE(
-    s57_to_geotiff::exportCell(cell.dataset(), 20000.0, constantDatum(), {}, out, error, nullptr))
+    s57_to_geotiff::exportCell(cell.dataset(), 20000.0, constantDatum(), out, error, nullptr))
     << error;
 
   // Depth identical, sigma differs by zone: A1 -> 0.6, C -> 2.5.
@@ -229,7 +229,7 @@ TEST(Exporter, SoundingOverridesArea)
   const std::string out = tempPath("sounding.tif");
   std::string error;
   ASSERT_TRUE(
-    s57_to_geotiff::exportCell(cell.dataset(), 20000.0, constantDatum(), {}, out, error, nullptr))
+    s57_to_geotiff::exportCell(cell.dataset(), 20000.0, constantDatum(), out, error, nullptr))
     << error;
 
   // At the sounding: band1 = -30 - 5 = -35, sigma = A1 at depth 5 = 0.55.
@@ -247,7 +247,7 @@ TEST(Exporter, LevelSelectionFromScale)
       s57_to_geotiff::CellExport stats;
       EXPECT_TRUE(
         s57_to_geotiff::exportCell(
-          cell.dataset(), scale, constantDatum(), {},
+          cell.dataset(), scale, constantDatum(),
           std::string(::testing::TempDir()) + "/level_" + std::to_string(static_cast<long>(scale)) +
           ".tif", error, &stats)) << error;
       return stats;
@@ -265,24 +265,31 @@ TEST(Exporter, LevelSelectionFromScale)
   EXPECT_EQ(fine.width, expected_w);
 }
 
-TEST(Exporter, FinerFootprintClip)
+// [s57_tools#49] The inverse of the clip this replaces: a coarse chart is
+// exported ENTIRE, including the ground a finer chart also covers.
+//
+// The old behaviour NaN'd those pixels ("largest scale governs", uma-ADR-0010
+// D7), which deleted exactly the coarser level that uma-ADR-0013 D5 upsamples
+// from and D3's corollary fills coverage gaps from — so a view zoomed out past
+// the finer chart's level had no ancestor to draw and rendered blank. Scale
+// precedence is now a consumer concern: the display draws finer over coarser,
+// and the safety walk takes the shallowest reliable value across all levels.
+TEST(Exporter, CoarseCellIsExportedEntire)
 {
   SyntheticCell cell;
   cell.addCoverage(-70.80, 43.00, -70.70, 43.10);
   cell.addDepare(-70.80, 43.00, -70.70, 43.10, 10.0, 20.0);   // full-extent area
 
-  // A finer chart covers the left half — those pixels must be clipped away.
-  auto finer = SyntheticCell::makeRect(-70.80, 43.00, -70.75, 43.10);
-  std::vector<OGRGeometry *> clip{finer.get()};
-
-  const std::string out = tempPath("clip.tif");
+  const std::string out = tempPath("entire.tif");
   std::string error;
   ASSERT_TRUE(
-    s57_to_geotiff::exportCell(cell.dataset(), 320000.0, constantDatum(), clip, out, error, nullptr))
+    s57_to_geotiff::exportCell(cell.dataset(), 320000.0, constantDatum(), out, error, nullptr))
     << error;
 
-  EXPECT_TRUE(std::isnan(sample(out, 1, -70.775, 43.05)));   // clipped (left)
-  EXPECT_NEAR(sample(out, 1, -70.725, 43.05), -45.0, 1e-6);  // kept (right)
+  // The left half is the ground a finer chart would have claimed. Both halves
+  // must carry depth: this is the pixel whose deletion blanked the wide view.
+  EXPECT_NEAR(sample(out, 1, -70.775, 43.05), -45.0, 1e-6);   // was clipped away
+  EXPECT_NEAR(sample(out, 1, -70.725, 43.05), -45.0, 1e-6);   // always kept
 }
 
 int main(int argc, char ** argv)

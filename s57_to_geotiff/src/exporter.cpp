@@ -189,7 +189,7 @@ double catzocSigma(int catzoc, double depth)
 
 bool exportCell(
   GDALDataset & dataset, double chart_scale, const DatumFn & datum,
-  const std::vector<OGRGeometry *> & clip_geoms, const std::string & out_path,
+  const std::string & out_path,
   std::string & error, CellExport * stats)
 {
   // A malformed cell can carry a zero/negative scale; guard before it reaches
@@ -407,54 +407,6 @@ bool exportCell(
     sigma[idx] = s.sigma;
   }
 
-  // --- Clip: drop pixels covered by any finer-scale footprint ---------------
-  if (!clip_geoms.empty()) {
-    std::unique_ptr<GDALDataset> mask(
-      mem_driver->Create("", width, height, 1, GDT_Byte, nullptr));
-    if (!mask) {
-      error = "failed to allocate the clip mask";
-      return false;
-    }
-    mask->SetGeoTransform(gt);
-    mask->SetProjection(wkt.c_str());
-    mask->GetRasterBand(1)->Fill(0);
-
-    std::vector<OGRGeometryH> handles;
-    std::vector<double> burns;
-    handles.reserve(clip_geoms.size());
-    burns.reserve(clip_geoms.size());
-    for (OGRGeometry * g : clip_geoms) {
-      if (g) {
-        handles.push_back(OGRGeometry::ToHandle(g));
-        burns.push_back(1.0);
-      }
-    }
-    if (!handles.empty()) {
-      int mask_band[1] = {1};
-      if (GDALRasterizeGeometries(
-          GDALDataset::ToHandle(mask.get()), 1, mask_band, static_cast<int>(handles.size()),
-          handles.data(), nullptr, nullptr, burns.data(), nullptr, nullptr, nullptr) != CE_None)
-      {
-        // A failed clip mask would under-clip: stale coarser depth could leak
-        // through a finer cell's footprint. Fail the cell rather than emit it.
-        error = "failed to rasterize the finer-scale clip mask";
-        return false;
-      }
-      std::vector<unsigned char> covered(n);
-      if (mask->GetRasterBand(1)->RasterIO(
-          GF_Read, 0, 0, width, height, covered.data(), width, height, GDT_Byte, 0, 0) != CE_None)
-      {
-        error = "failed to read clip mask";
-        return false;
-      }
-      for (std::size_t i = 0; i < n; ++i) {
-        if (covered[i]) {
-          depth_bd[i] = kNaN;
-        }
-      }
-    }
-  }
-
   // --- Datum conversion per pixel: ellipsoidal height = datum_z - depth ------
   std::vector<double> out_depth(n, kNaN);
   std::vector<double> out_sigma(n, kNaN);
@@ -537,28 +489,6 @@ std::shared_ptr<GDALDataset> openVector(const std::string & path)
     [](GDALDataset * d) {if (d) {GDALClose(d);}});
 }
 
-std::vector<OGRGeometry *> readFootprints(GDALDataset & dataset)
-{
-  std::vector<OGRGeometry *> footprints;
-  forEachFeature(
-    dataset, [&](OGRFeature * feature) {
-      if (featureObjl(feature) != kObjlMcovr) {
-        return;
-      }
-      int ci = feature->GetFieldIndex("CATCOV");
-      if (ci >= 0 && feature->IsFieldSetAndNotNull(ci) &&
-        feature->GetFieldAsInteger(ci) != 1)
-      {
-        return;                       // only coverage-available polygons clip
-      }
-      OGRGeometry * geometry = feature->GetGeometryRef();
-      if (geometry) {
-        footprints.push_back(geometry->clone());
-      }
-    });
-  return footprints;
-}
-
 DatumFn buildDatum(const ExporterOptions & opts, std::ostream & log)
 {
   marine_vertical_datum::VDatumQueryFn vquery;
@@ -619,26 +549,20 @@ int runExport(const ExporterOptions & opts, std::ostream & log)
 
   const DatumFn datum = buildDatum(opts, log);
 
-  // Pass A: scale + coverage footprints per cell (footprints owned for the run).
-  struct Cell
-  {
-    std::shared_ptr<marine_charts::S57Dataset> ds;
-    double scale;
-    std::vector<OGRGeometry *> footprints;
-  };
-  std::vector<Cell> cells;
-  cells.reserve(datasets.size());
+  // One pass: export each cell entire. There is no longer a cross-cell
+  // dependency — the old Pass A existed only to collect every cell's coverage
+  // footprints before any export could start, so that finer cells could clip
+  // coarser ones (s57_tools#49). Without it each cell is independent, and the
+  // vector dataset is opened once instead of twice.
+  int exported = 0;
   for (auto & ds : datasets) {
     const double scale = ds->chartScale();
-    // A malformed cell with no readable compilation scale (chartScale()==0)
-    // would enter Pass B with scale 0; the `other.scale < cell.scale` clip
-    // predicate then reads 0 < scale -> true for every real cell, so its
-    // footprints would NaN out valid depth from every overlapping cell even as
-    // it fails its own export at exportCell's `chart_scale > 0` guard. Drop it
-    // here so a scale-0 cell can neither export nor clip.
+    // A malformed cell with no readable compilation scale would fail exportCell's
+    // own `chart_scale > 0` guard anyway; skipping here keeps the warning
+    // specific and avoids opening the dataset for nothing.
     if (!(scale > 0.0)) {
       log << "warning: " << ds->filePath()
-          << ": non-positive chart scale; skipping (cannot export or clip)\n";
+          << ": non-positive chart scale; skipping\n";
       continue;
     }
     auto gdal = openVector(ds->filePath());
@@ -646,36 +570,13 @@ int runExport(const ExporterOptions & opts, std::ostream & log)
       log << "warning: cannot open " << ds->filePath() << "; skipping\n";
       continue;
     }
-    cells.push_back({ds, scale, readFootprints(*gdal)});
-  }
-
-  // Pass B: export each cell, clipped by every strictly-finer cell's footprints
-  // (finer = smaller scale denominator; largest scale governs, ADR-0010 D7).
-  // The comparison is strict: two cells at the *same* compilation scale do not
-  // clip each other. Standard ENC usage bands don't overlap at equal scale, and
-  // any residual same-scale overlap is left for import_geotiff to dedup rather
-  // than resolved arbitrarily here.
-  int exported = 0;
-  for (const Cell & cell : cells) {
-    std::vector<OGRGeometry *> clip;
-    for (const Cell & other : cells) {
-      if (other.scale < cell.scale) {
-        clip.insert(clip.end(), other.footprints.begin(), other.footprints.end());
-      }
-    }
-
-    auto gdal = openVector(cell.ds->filePath());
-    if (!gdal) {
-      log << "warning: cannot reopen " << cell.ds->filePath() << "; skipping\n";
-      continue;
-    }
     const std::string out_path =
-      opts.out_dir + "/" + baseLabel(cell.ds->label()) + ".tif";
+      opts.out_dir + "/" + baseLabel(ds->label()) + ".tif";
     std::string error;
     CellExport stats;
     bool ok = false;
     try {
-      ok = exportCell(*gdal, cell.scale, datum, clip, out_path, error, &stats);
+      ok = exportCell(*gdal, scale, datum, out_path, error, &stats);
     } catch (const std::exception & e) {
       // Degrade any per-cell failure (e.g. bad_alloc from a still-large cell that
       // passed the dimension caps) to a skipped-cell warning instead of a
@@ -685,34 +586,27 @@ int runExport(const ExporterOptions & opts, std::ostream & log)
     }
     if (ok) {
       if (stats.written == 0) {
-        log << "warning: " << cell.ds->label()
+        log << "warning: " << ds->label()
             << ": no in-datum data (all pixels no-data); wrote empty " << out_path << "\n";
       } else {
         log << "exported " << out_path << " (" << stats.width << "x" << stats.height
-            << ", " << stats.written << " cells, scale 1:" << static_cast<long>(cell.scale)
+            << ", " << stats.written << " cells, scale 1:" << static_cast<long>(scale)
             << ", GGGS level " << stats.level << " -> import_geotiff --level " << stats.level
             << ")\n";
         ++exported;
       }
     } else {
-      log << "warning: " << cell.ds->label() << ": " << error << "\n";
+      log << "warning: " << ds->label() << ": " << error << "\n";
     }
   }
 
-  // Release cloned footprints.
-  for (const Cell & cell : cells) {
-    for (OGRGeometry * g : cell.footprints) {
-      OGRGeometryFactory::destroyGeometry(g);
-    }
-  }
-
-  log << "exported " << exported << " of " << cells.size() << " cell(s)\n";
+  log << "exported " << exported << " of " << datasets.size() << " cell(s)\n";
 
   // A non-empty corpus that produced nothing (every cell failed or was all
   // no-data) is a failure, not a silent success: signal it so the CLI exits
   // nonzero and a caller can tell it apart from a genuinely empty corpus (which
   // returns 0 above). -1 already means "no output"; reuse it here.
-  if (!cells.empty() && exported == 0) {
+  if (!datasets.empty() && exported == 0) {
     log << "error: no cells exported from a non-empty corpus\n";
     return -1;
   }
