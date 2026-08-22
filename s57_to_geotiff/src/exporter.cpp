@@ -567,7 +567,7 @@ int runExport(const ExporterOptions & opts, std::ostream & log)
     }
     auto gdal = openVector(ds->filePath());
     if (!gdal) {
-      log << "warning: cannot reopen " << ds->filePath() << "; skipping\n";
+      log << "warning: cannot open " << ds->filePath() << "; skipping\n";
       continue;
     }
     const std::string out_path =

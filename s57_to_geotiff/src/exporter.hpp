@@ -43,7 +43,13 @@ struct CellExport
 
 // Export one open S-57 vector `dataset` to a two-band GeoTIFF at `out_path`
 // (band 1 = seafloor ellipsoidal height in metres up-positive, band 2 = 1-sigma
-// in metres, NaN no-data; WGS84 geographic), following ADR-0010 D7.
+// in metres, NaN no-data; WGS84 geographic), following ADR-0010 D7 — its depth
+// sources (DEPARE/DRGARE band midpoint + half-band sigma floor, SOUNDG), its
+// CATZOC->sigma table and finite-sigma contract, its per-cell chart-datum
+// conversion, and its scale->GGGS-level rule all still apply. D7's "largest
+// scale governs" clipping clause does NOT: it was withdrawn (uma#337,
+// s57_tools#49) because it deleted the coarser levels uma-ADR-0013 D5 upsamples
+// from. See the note on `exportCell` below.
 //
 // `chart_scale` is the cell's compilation scale denominator (drives GGGS level
 // selection). `datum` resolves the chart datum per pixel. Returns false and
