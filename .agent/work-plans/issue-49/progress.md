@@ -47,3 +47,33 @@ not follow as suggested.
 - The paired ADR amendment (uma#337 / PR uma#338) is **already merged**, so the
   D7 reference can now be qualified against a landed decision rather than a
   pending one.
+
+## Implementation
+**Status**: complete
+**When**: 2026-08-22 16:24 -04:00
+**By**: Claude Code Agent (Claude Opus 5 (1M context))
+
+**Branch**: feature/issue-49 at `ac4ebc8` (PR #50)
+
+Works both findings from the `## Integrated Review` above.
+
+- [x] Stale `"cannot reopen"` warning — now `"cannot open"`. The two-pass flow
+      opened each cell twice; the single pass opens once, so the old text
+      described an event that never happened.
+- [x] `exportCell` docstring's ADR-0010 D7 citation — **qualified, not removed**.
+      Operator chose this remedy at the checkpoint over Copilot's suggestion to
+      delete the citation. D7 still governs depth sources, the CATZOC->sigma
+      finite-sigma contract, chart datum, and scale->level; only "largest scale
+      governs" was withdrawn (uma#337, merged as uma#338). Deleting would leave
+      the exporter looking ungoverned.
+
+**Verification**: 16 tests, 0 failures. Copilot re-reviewed at `ac4ebc8` and
+returned **Approval recommended**; `build-and-test` green; PR MERGEABLE/CLEAN.
+
+**Deviation, recorded**: the fix was applied host-inline rather than via a
+dispatched `address-findings`, and no Deep `review-code` re-run followed. Both
+findings were single-line comment/message edits with no behaviour change, the
+remedy for one was an operator decision taken at the checkpoint (ground truth a
+sub-agent could not have had), and the convergence guidance warns against
+spinning full rounds on comment-level diffs. The independent re-read came from
+Copilot's re-review at the new head instead.
