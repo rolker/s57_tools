@@ -705,3 +705,13 @@ Project pass: no `conventions=` hook rule, so every commit ran the repository's 
 - [ ] No issues found. LGTM.
 
 Checked: `46ea9fb..76c15dd` changes README item 5 and comment lines above `chooseStrip` only (no code line); no `.agent/` file; message ends "Backport to jazzy.". `chooseStrip` reports whole only when 2 or more pending strips have age >= 2, so the new sentences (never on 2 origins per axis; wider jitter can) agree with it and `recordUncovered`, and with the tests (within one cell: 2 origins, none; two cells: 4 origins, whole at pinned cycles). No remaining "under 2 cells" claim in README, source or tests. The newest Implementation entry's figures (2 to 3% of updates report, 5 to 9% repainted with inflation, 0.3 to 0.4 s) are consistent with each other and the README (which says about 0.3 s).
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 17:35 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (pre-push review round 4 approved with no findings)
+**After**: publish
+**Decision**: publish
+
+Read: the Local Review (Pre-Push) round 4 at `76c15dd`, approved, nothing open. Fifteen code commits. The pull request's Jazzy CI job is the first Jazzy compile and run of this change and its tests.
