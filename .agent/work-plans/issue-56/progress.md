@@ -172,3 +172,71 @@ The plan is correct and ready: the `floor` fix is complete for the defect class,
 **Decision**: proceed
 
 Read: the Plan Review at `dde57e4`, verdict ready. Both commits go in as planned: `std::floor` in `worldToTile` with the rolling-window test, and `lround` on the master-to-layer cell offset with its 0.1 m test. One push, not test-first. Findings applied: (1) the uncharted case is driven through Nav2's own cycle, a `LayeredCostmap` with an `InflationLayer` and `setFootprint` and one `updateMap`, as a costmap node does on its first cycle; if that proves impractical the direct call stays and its comment says which production cycle it stands for. (4) The `lround` test stays single-cycle and its comment says why: painted in a later cycle, the moved cells are not repainted at all (the separate repaint defect), so a two-cycle version passes without the fix. (5) The pull request's vessel statement drops "become unknown where `allow_uncharted` is false" for BEN, which leaves that setting at its default of true. (6) The new test is registered after `test_plugin_loading` in `s57_layer/CMakeLists.txt`, away from where the port inserts its own. **Not in this issue:** the review confirmed that cells exposed by a rolling window's move are not repainted until a tile is invalidated (the planner's defect A; on re-entered ground the local costmap can show free space on charted land), and that with no charts and `allow_uncharted: false` newly entered tiles are not marked (defect B, which does not apply to BEN). Neither is touched here; the tests each start from empty tiles in one cycle and are not affected. The host takes A to the owner as its own issue.
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 11:40 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Branch**: feature/issue-56 at `a5b2294`
+
+Two code commits, neither touching `.agent/`, each ending "Backport to jazzy." (`git merge-tree` shows each cherry-picks cleanly onto `origin/jazzy` in order; `s57_layer` is identical on `rolling` and `jazzy`):
+
+- `ce8fd8d` s57_layer: find a rolling window's tiles below the layer origin (#56). `std::floor` in `worldToTile`; `current_charts_`, `chart_bounds_`, `grids_` moved to protected in `s57_layer.h` with a one-line comment; new `test/test_rolling_window.cpp` (7 cases) and its target, registered after `test_plugin_loading` (links `nav2_costmap_2d::layers` for `InflationLayer`).
+- `a5b2294` s57_layer: round the master-to-layer cell offset to the nearest cell (#56). `static_cast<int>(std::lround(...))` at `:469` and `:474`, tile term added as an integer (as `bathymetry_layer.cpp:1190-1215`); the 0.1 m test case.
+
+Final diff of `s57_layer.cpp` against `origin/rolling` (no other line changed):
+
+```diff
+@@ -156,8 +156,8 @@ void S57Layer::matchSize()
+-  int ix = (x - x_origin_)/resolution_/tile_size_;
+-  int iy = (y - y_origin_)/resolution_/tile_size_;
++  int ix = static_cast<int>(std::floor((x - x_origin_)/resolution_/tile_size_));
++  int iy = static_cast<int>(std::floor((y - y_origin_)/resolution_/tile_size_));
+@@ -466,12 +466,12 @@ void S57Layer::updateCosts(...)
+-    int tile_offset_x = -ti*tile_size_ + (master_grid.getOriginX()-x_origin_)/resolution_;
++    int tile_offset_x = -ti*tile_size_ + static_cast<int>(std::lround((master_grid.getOriginX()-x_origin_)/resolution_));
+-      int tile_offset_y = -tj*tile_size_ + (master_grid.getOriginY()-y_origin_)/resolution_;
++      int tile_offset_y = -tj*tile_size_ + static_cast<int>(std::lround((master_grid.getOriginY()-y_origin_)/resolution_));
+```
+
+### Tests
+
+Rolling `LayeredCostmap("map", true, false)`, 10 x 10 at 1 m, `tile_size` 4, in a costmap node's order (`resizeMap`, `addPlugin`, `initialize`), one `updateMap(robot)`; all-land chart given through the protected members; every cell asserted, each case also asserts the window origin it relies on. The uncharted case (`allow_uncharted: false`, no chart) runs through Nav2's cycle with an `InflationLayer` after the layer and `setFootprint`, as a costmap node's first cycle; its comment says the inflation layer is needed because with no chart the layer reports no bounds of its own (defect B). The `lround` case is single-cycle against an unmoved 20 x 20 oracle, asserts origin `0.30000000000000004`, and its comment says why it must stay single-cycle (defect A). No sleeps; no DDS traffic beyond the node's own participant.
+
+### Verification (Rolling, scratch copy)
+
+Scratch copy in the session scratchpad: `s57_layer` and `s57_grids` from the port's branch `feature/issue-52` at `8ab87bf` (by `git archive`, read-only) with this branch's `s57_layer` diff applied; built with colcon against `/opt/ros/rolling`, the underlay install (Nav2 from source) and the core install. Final run on the exact `git merge-tree` result of this branch and `8ab87bf` (tree `4a53c3e`, which merges with no conflict).
+
+| Case | Without `floor` | With `floor` |
+|---|---|---|
+| both axes, robot (0,0) | 19 of 100 not 254; origin (-5, -5); first (0, 0) at (-4.5, -4.5) cost 0 | OK |
+| x only, (0,20) | 10 of 100; origin (-5, 15); first (0, 0) at (-4.5, 15.5) cost 0 | OK |
+| y only, (20,0) | 10 of 100; origin (15, -5); first (0, 0) at (15.5, -4.5) cost 0 | OK |
+| exact tile multiple, (-3,-3) | 64 of 100; origin (-8, -8); first (0, 0) at (-7.5, -7.5) cost 0 | OK |
+| far negative, (-1000.25,-2000.75) | 19 of 100; origin (-1005, -2005); first (0, 0) at (-1004.5, -2004.5) cost 0 | OK |
+| positive space control, (20,20) | OK | OK |
+| uncharted, (0,0) | 19 of 100 not 255; origin (-5, -5); first (0, 0) at (-4.5, -4.5) cost 0 | OK |
+
+`lround` case, `floor` only: "10 of 100 cells differ from the unmoved window; window origin (0.30000000000000004, 0); first wrong cell (1, 0) centred at (0.45, 0.05) has cost 0 where the unmoved window has 254" (land shown free). With `lround`: OK.
+
+- Each of the 8 new tests 30 times as separate processes (`--gtest_filter`): 30 pass, 0 fail each.
+- `colcon test --packages-select s57_layer` (`--ctest-args -j1`): "Summary: 60 tests, 0 errors, 0 failures, 8 skipped" (the 8 skipped are cppcheck's per-file skips); gtest: allow_uncharted 3, tide_offset 7, depth_costs 12, initialize 9, plugin_loading 1, rolling_window 8, 0 failures.
+- `ldd` under the same environment: every `s57_layer` test binary (`test_allow_uncharted`, `test_tide_offset`, `test_depth_costs`, `test_initialize`, `test_rolling_window`) resolves `libs57_layer.so => <scratch>/ws/install/s57_layer/lib/libs57_layer.so`; `test_rolling_window` loads `liblayers.so` and `libnav2_costmap_2d_core.so` from `rolling/underlay/install/nav2_costmap_2d/lib`. No other `libs57_layer.so` exists under `/opt/ros` or `rolling/`.
+
+### Jazzy compile, by reading (`navigation2` `origin/jazzy`, c7046550)
+
+`LayeredCostmap(std::string, bool, bool)`, `resizeMap(uint, uint, double, double, double, bool = false)`, `addPlugin(std::shared_ptr<Layer>)`, `updateMap(double, double, double)`, `setFootprint(const std::vector<Point> &)`, `getCostmap()`; `Layer::initialize(LayeredCostmap *, std::string, tf2_ros::Buffer *, const nav2_util::LifecycleNode::WeakPtr &, CallbackGroup::SharedPtr)` (the `__has_include` switch gives `nav2_util::LifecycleNode`); `nav2_costmap_2d/inflation_layer.hpp` with `InflationLayer()`; `Costmap2D::getCost(uint, uint)`, `mapToWorld(uint, uint, double &, double &)`, `worldToMap(double, double, uint &, uint &)`, `getOriginX/Y`, `getSizeInCellsX/Y`; CMake target `nav2_costmap_2d::layers` (alias at `CMakeLists.txt:94`). All present with these signatures. `Costmap2D::updateOrigin` and `LayeredCostmap::updateMap`'s rolling and bounds logic match `main`; `InflationLayer::onFootprintChanged` sets `need_reinflation_` and `updateBounds` then reports the whole map, as on `main`.
+
+### Statements for the pull request
+
+- **Shown on Rolling:** on a scratch copy carrying the port's changes (`feature/issue-52` at `8ab87bf`), built against the underlay's Nav2 install: each case above failing without its fix and passing with it, all `s57_layer` tests passing, 30/30 repeats.
+- **Jazzy:** Jazzy CI on this pull request is the first Jazzy compile and run; nothing was run on Jazzy locally. The Nav2 calls were checked against `origin/jazzy` by reading.
+- **For a vessel:** cells in the west and south edge strip of a rolling window that were free on the local costmap, or unknown on the global one, become lethal where the chart says so, with their inflation. Nothing that was marked becomes unmarked. A path or goal on charted land in that strip now fails to plan, which is correct. BEN leaves `allow_uncharted` at its default (true), so the uncharted case does not apply there.
+- **Not established:** that the odometry frame on the boat is `map`; whether the map is re-anchored in operation; anything on a vessel or with a planner.
+- **`lround`:** changes nothing at BEN's 0.5 m and 1.0 m resolutions (binary-exact).
+- **Combining with the port:** `git merge-tree` of this branch and `8ab87bf` merges with no conflict (the new test is registered after `test_plugin_loading`; the port inserts `test_initialize` before it; the `.cpp` hunks do not overlap; the port does not touch `s57_layer.h`). The merged tree builds and passes all `s57_layer` tests on Rolling (above). The new test already uses the port's `__has_include` switch. Whichever merges second rebases; the port's plan's "Found defect 2" becomes "fixed by #56".
+
+### Not done here
+
+- Defect A (cells exposed by a window move not repainted until a tile is invalidated) and defect B (no charts, `allow_uncharted: false`: newly entered tiles not marked) are not fixed or worked round. The uncharted test depends on B only in that it needs the inflation layer's whole-window bounds (said in its comment); the `lround` test would pass vacuously in a two-cycle form because of A (said in its comment). The other tests start from empty tiles in one cycle and are unaffected.
+- No push, no GitHub post. Scratch copy removed.
