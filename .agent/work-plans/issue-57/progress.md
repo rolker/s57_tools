@@ -715,3 +715,28 @@ Checked: `46ea9fb..76c15dd` changes README item 5 and comment lines above `choos
 **Decision**: publish
 
 Read: the Local Review (Pre-Push) round 4 at `76c15dd`, approved, nothing open. Fifteen code commits. The pull request's Jazzy CI job is the first Jazzy compile and run of this change and its tests.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-11-24 17:45 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+**Reviews-read**: none
+
+**PR**: #64 at `5df5bf4`
+**Sources**: 2 (Local Review (Pre-Push) round 4 @ `76c15dd`, covers head via bookkeeping; CI rollup). No pull-request review, inline comment or conversation comment exists (human, Copilot or bot).
+**Cross-source confirmations**: 0
+**CI**: all-pass
+
+### Findings
+- No open findings. Round 4 approved with none; nothing from rounds 1 to 3 is open.
+
+### CI record (Jazzy, first compile and run of the change)
+Run 45502369590 (pull_request, 2026-11-24T22:35Z); the job checked out `3c8e321`, "Merge 5df5bf4fdd013d1428feb34f0983f74d6bc5a08a into afa7403beb60c16e014b464507fcf26eeb9c07a7" (the head merged into `rolling`). `Starting >>> s57_layer` / `Finished <<< s57_layer [1min 1s]` in the build, so `s57_layer` was built from this branch on Jazzy; `PACKAGES:` lists s57_layer. The Rolling job (11 packages) does not build `s57_layer`, as the pull request body says.
+Tests: `6: [  PASSED  ] 28 tests.`; `6/9 Test #6: test_rolling_window ... Passed 4.06 sec`; `100% tests passed, 0 tests failed out of 9`; `Finished <<< s57_layer [6.45s]`; `Summary: 263 tests, 0 errors, 0 failures, 32 skipped`. All 28 test_rolling_window cases are `OK`: none failed, skipped or disabled (the 32 skips are in other packages). They are 11 RollingWindowTest, 11 MovingWindowTest and 6 WholeWindowTest, among them `WholeWindowTest.StationKeepingWithinOneCellNeverRepaintsTheWholeWindow`, `WholeWindowTest.StationKeepingWithinTwoCellsRepaintsTheWholeWindowAtThePredictedCycles`, `WholeWindowTest.JumpOfMoreThanATileRepaintsTheWholeWindowAndOfATileDoesNot`, `MovingWindowTest.ReversalPastTheStartEveryCellWithinOneCycle`, `WholeWindowTest.ReversalNeverRepaintsTheWholeWindow`, `WholeWindowTest.SharpDiagonalReversalRepaintsTheWholeWindowOnce`.
+Compiler warnings on Jazzy (GCC 13): none in `s57_layer.cpp`, `s57_layer.h` or `test_rolling_window.cpp`. The 47 `warning:` lines in the log are in `marine_charts` (`s57_catalog.cpp:55`), `geodesy`, `marine_autonomy` (`gz4d_geo.h`), `s57_to_geotiff`, `enc_updater` and `marine_bathymetry_store` tests, all outside this change. The test took 4.06 s on CI against 0.7 s locally.
+
+### Pull request body
+Unsupported: "This pull request's Jazzy CI job is the first Jazzy compile and run." states an intent, not the result. Replace with: "Jazzy CI (run 45502369590, on the merge `3c8e321` of this head into `rolling`): `s57_layer` built, all 28 `test_rolling_window` cases passed (4.06 s on CI), 9 of 9 `s57_layer` tests passed, and the compiler gave no warning in `s57_layer.cpp`, `s57_layer.h` or `test_rolling_window.cpp`. This was the first Jazzy compile and run of the change." No other statement checked against the CI run was found unsupported; the Rolling statement ("no CI job builds Nav2 source, so this package has no Rolling CI job") matches the Rolling log.
+
+### False positives
+- none
