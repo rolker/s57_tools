@@ -217,7 +217,8 @@ private:
   enum Strip {x_low, x_high, y_low, y_high, none, whole};
 
   // True when the next rolling cycle must report the whole window: no
-  // window has been seen yet, or reset() or matchSize() ran since.
+  // window has been seen yet, reset() or matchSize() ran since, or the
+  // layer was disabled for a cycle since (updateBounds).
   // last_window_ is meaningful only while this is false.
   bool whole_pending_ = true;
   // The window of the last rolling cycle, by its cell edges.

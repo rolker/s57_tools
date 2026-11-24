@@ -199,8 +199,10 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
   {
     // Defensive: the window moves on while this layer is disabled, so
     // last_window_ goes stale; repaint the whole window once it is enabled
-    // again. Unreachable today: enabled_ is read only in onInitialize, and
-    // no parameter callback changes it, so no test can reach this line.
+    // again. This line runs every cycle on a layer configured disabled, but
+    // its effect cannot be observed today: enabled_ is set only in
+    // onInitialize and no parameter callback changes it, so nothing
+    // re-enables the layer, and no test can see the repaint.
     whole_pending_ = true;
     return;
   }
@@ -444,7 +446,10 @@ bool S57Layer::recordUncovered(const Rect & window, double half_cell)
   // never moves this far: BEN's global costmap moves about 5 cells per
   // cycle at 5 m/s and its local one 2, against 100-cell tiles. A move past
   // the window (the test above) is such a jump too, unless a tile is as wide
-  // as the window; that test is kept for that case.
+  // as the window; that test is kept for that case. On a window no wider
+  // than a tile plus a cell (a 60-cell local costmap with the default
+  // 100-cell tiles) the test above always fires first, so this rule never
+  // decides there.
   const double tile = tile_size_*resolution_;
   if(std::abs(window.min_x - last_window_.min_x) > tile + half_cell ||
      std::abs(window.min_y - last_window_.min_y) > tile + half_cell)
