@@ -264,13 +264,100 @@ TEST_F(RollingWindowTest, UnchartedBelowOriginMarkedUnknown)
   EXPECT_TRUE(everyCellIs(*master, nav2_costmap_2d::NO_INFORMATION));
 }
 
+// One cycle of a 10 x 10 rolling window at 0.1 m whose layer origin is
+// (0, 0), with the robot at (robot_x, robot_y), compared cell by cell at the
+// same world point with an oracle over the same chart: a 20 x 20 window with
+// the same layer origin, so the same tiles, moved by one cycle with the robot
+// at (oracle_robot, oracle_robot) to an origin a whole number of cells from
+// the layer origin in floating point, so its own offset is exact and any
+// rounding of it is right.
+::testing::AssertionResult matchesOracle(
+  std::shared_ptr<grid_map::GridMap> chart, double oracle_robot, double oracle_origin,
+  double robot_x, double robot_y, double origin_x, double origin_y)
+{
+  auto node = std::make_shared<TestLifecycleNode>("test_rolling_window_offset");
+  node->declare_parameter("chart_layer.tile_size", 4);
+  auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+
+  nav2_costmap_2d::LayeredCostmap oracle_costmap("map", true, false);
+  oracle_costmap.resizeMap(20, 20, 0.1, 0.0, 0.0);
+  auto oracle_layer = std::make_shared<S57LayerForTest>();
+  oracle_costmap.addPlugin(oracle_layer);
+  oracle_layer->initialize(&oracle_costmap, "chart_layer", tf_buffer.get(), node, nullptr);
+  oracle_layer->addChart("coast", chart);
+  oracle_costmap.updateMap(oracle_robot, oracle_robot, 0.0);
+  auto * oracle = oracle_costmap.getCostmap();
+  if (oracle->getOriginX() != oracle_origin || oracle->getOriginY() != oracle_origin ||
+    oracle_origin / 0.1 != std::round(oracle_origin / 0.1))
+  {
+    return ::testing::AssertionFailure() << std::setprecision(17) <<
+           "oracle window origin is (" << oracle->getOriginX() << ", " << oracle->getOriginY() <<
+           "), not (" << oracle_origin << ", " << oracle_origin <<
+           ") or not a whole number of cells from the layer origin";
+  }
+
+  nav2_costmap_2d::LayeredCostmap rolling_costmap("map", true, false);
+  rolling_costmap.resizeMap(10, 10, 0.1, 0.0, 0.0);
+  auto rolling_layer = std::make_shared<S57LayerForTest>();
+  rolling_costmap.addPlugin(rolling_layer);
+  rolling_layer->initialize(&rolling_costmap, "chart_layer", tf_buffer.get(), node, nullptr);
+  rolling_layer->addChart("coast", chart);
+  rolling_costmap.updateMap(robot_x, robot_y, 0.0);
+  auto * master = rolling_costmap.getCostmap();
+
+  // The origin the case relies on; without it the test would pass vacuously.
+  if (master->getOriginX() != origin_x || master->getOriginY() != origin_y) {
+    return ::testing::AssertionFailure() << std::setprecision(17) << "window origin is (" <<
+           master->getOriginX() << ", " << master->getOriginY() << "), not (" << origin_x <<
+           ", " << origin_y << ")";
+  }
+
+  unsigned int wrong = 0, oracle_land = 0, oracle_water = 0;
+  std::ostringstream first;
+  for (unsigned int j = 0; j < master->getSizeInCellsY(); j++) {
+    for (unsigned int i = 0; i < master->getSizeInCellsX(); i++) {
+      double wx, wy;
+      master->mapToWorld(i, j, wx, wy);
+      unsigned int oi, oj;
+      if (!oracle->worldToMap(wx, wy, oi, oj)) {
+        return ::testing::AssertionFailure() << "cell (" << i << ", " << j << ") centred at (" <<
+               wx << ", " << wy << ") is outside the oracle";
+      }
+      unsigned char cost = master->getCost(i, j);
+      unsigned char expected = oracle->getCost(oi, oj);
+      oracle_land += expected == nav2_costmap_2d::LETHAL_OBSTACLE;
+      oracle_water += expected == nav2_costmap_2d::FREE_SPACE;
+      if (cost != expected) {
+        if (wrong == 0) {
+          first << "first wrong cell (" << i << ", " << j << ") centred at (" << wx << ", " <<
+            wy << ") has cost " << static_cast<int>(cost) << " where the oracle has " <<
+            static_cast<int>(expected);
+        }
+        wrong++;
+      }
+    }
+  }
+  // The oracle runs the same layer code: it must show the coast, or a
+  // comparison of two unpainted windows would pass.
+  if (oracle_land == 0 || oracle_water == 0) {
+    return ::testing::AssertionFailure() << "the oracle shows " << oracle_land <<
+           " land and " << oracle_water << " water cells under the window, not a coast";
+  }
+  if (wrong == 0) {
+    return ::testing::AssertionSuccess();
+  }
+  return ::testing::AssertionFailure() << wrong <<
+         " of 100 cells differ from the oracle; window origin (" <<
+         std::setprecision(17) << master->getOriginX() << ", " << master->getOriginY() << "); " <<
+         first.str();
+}
+
 // The master-to-layer cell offset at a resolution that is not binary-exact.
 // At 0.1 m, moving the window from 0 towards 0.35 (0.375 on Jazzy, see the
 // size formulas above; both truncate to 3 cells) puts its origin at
 // 0 + 3*0.1 = 0.30000000000000004, so the offset of the tile above it is
 // -0.9999999999999996 cells, which truncates to 0 and copies that tile one
-// cell west. The oracle is a window that never moved, over the same chart
-// with the same layer origin, compared cell by cell at the same world point.
+// cell west. The oracle's origin is 0, where it starts.
 // This must stay one cycle, painting in the cycle that moves the window:
 // painted at origin 0 first, the cells a later move exposes are not repainted
 // at all (a separate defect), so a two-cycle version passes without the fix.
@@ -280,56 +367,27 @@ TEST_F(RollingWindowTest, NonBinaryResolutionOffsetRoundsToNearestCell)
   // elsewhere, so a shift of one cell shows at a coast in two tiles.
   auto coast = makeChartGrid(
     1.0, 1.0, 4.0, 0.1, [](double x, double) {return x < 0.6 || (x > 0.9 && x < 1.0);});
+  EXPECT_TRUE(matchesOracle(coast, 1.0, 0.0, 0.85, 0.5, 0.30000000000000004, 0.0));
+}
 
-  auto node = std::make_shared<TestLifecycleNode>("test_rolling_window_offset");
-  node->declare_parameter("chart_layer.tile_size", 4);
-  auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
-
-  nav2_costmap_2d::LayeredCostmap oracle_costmap("map", false, false);
-  oracle_costmap.resizeMap(20, 20, 0.1, 0.0, 0.0);
-  auto oracle_layer = std::make_shared<S57LayerForTest>();
-  oracle_costmap.addPlugin(oracle_layer);
-  oracle_layer->initialize(&oracle_costmap, "chart_layer", tf_buffer.get(), node, nullptr);
-  oracle_layer->addChart("coast", coast);
-  oracle_costmap.updateMap(1.0, 1.0, 0.0);
-  auto * oracle = oracle_costmap.getCostmap();
-
-  nav2_costmap_2d::LayeredCostmap rolling_costmap("map", true, false);
-  rolling_costmap.resizeMap(10, 10, 0.1, 0.0, 0.0);
-  auto rolling_layer = std::make_shared<S57LayerForTest>();
-  rolling_costmap.addPlugin(rolling_layer);
-  rolling_layer->initialize(&rolling_costmap, "chart_layer", tf_buffer.get(), node, nullptr);
-  rolling_layer->addChart("coast", coast);
-  rolling_costmap.updateMap(0.85, 0.5, 0.0);
-  auto * master = rolling_costmap.getCostmap();
-
-  // The origin this case relies on; without it the test would pass vacuously.
-  ASSERT_EQ(master->getOriginX(), 0.30000000000000004);
-  ASSERT_EQ(master->getOriginY(), 0.0);
-
-  unsigned int wrong = 0;
-  std::ostringstream first;
-  for (unsigned int j = 0; j < master->getSizeInCellsY(); j++) {
-    for (unsigned int i = 0; i < master->getSizeInCellsX(); i++) {
-      double wx, wy;
-      master->mapToWorld(i, j, wx, wy);
-      unsigned int oi, oj;
-      ASSERT_TRUE(oracle->worldToMap(wx, wy, oi, oj));
-      unsigned char cost = master->getCost(i, j);
-      unsigned char expected = oracle->getCost(oi, oj);
-      if (cost != expected) {
-        if (wrong == 0) {
-          first << "first wrong cell (" << i << ", " << j << ") centred at (" << wx << ", " <<
-            wy << ") has cost " << static_cast<int>(cost) << " where the unmoved window has " <<
-            static_cast<int>(expected);
-        }
-        wrong++;
-      }
-    }
-  }
-  EXPECT_EQ(wrong, 0u) << wrong << " of 100 cells differ from the unmoved window; window origin (" <<
-    std::setprecision(17) << master->getOriginX() << ", " << master->getOriginY() << "); " <<
-    first.str();
+// The same on both axes below the layer origin, so the y offset and a
+// negative one are rounded too. With the robot at (0.14, 0.14) the window
+// asks for -0.36 (Rolling) or -0.335 (Jazzy), both 3 cells below 0, and its
+// origin is 0 + -3*0.1 = -0.30000000000000004 on both axes. The offset of
+// the tile below 0 (tile -1) is then 4 - 3.0000000000000004 =
+// 0.9999999999999996 cells, which truncates to 0 and copies that tile one
+// cell east and north. The other tiles in the window have offsets that
+// truncate correctly. One cycle, for the reason above. The oracle's robot at
+// -0.06 puts its origin at -1.0 on both distros (-1.06 and -1.035 both
+// truncate to -10 cells), and -1.0 / 0.1 is exactly -10.
+TEST_F(RollingWindowTest, NegativeNonBinaryOffsetRoundsToNearestCellOnBothAxes)
+{
+  // Land west of -0.1 m and south of -0.1 m, 10 m of water elsewhere, so a
+  // shift of one cell shows at the coast inside tile -1 on either axis.
+  auto coast = makeChartGrid(
+    0.0, 0.0, 4.0, 0.1, [](double x, double y) {return x < -0.1 || y < -0.1;});
+  EXPECT_TRUE(
+    matchesOracle(coast, -0.06, -1.0, 0.14, 0.14, -0.30000000000000004, -0.30000000000000004));
 }
 
 }  // namespace
