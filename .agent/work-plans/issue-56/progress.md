@@ -377,3 +377,66 @@ Port head read from the shared object store, no fetch: `feature/issue-52` = `ori
 
 - `generateTile`'s first-writer rule at non-binary resolutions (a chart cell can claim a neighbouring layer cell depending on floating-point rounding of the tile origin), seen while building the oracle: pre-existing, not changed, for the owner alongside the review's other `generateTile` note.
 - Checks: the `s57_layer` suite above; no workspace script changed, so no script suite applies. No push, no GitHub post. Scratch workspaces removed.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-11-24 12:28 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: approved
+
+**Branch**: feature/issue-56 at `9d842da` (code head `229c4c4`)
+**Base**: origin/rolling
+**Depth**: Standard (reason: whole-branch classification as in round 1; this round's change, `a5b2294..229c4c4`, is test-only)
+**Must-fix**: 0 | **Suggestions**: 1
+**Round**: 2 | **Ship**: recommended — no must-fix findings; the remaining suggestion corrects the record and raises a pre-existing defect
+
+Reviewers: Claude adversarial (fresh subagent, read-only) completed: no must-fix. Gemini and Codex (`cross_model_review.sh --branch origin/rolling`) completed. Their findings were judged and dropped: an `int` overflow of the cell offset needs about 10^9 m of travel; the uncharted test's reliance on the inflation layer was settled in round 1 and is stated in its comment; the plan and progress files travelling in the PR is the workflow; and there were style nits. The prompt and findings files were removed from the tree.
+
+### Findings
+- [ ] (suggestion) The implementation entry explains the disagreement with a different-tile oracle as a first-writer effect that "depends on floating-point rounding" at 0.1 m, with "the edges exact" at 0.5 and 1.0 m. That explanation is incomplete, and the pull request should not repeat it.
+  - **What actually happens.** `Costmap2D::worldToMapEnforceBounds` clamps only when `wx > origin + size*res`, with a strict comparison. That is the same on Jazzy and Rolling. So a chart cell whose far edge lies exactly on a tile's east or north edge gets index `tile_size`, one past the last cell. `generateTile` then reads and writes the tile through `getCost` and `setCost` at that index.
+    - On the east edge, the write lands in the first cell of the next row. That cell takes its cost from a cell a whole tile width away: up to 49.5 m at BEN's 0.5 m local resolution with 100-cell tiles.
+    - In the top row, the read goes past the end of the tile's buffer. If the byte there happens to equal 255, the write goes past the end too.
+  - **When.** At every resolution, whenever chart-cell edges line up with tile edges.
+  - **Evidence (scratch).**
+    - A probe at 1.0 m with the layer origin at 0 paints 9 of 400 cells wrong, in the first column of each tile.
+    - Bounds-checking copies of `getCost`/`setCost` were linked into the test executable. They show two committed tests, `AboveOriginControl` and `NonBinaryResolutionOffsetRoundsToNearestCell`, making out-of-range calls: 272 reads and 48 writes (176 reads past the buffer end) in the first, and 318 reads and 54 writes (206 reads past the end) in the second.
+    - ASan cannot see this, because the accesses are inside Nav2's uninstrumented library. That may be why round 1's ASan run was clean while its tile-size-100 harness occasionally crashed.
+    - With 4-cell tiles the reads stay inside the 16-byte buffer's malloc slack, so the committed tests are not at practical risk.
+  - **Status.** Pre-existing: this branch does not change it, and no issue covers it. How often chart and tile edges coincide with real chart grids is not established. Correct the record, and raise it with the owner as a new issue. — `.agent/work-plans/issue-56/progress.md` (Implementation: "y and negative-origin coverage", "Not done here")
+
+### Round-1 items
+- **Must-fix (Jazzy origins): closed.**
+  - Python replay of `updateMap` and `updateOrigin` for both size formulas: all 11 robot positions give the same origin on both distros. This covers the 0.1 m doubles, 0.30000000000000004 and -0.30000000000000004, and both oracles at 0 and -1.0.
+  - Shim repeated. `libnav2_costmap_2d_core` has no `DT_SYMBOLIC`. `updateMap` calls `getSizeInMetersX/Y` through the PLT (`R_X86_64_JUMP_SLOT`), and so does `libs57_layer`. The executable exports both functions, so the executable's definitions are the ones called.
+  - The `a5b2294` test file under the shim fails 5 of 8 with exactly the predicted origins. The new file passes 9 of 9 with and without the shim.
+- **Suggestion (y and negative coverage): closed** by `NegativeNonBinaryOffsetRoundsToNearestCellOnBothAxes`.
+- **Suggestion (PR statements): closed.** The port head has since moved to `cd4aa27` (a comment-only change to `grid_publisher.cpp`), so the statement naming `454ae59` should name `cd4aa27`. It was verified against `cd4aa27` here.
+
+### Verified (Rolling scratch copy, outside the tree)
+- **Source unchanged.** `s57_layer.cpp` and `s57_layer.h` are unchanged since `a5b2294`.
+- **Build.**
+  - Merged tree: `git merge-tree --write-tree 229c4c4 cd4aa27` gives `41a2bb6`, no conflict.
+  - Built in Release against `/opt/ros/rolling` and the underlay and core installs.
+  - `colcon test` for `s57_layer`: "61 tests, 0 errors, 0 failures, 8 skipped".
+  - `test_rolling_window` ran 50 times with 0 failures.
+  - `ldd`: `libs57_layer.so` resolves to the scratch install; `libnav2_costmap_2d_core.so` and `liblayers.so` resolve to the underlay.
+- **Teeth.** Each fix was reverted separately; the Rolling build and the Jazzy shim give identical results:
+
+  | Reverted | Cases that fail | Cases that pass |
+  |---|---|---|
+  | `floor`, both axes | 7: the six 1 m below-origin cases (including uncharted) and the negative 0.1 m case | the control and the 0.1 m x case |
+  | `floor`, x only | 6 | 3 |
+  | `floor`, y only | 6 | 3 |
+  | `lround`, both axes | the 0.1 m x case (10 of 100 cells) and the negative case (17 of 100) | all others |
+  | `lround`, x only | the 0.1 m x case (10) and the negative case (9) | all others |
+  | `lround`, y only | the negative case (9) | all others |
+  | neither | 8 | the control |
+
+  Every part of each fix has a case that fails without it.
+- **Nav2 by reading, `origin/jazzy` against Rolling.** `updateOrigin`, `worldToMapEnforceBounds`, `InflationLayer::updateBounds` with `need_reinflation_`, and `onFootprintChanged` all set the same bounds. `updateMap`'s reset and paint region is the same. Jazzy's early return on empty bounds does not apply.
+- **Oracle.** It shares the tiles, and so `generateTile`, with the window under test. So it checks the master-to-tile offset only, and its own offsets are exact. That is what the tests claim, so it is adequate for that purpose.
+- **Jazzy compile, by reading.** The new code calls only gtest `AssertionResult`, `std::round`/`std::setprecision` (both headers included) and `Costmap2D::worldToMap`/`getOriginX`, all present on Jazzy.
+- **Hygiene.**
+  - `285a116` and `229c4c4` touch no `.agent/` file, and their messages end "Backport to jazzy.".
+  - `ce8fd8d`, `a5b2294`, `285a116` and `229c4c4` cherry-pick in order onto `origin/jazzy` (`89b552d`) with no conflict. The result's `s57_layer` is identical to the branch's.
