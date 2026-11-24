@@ -156,8 +156,8 @@ void S57Layer::matchSize()
 
 S57Layer::TileID S57Layer::worldToTile(double x, double y)
 {
-  int ix = (x - x_origin_)/resolution_/tile_size_;
-  int iy = (y - y_origin_)/resolution_/tile_size_;
+  int ix = static_cast<int>(std::floor((x - x_origin_)/resolution_/tile_size_));
+  int iy = static_cast<int>(std::floor((y - y_origin_)/resolution_/tile_size_));
   return std::make_pair(ix, iy);
 }
 
