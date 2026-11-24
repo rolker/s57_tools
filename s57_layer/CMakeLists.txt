@@ -25,18 +25,31 @@ add_library(${PROJECT_NAME} SHARED
 )
 add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
 
-ament_target_dependencies(${PROJECT_NAME}
-  geodesy
-  grid_map_ros
+# geodesy and grid_map_ros export no CMake target, only include directories
+# and libraries, so use their variables. geodesy's headers are included only
+# from src/s57_layer.cpp, hence PRIVATE; grid_map's are included from
+# src/s57_layer.h, hence PUBLIC, as s57_grids links grid_map_ros.
+target_include_directories(${PROJECT_NAME}
+  PUBLIC
+    ${grid_map_ros_INCLUDE_DIRS}
+  PRIVATE
+    ${geodesy_INCLUDE_DIRS}
 )
 
+# PUBLIC: every library this target linked before, plus grid_map_ros, so the
+# exported interface does not change. PRIVATE: geodesy's static geoconv
+# library, linked into the plugin and kept out of the exported link interface.
 target_link_libraries(${PROJECT_NAME}
+  PUBLIC
     ${geometry_msgs_TARGETS}
+    ${grid_map_ros_LIBRARIES}
     s57_grids::s57_grids
     nav2_costmap_2d::nav2_costmap_2d_core
     rclcpp::rclcpp
     ${s57_msgs_TARGETS}
     tf2_geometry_msgs::tf2_geometry_msgs
+  PRIVATE
+    ${geodesy_LIBRARIES}
 )
 
 install(
