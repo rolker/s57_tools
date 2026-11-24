@@ -688,3 +688,20 @@ Read: the Local Review (Pre-Push) round 3 at `46ea9fb`: one must-fix, one sugges
 
 ### Checks
 Project pass: no `conventions=` hook rule, so every commit ran the repository's pre-commit hooks; none skipped, no `--no-verify`. Nothing pushed, nothing posted.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-11-24 17:35 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+**Verdict**: approved
+
+**Branch**: feature/issue-57 at `76c15dd`
+**Base**: rolling
+**Depth**: Standard (reason: round 4 words-against-code check per handoff; no cross-model reviewers, no adversarial subagent, no builds)
+**Must-fix**: 0 | **Suggestions**: 0
+**Round**: 4 | **Ship**: recommended — no must-fix; the round-3 must-fix is corrected
+
+### Findings
+- [ ] No issues found. LGTM.
+
+Checked: `46ea9fb..76c15dd` changes README item 5 and comment lines above `chooseStrip` only (no code line); no `.agent/` file; message ends "Backport to jazzy.". `chooseStrip` reports whole only when 2 or more pending strips have age >= 2, so the new sentences (never on 2 origins per axis; wider jitter can) agree with it and `recordUncovered`, and with the tests (within one cell: 2 origins, none; two cells: 4 origins, whole at pinned cycles). No remaining "under 2 cells" claim in README, source or tests. The newest Implementation entry's figures (2 to 3% of updates report, 5 to 9% repainted with inflation, 0.3 to 0.4 s) are consistent with each other and the README (which says about 0.3 s).
