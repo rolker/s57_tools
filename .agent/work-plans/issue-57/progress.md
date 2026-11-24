@@ -740,3 +740,13 @@ Unsupported: "This pull request's Jazzy CI job is the first Jazzy compile and ru
 
 ### False positives
 - none
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 18:15 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: owner
+**After**: merge
+**Decision**: merge
+
+The owner, 2026-11-24, asked whether to merge pull request 64 with the decision summary in the dialog (the design, the later-marking trade he confirmed, the whole-window limit under position jitter of more than one cell per update, the evidence and what is not shown): "Merge, then prepare the backport (Recommended)". The fifteen code commits are then backported to `jazzy` by hand and that pull request is brought to him with its CI result before it is merged.
