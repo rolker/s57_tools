@@ -104,3 +104,61 @@ Read: the Issue Review, status complete. Scope stands: `std::floor` in `S57Layer
 **Plan**: `.agent/work-plans/issue-56/plan.md` at `dde57e4`
 
 Two commits: `std::floor` in `worldToTile` with a rolling-window test (six cases, every cell asserted; an exact tile multiple is not a control because `updateCosts` looks up cell centres), then `lround` for the master-to-layer offset at 469/474 with a 0.1 m test that shows land shown free without it. Each case was shown failing without its fix and passing with it on a Rolling scratch copy carrying the port's changes; Jazzy is CI only. Two further defects found (exposed cells not repainted after a move; empty chart list sets no needs_update) are left to the host.
+
+## Plan Review
+**Status**: complete
+**When**: 2026-11-24 11:24 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: ready
+
+**Issue**: #56 — s57_layer leaves the west and south edge of a rolling costmap unmarked (worldToTile rounds toward zero)
+**Plan**: `.agent/work-plans/issue-56/plan.md` at `dde57e4`
+**Branch**: `feature/issue-56`
+
+Independent scratch run: a package of my own in the session scratchpad compiling the port's `s57_layer.cpp` at `02d7617` (feature/issue-52, the port's code commits) three ways (as is, `floor` only, `floor` + `lround`) into a test executable with Rolling Nav2's `LayeredCostmap` and `InflationLayer` (`ldd`: underlay `libnav2_costmap_2d_core.so` and `liblayers.so`; the layer is compiled into the binary, so no installed `libs57_layer.so` can shadow it).
+
+### Evaluation
+
+| Dimension | Verdict | Notes |
+|---|---|---|
+| Scope | Good | Two conversions, one test file, three header members, one CMake target; two commits, each one fix. Defects A and B reported, not fixed |
+| Issue alignment | Good | Covers the issue and every issue-review action (floor, optional `lround` with a failing test, `map_tide` correction, Rolling verification via scratch, Jazzy CI as first real run). Serves: "None (the project states no goals). It fixes charted hazards missing from the costmap, the purpose of `s57_layer`." Correct for a project without goals |
+| File targeting | Good | `s57_layer.cpp`, `s57_layer.h`, new test, `CMakeLists.txt`. No README change needed |
+| Consequences | Needs work | Defect A's description understates the serious case (finding 2); defect B's overstates it for BEN (finding 3) |
+| Principle alignment | Good | Each fix has a test that fails without it (reproduced independently, below). Prior art (`bathymetry_layer` `floor`/`lround`) taken. Design picture: no change, stated |
+| ADR compliance | Good | No workspace ADR triggered (project bug fix) |
+| ROS conventions | Good | Test drives Nav2's own `LayeredCostmap::updateMap`; `__has_include` switch as the port's tests have it |
+
+### Independent checks
+
+- **#56 cases, through `updateMap`** (10 x 10 at 1 m, tile 4, all land): as is, robot (0,0) 19 wrong, (0,20) 10, (20,0) 10, (-3,-3) origin (-8,-8) 64, (20,20) 0; also (-3.5,-3.5) 64 and (-1000.25,-2000.75) 19. With `floor`, 0 in every case. The planner's correction stands: an exact tile multiple is not a control.
+- **Class of defect.** `worldToTile` has two callers (`updateBounds` with the window edges, `updateCosts` with cell centres of `min_i` and the exclusive `max_i`); every other tile-id use is `origin + id*res*tile`, correct for negative ids. The copy offsets with `start_i`/`i_count` handle a negative tile correctly. Edge rounding: by reading, if floating-point error puts the window's right or top edge just below a tile boundary, `updateCosts`' end cell centre lands one tile above `updateBounds`' end tile; `tiles_[tile]` then default-constructs that tile (`complete = false`), which holds `current_` false. This is the same with or without `floor`, needs an edge within an ulp of a boundary, and was not run; outside #56.
+- **`lround`.** Reproduced: 10 x 10 at 0.1 m, one `updateMap(0.85, 0.5)` gives origin `0.30000000000000004`; against an unmoved 20 x 20 oracle, `floor` only gives 10 of 100 wrong, first (1,0) cost 0 where 254 is expected; with `lround`, 0. The offset `(master_origin - x_origin_)/res` is an integer number of cells by construction (`updateOrigin` keeps the grid aligned and `matchSize` re-takes the origin on every resize), so it is never legitimately half-way; `lround` is right for both signs, and equals truncation whenever truncation was right. Same as `bathymetry_layer.cpp:1190-1215` (which multiplies by `1/res`; immaterial). BEN's 0.5 and 1.0 m keep every origin an exact multiple, so nothing changes on BEN. The test's double is IEEE-deterministic (`0.85-0.5` is exact, `/0.1` gives `3.4999999999999996`, `0 + 3*0.1` is the same with or without FMA contraction), and the origin assertion stops it passing vacuously.
+- **Nav2 Jazzy API.** `origin/jazzy` `LayeredCostmap(std::string, bool, bool)`, `addPlugin(std::shared_ptr<Layer>)`, `updateMap(x, y, yaw)` are the same as `main`; `Layer::initialize` takes `nav2_util::LifecycleNode::WeakPtr` there, which the switch provides. `updateOrigin` arithmetic is identical.
+- **`map_tide`.** `mru_transform.cpp:165-181` anchors `map` at the first fix unless an origin is configured; `sea_surface_estimator.hpp:367-372` publishes `map_tide` as a z-only translation of the odometry header frame. As the plan states; the plan's list of what stays unestablished is right.
+
+### Findings
+
+1. **[Principle alignment — Test what breaks] Low.** The uncharted case's premise is too narrow. "A real `updateMap` cycle marks nothing" holds only for a costmap without an inflation layer. `Costmap2DROS::on_configure` calls `setRobotFootprint` after the plugins initialise, `InflationLayer::onFootprintChanged` sets `need_reinflation_`, and the first `updateMap` then passes the whole window to every layer's `updateCosts`. Scratch: allow_uncharted false, no charts, `LayeredCostmap` + `InflationLayer` + `setFootprint`, one `updateMap`: 100 of 100 `NO_INFORMATION` (0 of 100 without the inflation layer). So the direct `updateBounds`/`updateCosts` call asserts what production does on its first cycle on both BEN costmaps; it is not pinning a behaviour production never shows. Resolution: drive that case through `updateMap` with an `InflationLayer` and `setFootprint` (Nav2's production path), or say in the test's comment which production cycle the direct call stands for.
+2. **[Consequences — defect A] High, for the owner; not blocking this plan.** Defect A is real, and its serious form is not the one the plan describes. Mechanism: `updateOrigin` fills newly exposed cells with the default; `S57Layer::updateBounds` reports only tiles with `needs_update`, and a tile already in `tiles_` never gets it again except through tide (> 1 cm), chart-set change or `reset()`. Stock rolling layers report the whole window every cycle (`StaticLayer::updateBounds` rolling branch; `bathymetry_layer.cpp:896-901` likewise). The plan says the inflation layer "only re-expands bounds the layer already reported"; it also merges the previous cycle's bounds and adds its radius. Scratch, all-land chart, tile 4 m:
+   - No inflation: moving east 1 m per step, unpainted columns accumulate (60 of 100 after 8 m).
+   - Inflation radius 2 m (< tile): a column stays unpainted permanently.
+   - Inflation radius 6 m (≥ tile, like BEN: 150 m against 50 m local and 100 m global tiles): the band at the leading edge grows up to one tile less one cell, then is repainted when the window enters a new tile column.
+   - **Reversal with inflation 6 m and a footprint set:** 10 m east, then back west: the retraced window reaches 100 of 100 cells free on an all-land chart, and stays so until the window enters a tile column never seen before.
+   On BEN this means: travelling straight, an unpainted band up to 50 m deep at 125-175 m ahead in the local costmap (and up to 100 m at 2400-2500 m in the global), repainted every tile width of travel. On any return into ground already seen (survey lines longer than half the local window, a reversal), the local costmap shows `FREE_SPACE` on charted land over the re-entered area. The global costmap is affected only where an area left its 5000 m window and came back; it then shows `NO_INFORMATION`, which `allow_unknown: true` plans through. Not established: how often the sea-surface average moves more than 1 cm on BEN (each such move repaints the window, so frequent tide jitter would mask A), and whether BEN's controller consults the local costmap for collision. Resolution: the host reports A to the owner as its own issue, and states that it may be more serious than #56. It does not change this plan's tests (each starts from empty tiles in one cycle).
+3. **[Consequences — defect B] Low.** Real as described in a bare `LayeredCostmap`, narrower in production. On a `Costmap2DROS` with an inflation layer, the first cycle paints the whole window (finding 1), and a later empty chart response invalidates every tile (`getDatasetsCallback:721-729` sets `needs_update`), so those tiles are painted unknown. What remains is tiles that first enter the window after that, with `allow_uncharted: false`: they are never painted (the tile mechanism of defect A). With `track_unknown_space: true` their default is already `NO_INFORMATION`, so B shows only with `track_unknown_space: false`. BEN sets no `allow_uncharted` (default true), so B does not apply to BEN at all. Resolution: correct the plan's B description in the record the host passes to the owner.
+4. **[Principle alignment — Test what breaks] Low.** The `lround` test fails without the fix only because it paints in the cycle that moves the window. A two-cycle version (paint at origin 0, then move to 0.3) passes without `lround` (0 of 400 wrong in scratch), because defect A means the moved cells are never repainted. Resolution: keep the single-cycle structure and say in the test comment why it must stay single-cycle.
+5. **[Consequences — vessel] Info.** The plan's "they become unknown where `allow_uncharted: false` and there is no chart" does not apply on BEN (default true). The rest of the vessel statement stands: newly lethal cells in the west/south strip and their inflation (at cost_scaling 0.05 the inflation cost is about 21 at 50 m and under 1 at 150 m); a mission whose path or goal is on charted land in that strip now fails to plan where it used to plan through, which is the correct outcome; nothing previously marked becomes unmarked.
+6. **[File targeting — CMake] Info.** The port inserts `test_initialize` between the `test_depth_costs` and `test_plugin_loading` blocks. The conflict is in that one place, as the plan says; registering the new test after `test_plugin_loading` may avoid even that. The port's `.cpp` hunks (`@@ -7`, `-32`, `-121`, `-652`) do not touch lines 159-160, 469 or 474, and it does not touch `s57_layer.h`.
+
+### Summary
+
+The plan is correct and ready: the `floor` fix is complete for the defect class, the `lround` fix is right for every sign and does nothing on BEN, and both tests fail without their fix (reproduced independently on Rolling). The findings are refinements to one test's framing and, more importantly, to the record of defect A, which is real and has a re-entry form that leaves the local costmap free on charted land.
+
+### Recommended Actions
+
+- [ ] Drive the uncharted case through `updateMap` with an `InflationLayer` and `setFootprint`, or comment which production cycle the direct call stands for (finding 1)
+- [ ] Comment in the `lround` test why it must paint in the cycle that moves the window (finding 4)
+- [ ] Host: report defect A to the owner as its own issue, with the re-entry case and the unestablished tide-repaint frequency (finding 2)
+- [ ] Host: correct defect B's description for the owner: not applicable on BEN; only for tiles entering later with `allow_uncharted: false` and `track_unknown_space: false` (finding 3)
+- [ ] Optionally register the new test after `test_plugin_loading` (finding 6)
