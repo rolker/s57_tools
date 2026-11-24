@@ -84,6 +84,21 @@ if(BUILD_TESTING)
   # the iso8211 sources are vendored from GDAL and use upstream style
   set(ament_cmake_uncrustify_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  # Reads NOAA's CATALOG.031 through the vendored ISO 8211 reader; see
+  # test/data/README.md for the fixture's source and terms.
+  ament_add_gtest(test_s57_catalog test/test_s57_catalog.cpp)
+  target_compile_definitions(test_s57_catalog PRIVATE
+    TEST_ENC_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/test/data/enc_root")
+  # The public headers include geographic_msgs, geometry_msgs and tf2_ros,
+  # which the library links PRIVATE, so the test names them itself.
+  target_link_libraries(test_s57_catalog
+    ${PROJECT_NAME}
+    ${geographic_msgs_TARGETS}
+    ${geometry_msgs_TARGETS}
+    tf2_ros::tf2_ros
+  )
 endif()
 
 ament_package()

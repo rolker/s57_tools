@@ -1,73 +1,352 @@
+# CI for s57_tools. The same file is carried on the rolling and jazzy
+# branches; pushes and pull requests to either run it.
+#
+# Job "jazzy" builds and tests all six packages: s57_msgs, marine_charts,
+# s57_to_geotiff, enc_updater, s57_grids and s57_layer. grid_map_core,
+# grid_map_ros and the Nav2 packages s57_grids and s57_layer need come from
+# Jazzy's apt binaries through rosdep.
+#
+# Job "rolling" builds and tests four of the six: s57_msgs, marine_charts,
+# s57_to_geotiff and enc_updater. s57_grids needs grid_map_ros, which pulls in
+# nav2_msgs, and s57_layer needs nav2_costmap_2d; Nav2 is not released for
+# Rolling, and no CI job here builds Nav2 from source, so those two are
+# checked on Rolling by hand. A guard step fails the job if Nav2 source,
+# grid_map_ros or bathymetry_layer enters the build (is a package on disk in
+# the four packages' --packages-up-to closure), or if any package in that
+# closure declares a nav2_* rosdep key.
+#
+# The workspace is this checkout plus source dependencies that are not rosdep
+# keys:
+#
+# - rolker/unh_marine_autonomy, a shallow clone of the whole repository at the
+#   job's distro branch (jazzy or rolling), not a pinned commit: accepted, as
+#   in mru_transform's and unh_marine_simulation's CI. s57_to_geotiff and
+#   enc_updater take marine_autonomy, marine_interfaces,
+#   marine_tiled_raster_store, marine_vertical_datum and
+#   marine_bathymetry_store from it. The whole repository is cloned rather
+#   than those five folders so that a new internal dependency joins the
+#   --packages-up-to closure instead of breaking the job; the other packages
+#   sit on disk outside the closure and are not built.
+# - geodesy (jazzy job only; s57_layer includes geodesy/ecef.h), from
+#   geographic_info cloned at commit f70b81a, which is tag 1.0.7 plus the one
+#   upstream fix after it ("Adding missing include for setprecision", #64).
+#   Jazzy's released geodesy is 1.0.6 and has no ecef.h. COLCON_IGNORE in the
+#   clone's geographic_msgs and geographic_info folders leaves only geodesy
+#   visible to colcon and rosdep, so the released geographic_msgs is used.
+# - grid_map (rolling job only), cloned at commit 0ece1b5 (tag 2.5.0):
+#   grid_map_core is not released for Rolling. The closure takes only
+#   grid_map_core and grid_map_cmake_helpers from it.
+#
+# rosdep is given only the paths of the build step's --packages-up-to
+# closure, taken from colcon list, with no -r: a key that does not install
+# fails the job. The test step does not source install/setup.bash: colcon
+# test gives each package the environment of its declared workspace
+# dependencies only, so a missing workspace test_depend fails here instead of
+# being hidden by the whole overlay.
+#
+# The step "Python tests ran" fails the job if enc_updater ran no Python
+# test. With tests_require in setup.py, newer setuptools hides pytest from
+# colcon, which then runs nothing; the test step alone would not say so. It
+# counts tests minus skipped minus errors: colcon writes a placeholder
+# pytest.xml (1 test, 1 error) before pytest runs, and that must not read as
+# one test that ran.
+#
+# Each job's PACKAGES names the packages every colcon command selects; no
+# colcon command runs without a selector.
+#
+# The rolling job runs ament_xmllint on enc_updater/package.xml by hand:
+# enc_updater runs no xmllint test of its own, and Rolling's stricter
+# manifest schema is a known port failure.
+#
+# Job "rolling" is skipped for pull requests to and pushes on jazzy
+# (github.base_ref is the target branch of a pull request; github.ref_name is
+# the pushed branch), so on the jazzy branch this file runs the jazzy job
+# only.
+
 name: CI
 
 on:
   push:
-    branches: [jazzy]
+    branches: [rolling, jazzy]
   pull_request:
-    branches: [jazzy]
+    branches: [rolling, jazzy]
 
 jobs:
-  build-and-test:
+  jazzy:
+    name: build-and-test (jazzy)
+    # The container supplies the distro's OS; the host runner only runs it.
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     container:
       image: ros:jazzy-ros-core
+    env:
+      PACKAGES: s57_msgs marine_charts s57_to_geotiff enc_updater s57_grids s57_layer
 
     steps:
       - name: Update apt
         run: apt-get update
 
       - name: Install ros dev tools
-        run: DEBIAN_FRONTEND=noninteractive apt-get -y install ros-dev-tools
+        run: DEBIAN_FRONTEND=noninteractive apt-get -y install ros-dev-tools git
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Init rosdep
-        run: rosdep init
+        run: |
+          if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
+            rosdep init
+          fi
 
       - name: Update rosdep
         run: rosdep update
 
       - name: Create workspace
-        run: mkdir -p ../ws/src && ln -s $GITHUB_WORKSPACE ../ws/src/s57_tools
+        run: mkdir -p ../ws/src && ln -s "$GITHUB_WORKSPACE" ../ws/src/s57_tools
 
-      # TODO: Remove once geodesy is released to the rosdep index for Jazzy.
-      # geodesy is a build dependency of s57_layer but has no rosdep key yet.
-      - name: Clone geographic_info (unreleased geodesy dependency)
+      - name: Clone geographic_info at f70b81a for geodesy
+        working-directory: ../ws
+        run: |
+          git init src/geographic_info
+          cd src/geographic_info
+          git remote add origin https://github.com/ros-geographic-info/geographic_info.git
+          git fetch --depth 1 origin f70b81a438172cd7a066dc1b18314d70e0eb6389
+          git checkout FETCH_HEAD
+
+      - name: Build only geodesy from the geographic_info clone
+        working-directory: ../ws/src/geographic_info
+        run: touch geographic_msgs/COLCON_IGNORE geographic_info/COLCON_IGNORE
+
+      - name: Clone unh_marine_autonomy (jazzy)
+        working-directory: ../ws
         run: >
-          git clone --depth 1 -b ros2
-          https://github.com/ros-geographic-info/geographic_info.git
-          ../ws/src/geographic_info
+          git clone --depth 1 -b jazzy
+          https://github.com/rolker/unh_marine_autonomy.git
+          src/unh_marine_autonomy
 
       - name: Install ROS dependencies
         working-directory: ../ws
-        run: >
-          DEBIAN_FRONTEND=noninteractive
-          rosdep install --from-paths src --ignore-src -r -y
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          paths="$(colcon list --base-paths src --paths-only --packages-up-to $PACKAGES)"
+          if [ -z "$paths" ]; then
+            echo "colcon list returned no package paths" >&2
+            exit 1
+          fi
+          echo "$paths"
+          # shellcheck disable=SC2086
+          DEBIAN_FRONTEND=noninteractive rosdep install --ignore-src -y --from-paths $paths
 
       - name: Build
         working-directory: ../ws
-        run: >
-          bash -c 'source /opt/ros/jazzy/setup.bash &&
-          colcon build --packages-up-to
-          s57_msgs marine_charts s57_grids s57_layer
-          --cmake-args -DBUILD_TESTING=ON'
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          # shellcheck disable=SC2086
+          colcon build --packages-up-to $PACKAGES
 
       - name: Test
         working-directory: ../ws
-        run: >
-          bash -c 'source /opt/ros/jazzy/setup.bash &&
-          source install/setup.bash &&
-          colcon test --packages-select
-          s57_msgs marine_charts s57_grids s57_layer
-          --event-handlers console_direct+
-          --return-code-on-test-failure'
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          # shellcheck disable=SC2086
+          colcon test --packages-select $PACKAGES \
+            --event-handlers console_direct+ --return-code-on-test-failure
 
       - name: Test results
         working-directory: ../ws
-        run: >
-          bash -c 'source /opt/ros/jazzy/setup.bash &&
-          colcon test-result --verbose'
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon test-result --verbose
         if: always()
+
+      - name: Python tests ran
+        working-directory: ../ws
+        shell: bash
+        run: |
+          python3 - build/enc_updater/pytest.xml <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          failed = False
+          for path in sys.argv[1:]:
+              try:
+                  root = ET.parse(path).getroot()
+              except (OSError, ET.ParseError) as error:
+                  print(f'{path}: no usable pytest result ({error}); no Python test ran')
+                  failed = True
+                  continue
+              suites = [root] if root.tag == 'testsuite' else list(root.iter('testsuite'))
+              total = sum(int(suite.get('tests', 0)) for suite in suites)
+              skipped = sum(int(suite.get('skipped', 0)) for suite in suites)
+              errors = sum(int(suite.get('errors', 0)) for suite in suites)
+              print(f'{path}: {total} tests, {skipped} skipped, {errors} errors')
+              if total - skipped - errors <= 0:
+                  print(f'{path}: no Python test ran')
+                  failed = True
+          sys.exit(1 if failed else 0)
+          PY
+
+  rolling:
+    name: build-and-test (rolling)
+    if: (github.base_ref || github.ref_name) != 'jazzy'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    container:
+      image: ros:rolling-ros-core
+    env:
+      PACKAGES: s57_msgs marine_charts s57_to_geotiff enc_updater
+
+    steps:
+      - name: Update apt
+        run: apt-get update
+
+      - name: Install ros dev tools
+        run: DEBIAN_FRONTEND=noninteractive apt-get -y install ros-dev-tools git
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Init rosdep
+        run: |
+          if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
+            rosdep init
+          fi
+
+      - name: Update rosdep
+        run: rosdep update
+
+      - name: Create workspace
+        run: mkdir -p ../ws/src && ln -s "$GITHUB_WORKSPACE" ../ws/src/s57_tools
+
+      - name: Clone grid_map at 0ece1b5 for grid_map_core
+        working-directory: ../ws
+        run: |
+          git init src/grid_map
+          cd src/grid_map
+          git remote add origin https://github.com/ANYbotics/grid_map.git
+          git fetch --depth 1 origin 0ece1b53ca03199527d0d42913cf2567d0d6a913
+          git checkout FETCH_HEAD
+
+      - name: Clone unh_marine_autonomy (rolling)
+        working-directory: ../ws
+        run: >
+          git clone --depth 1 -b rolling
+          https://github.com/rolker/unh_marine_autonomy.git
+          src/unh_marine_autonomy
+
+      - name: Closure takes in no Nav2, grid_map_ros or bathymetry_layer
+        working-directory: ../ws
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          names="$(colcon list --base-paths src --names-only --packages-up-to $PACKAGES)"
+          if [ -z "$names" ]; then
+            echo "colcon list returned no packages" >&2
+            exit 1
+          fi
+          echo "$names"
+          if echo "$names" | grep -E '^(nav2_.*|grid_map_ros|bathymetry_layer)$'; then
+            echo "the closure takes in the packages above, which this job must not build" >&2
+            exit 1
+          fi
+          # Declared keys: rosdep reads only the manifests, no setup.bash
+          # (ROS_DISTRO comes from the image, as for the rosdep install step).
+          # shellcheck disable=SC2086
+          paths="$(colcon list --base-paths src --paths-only --packages-up-to $PACKAGES)"
+          # shellcheck disable=SC2086
+          keys="$(rosdep keys --ignore-src --from-paths $paths)"
+          nav2="$(echo "$keys" | grep -E '^nav2_' || true)"
+          if [ -n "$nav2" ]; then
+            # shellcheck disable=SC2086
+            colcon list --base-paths src --packages-up-to $PACKAGES |
+              while read -r name path _; do
+                for key in $(rosdep keys --from-paths "$path" | grep -E '^nav2_' || true); do
+                  echo "$key, declared by $name ($path)"
+                done
+              done
+            echo "the closure declares the Nav2 rosdep keys above, which this job must not take in:" >&2
+            echo "$nav2" >&2
+            exit 1
+          fi
+
+      - name: Install ROS dependencies
+        working-directory: ../ws
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          paths="$(colcon list --base-paths src --paths-only --packages-up-to $PACKAGES)"
+          if [ -z "$paths" ]; then
+            echo "colcon list returned no package paths" >&2
+            exit 1
+          fi
+          echo "$paths"
+          # shellcheck disable=SC2086
+          DEBIAN_FRONTEND=noninteractive rosdep install --ignore-src -y --from-paths $paths
+
+      - name: xmllint enc_updater/package.xml
+        working-directory: ../ws
+        shell: bash
+        run: |
+          source /opt/ros/rolling/setup.bash
+          ament_xmllint src/s57_tools/enc_updater/package.xml
+
+      - name: Build
+        working-directory: ../ws
+        shell: bash
+        run: |
+          source /opt/ros/rolling/setup.bash
+          # shellcheck disable=SC2086
+          colcon build --packages-up-to $PACKAGES
+
+      - name: Test
+        working-directory: ../ws
+        shell: bash
+        run: |
+          source /opt/ros/rolling/setup.bash
+          # shellcheck disable=SC2086
+          colcon test --packages-select $PACKAGES \
+            --event-handlers console_direct+ --return-code-on-test-failure
+
+      - name: Test results
+        working-directory: ../ws
+        shell: bash
+        run: |
+          source /opt/ros/rolling/setup.bash
+          colcon test-result --verbose
+        if: always()
+
+      - name: Python tests ran
+        working-directory: ../ws
+        shell: bash
+        run: |
+          python3 - build/enc_updater/pytest.xml <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          failed = False
+          for path in sys.argv[1:]:
+              try:
+                  root = ET.parse(path).getroot()
+              except (OSError, ET.ParseError) as error:
+                  print(f'{path}: no usable pytest result ({error}); no Python test ran')
+                  failed = True
+                  continue
+              suites = [root] if root.tag == 'testsuite' else list(root.iter('testsuite'))
+              total = sum(int(suite.get('tests', 0)) for suite in suites)
+              skipped = sum(int(suite.get('skipped', 0)) for suite in suites)
+              errors = sum(int(suite.get('errors', 0)) for suite in suites)
+              print(f'{path}: {total} tests, {skipped} skipped, {errors} errors')
+              if total - skipped - errors <= 0:
+                  print(f'{path}: no Python test ran')
+                  failed = True
+          sys.exit(1 if failed else 0)
+          PY
