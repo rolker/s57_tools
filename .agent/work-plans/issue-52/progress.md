@@ -699,3 +699,13 @@ Part 2 (`s57_grids`, `s57_layer`). Specialists: governance, plan drift, a Claude
   - after a cleanup and configure cycle, a chart that was aborted is regenerated only when the layer's window next moves. — `s57_grids/src/grid_publisher.cpp:150-171`
 - [ ] (suggestion) `TEST_ENC_ROOT` reads the sibling package's source fixture. That works in this repository and in CI, but not in a standalone or bloom test build. Note it for #54. — `s57_grids/CMakeLists.txt:113`
 - [ ] (suggestion, the owner's) The new issue for the seam gap should include the map-axis variant. The edge defect is an out-of-bounds read every time and a conditional write. Both are pre-existing. — `s57_layer/src/s57_layer.cpp:425`, `:438-455`
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 11:53 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (pre-push review round 1 approved part 2 with no must-fix; three outside reviewers ran)
+**After**: publish
+**Decision**: publish
+
+Read: the Local Review (Pre-Push) at `8ab87bf`, approved, four suggestions. Published in two steps, as the plan checkpoint set: the branch is first pushed up to `354e860` and the pull request opened there, so the Jazzy job runs the parameter-overrides test against Nav2's own `Layer::declareParameter`; the rest follows once that run is in. Suggestion 1 (two comments in commit 12 that say more than the code does) is not deferred: it is fixed in the fix pass after the pull request's review, with whatever that review finds. Suggestions 2 and 3 go into the comment on rolker/s57_tools#54 at merge. Suggestion 4, and the review's confirmation of two more pre-existing `generateTile` defects (chart data dropped where a tile's centre is outside the chart's grid; a read and conditional write one past a row when a grid cell edge falls exactly on a tile edge), go to the owner as issue text; neither is changed here.
