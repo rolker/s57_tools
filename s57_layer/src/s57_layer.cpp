@@ -316,8 +316,9 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
   TileID start_tile = worldToTile(world_min_x, world_min_y);
   TileID end_tile = worldToTile(world_max_x, world_max_y);
 
+  // This layer's own rectangle: the tiles that need repainting.
+  Rect own;
   bool done = false;
-  int tiles_needing_update = 0;
   for(int i = start_tile.first; i <= end_tile.first && !done; i++)
     for(int j = start_tile.second; j <= end_tile.second && !done; j++)
     {
@@ -326,29 +327,30 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
         generateTile(id);
       if(tiles_[id].needs_update)
       {
-        tiles_needing_update += 1;
         double tile_min_x = x_origin_+id.first*resolution_*tile_size_;
         double tile_max_x = tile_min_x + resolution_*tile_size_;
         double tile_min_y = y_origin_+id.second*resolution_*tile_size_;
         double tile_max_y = tile_min_y + resolution_*tile_size_;
 
-        *min_x = std::min(*min_x, tile_min_x-resolution_);
-        *max_x = std::max(*max_x, tile_max_x+resolution_);
-        *min_y = std::min(*min_y, tile_min_y-resolution_);
-        *max_y = std::max(*max_y, tile_max_y+resolution_);
+        own.include(tile_min_x-resolution_, tile_min_y-resolution_,
+          tile_max_x+resolution_, tile_max_y+resolution_);
       }
       if(clock_->now() - start_time > rclcpp::Duration::from_seconds(update_timeout_))
         done = true;
     }
 
-  if(tiles_needing_update > 0)
+  // Clip this layer's own rectangle to the window, then widen the bounds the
+  // layers before it reported. Never narrow them: they are what those layers
+  // need repainted (Nav2's layer contract; LayeredCostmap::updateMap warns
+  // "Illegal bounds change" when a layer does).
+  own.clip(world_min_x, world_min_y, world_max_x, world_max_y);
+  if(!own.empty())
   {
-    *min_x = std::max(*min_x, world_min_x);
-    *max_x = std::min(*max_x, world_max_x);
-    *min_y = std::max(*min_y, world_min_y);
-    *max_y = std::min(*max_y, world_max_y);
+    *min_x = std::min(*min_x, own.min_x);
+    *min_y = std::min(*min_y, own.min_y);
+    *max_x = std::max(*max_x, own.max_x);
+    *max_y = std::max(*max_y, own.max_y);
   }
-
 }
 
 

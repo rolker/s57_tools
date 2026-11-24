@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -277,6 +278,72 @@ TEST_F(RollingWindowTest, UnchartedFixedWindowMarkedUnknown)
   ASSERT_EQ(master->getOriginX(), 0.0);
   ASSERT_EQ(master->getOriginY(), 0.0);
   EXPECT_TRUE(everyCellIs(*master, nav2_costmap_2d::NO_INFORMATION));
+}
+
+// A layer that widens the bounds to a margin around the window (no margin:
+// it reports nothing) and records the bounds it was given.
+class BoundsLayer : public nav2_costmap_2d::Layer
+{
+public:
+  explicit BoundsLayer(double margin)
+  : margin_(margin) {}
+  void onInitialize() override {current_ = true;}
+  void reset() override {}
+  bool isClearable() override {return false;}
+  void updateBounds(
+    double, double, double, double * min_x, double * min_y, double * max_x,
+    double * max_y) override
+  {
+    given = {*min_x, *min_y, *max_x, *max_y};
+    if (margin_ > 0.0) {
+      auto * costmap = layered_costmap_->getCostmap();
+      *min_x = std::min(*min_x, costmap->getOriginX() - margin_);
+      *min_y = std::min(*min_y, costmap->getOriginY() - margin_);
+      *max_x = std::max(*max_x, costmap->getOriginX() + costmap->getSizeInMetersX() + margin_);
+      *max_y = std::max(*max_y, costmap->getOriginY() + costmap->getSizeInMetersY() + margin_);
+    }
+  }
+  void updateCosts(nav2_costmap_2d::Costmap2D &, int, int, int, int) override {}
+
+  std::vector<double> given;
+
+private:
+  double margin_;
+};
+
+// The layer widens the bounds the layers before it reported and never
+// narrows them (Nav2's layer contract). Before #57 it clamped them to the
+// window whenever it had tiles to report, which Nav2 logs as an illegal
+// bounds change; Nav2 clips to the window itself.
+TEST_F(RollingWindowTest, BoundsFromEarlierLayersAreNotNarrowed)
+{
+  node_ = std::make_shared<TestLifecycleNode>("test_rolling_window");
+  node_->declare_parameter("chart_layer.tile_size", 4);
+  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+  layered_costmap_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>("map", true, false);
+  layered_costmap_->resizeMap(10, 10, 1.0, 0.0, 0.0);
+  auto wide = std::make_shared<BoundsLayer>(50.0);
+  layered_costmap_->addPlugin(wide);
+  wide->initialize(layered_costmap_.get(), "wide", tf_buffer_.get(), node_, nullptr);
+  layer_ = std::make_shared<S57LayerForTest>();
+  layered_costmap_->addPlugin(layer_);
+  layer_->initialize(layered_costmap_.get(), "chart_layer", tf_buffer_.get(), node_, nullptr);
+  auto spy = std::make_shared<BoundsLayer>(0.0);
+  layered_costmap_->addPlugin(spy);
+  spy->initialize(layered_costmap_.get(), "spy", tf_buffer_.get(), node_, nullptr);
+  layer_->addChart("land", makeLandGrid(20.25, 20.25));
+
+  // The first cycle, when every tile in the window is new and reported.
+  layered_costmap_->updateMap(20.5, 20.5, 0.0);
+  auto * master = layered_costmap_->getCostmap();
+  ASSERT_EQ(master->getOriginX(), 15.0);
+  ASSERT_EQ(master->getOriginY(), 15.0);
+  ASSERT_EQ(spy->given.size(), 4u);
+  EXPECT_EQ(spy->given[0], 15.0 - 50.0);
+  EXPECT_EQ(spy->given[1], 15.0 - 50.0);
+  EXPECT_EQ(spy->given[2], 15.0 + master->getSizeInMetersX() + 50.0);
+  EXPECT_EQ(spy->given[3], 15.0 + master->getSizeInMetersY() + 50.0);
+  EXPECT_TRUE(everyCellIs(*master, nav2_costmap_2d::LETHAL_OBSTACLE));
 }
 
 // One cycle of a 10 x 10 rolling window at 0.1 m whose layer origin is
