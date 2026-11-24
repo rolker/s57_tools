@@ -450,3 +450,32 @@ Reviewers: Claude adversarial (fresh subagent, read-only) completed: no must-fix
 **Decision**: publish
 
 Read: the Local Review (Pre-Push) round 2 at `229c4c4`, approved, one suggestion about wording. The pull request does not repeat the implementation entry's "ordinary rounding" explanation of why an oracle on different tiles disagreed: the review established that it is the pre-existing write one past a row in `generateTile` (`worldToMapEnforceBounds` returns the size when a chart cell's far edge lies exactly on a tile's east or north edge), at any resolution, and that two of the committed tests make such out-of-range calls inside 4-cell tiles without practical risk. That defect is not changed here; it is on the list for rolker/s57_tools#54 and the host puts the review's new evidence to the owner. The pull request names the port head the merge was verified against (`cd4aa27`).
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-11-24 12:47 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+**Reviews-read**: none
+
+**PR**: #60 at `6d3383c`
+**Sources**: 2 (Local Review (Pre-Push) round 2 @ `229c4c4`, covers the head via bookkeeping through `9d842da`; CI rollup)
+**Cross-source confirmations**: 0
+**CI**: all-pass
+
+### Findings
+No open findings. The pull request has no reviews, inline comments or conversation comments (no human, Copilot or bot). The round-2 pre-push review's one suggestion (wording of the `generateTile` edge behaviour) was applied in the pull request body at the publish checkpoint; the body names it a known pre-existing defect, not "ordinary rounding". Known and not findings: rolker/s57_tools#57, #59, and the `generateTile` read past a row.
+
+### CI and the Jazzy facts (run 45451176750, job `build-and-test (jazzy)`)
+- Checked out `fb21f83`, "Merge 6d3383c2c891fd43916ea01a4c46fbe3b6c0d55f into ce1eb2b338919dd26f04769c883e05a48ebf3c67" (this head merged into rolling's tip), so it built this branch's `s57_layer`: "Starting >>> s57_layer", "Finished <<< s57_layer [28.3s]".
+- `5/8 Test #5: test_rolling_window ..............   Passed    0.30 sec`; `[==========] 9 tests from 1 test suite ran. (81 ms total)`; `[  PASSED  ] 9 tests.`
+- All nine `[       OK ]`, none skipped, none disabled (no SKIPPED or DISABLED line in the binary's output): BelowOriginOnBothAxes (20 ms), BelowOriginOnXOnly (7), BelowOriginOnYOnly (6), BelowOriginOnAnExactTileMultiple (6), FarBelowOriginFromAFractionalPosition (6), AboveOriginControl (6), UnchartedBelowOriginMarkedUnknown (5), NonBinaryResolutionOffsetRoundsToNearestCell (6), NegativeNonBinaryOffsetRoundsToNearestCellOnBothAxes (6).
+- The log prints no window origin and no assertion output (passing cases print only node start-up lines, and a "get datasets service is not ready" warning that the tests do not use). The tests' origin assertions passed but the log does not show the values.
+- s57_layer's other tests passed: test_allow_uncharted 3, test_tide_offset 7, test_depth_costs, test_plugin_loading; lint tests passed. `Summary: 227 tests, 0 errors, 0 failures, 30 skipped` is the whole-run rollup; the 30 skips are not the new tests.
+- `build-and-test (rolling)` SUCCESS, but it does not build `s57_layer` (owner's decision: no job builds Nav2 source), so it says nothing about this change.
+
+### Pull request body: statements to change
+- "**Jazzy.** Nothing was run on Jazzy locally; this pull request's Jazzy CI job is the first Jazzy compile and run of the new tests." Replace with: "**Jazzy.** Nothing was run on Jazzy locally. The pull request's Jazzy CI job (run 45451176750, on the merge of this head into rolling) compiled `s57_layer` and ran the new tests: `test_rolling_window`, 9 of 9 passed, none skipped; the job's whole run was 227 tests, 0 errors, 0 failures. This is the first Jazzy compile and run of the new tests. The Rolling CI job does not build `s57_layer`."
+- The "Verified on Rolling" and "Not established" paragraphs should stay: CI does not cover Rolling, and the log does not show the window origins, so "tests assert the window's origin" stays as the tests' claim, not something CI output shows.
+
+### False positives
+None.
