@@ -131,8 +131,8 @@ if(BUILD_TESTING)
     pluginlib::pluginlib
   )
 
-  # One cycle of a rolling LayeredCostmap with the layer, and Nav2's
-  # inflation layer for the uncharted case (#56).
+  # A rolling LayeredCostmap with the layer, one cycle (#56) and several
+  # cycles of a moving window (#57), with and without Nav2's inflation layer.
   ament_add_gtest(test_rolling_window test/test_rolling_window.cpp)
   target_include_directories(test_rolling_window PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
