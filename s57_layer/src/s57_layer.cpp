@@ -367,6 +367,10 @@ void S57Layer::generateTile(TileID id)
     // chart coverage. updateCosts treats nullptr+complete as uncharted
     // and handles it according to allow_uncharted_.
     tiles_[id].costmap = nullptr;
+    // Report the tile, as the branch below does for a tile no chart covers:
+    // with allow_uncharted false it must be painted unknown, and nothing
+    // else would ask for it on a window that does not move.
+    tiles_[id].needs_update = true;
     return;
   }
 

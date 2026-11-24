@@ -140,13 +140,13 @@ protected:
   // with tiles of 4 cells so the window has a partial tile at every edge.
   // In a costmap node's order: resizeMap, addPlugin, initialize, so the
   // layer's matchSize takes origin (0, 0).
-  void makeWindow(bool allow_uncharted = true)
+  void makeWindow(bool allow_uncharted = true, bool rolling = true)
   {
     node_ = std::make_shared<TestLifecycleNode>("test_rolling_window");
     node_->declare_parameter("chart_layer.tile_size", 4);
     node_->declare_parameter("chart_layer.allow_uncharted", allow_uncharted);
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
-    layered_costmap_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>("map", true, false);
+    layered_costmap_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>("map", rolling, false);
     layered_costmap_->resizeMap(10, 10, 1.0, 0.0, 0.0);
     layer_ = std::make_shared<S57LayerForTest>();
     layered_costmap_->addPlugin(layer_);
@@ -234,12 +234,12 @@ TEST_F(RollingWindowTest, AboveOriginControl)
 }
 
 // allow_uncharted false and no chart: the window is marked unknown to its
-// edge. Driven as a costmap node's first cycle is: the node sets the
-// footprint after its plugins are initialised, so the inflation layer after
-// this one asks for the whole window and this layer paints all of it. The
-// inflation layer is needed: with no chart this layer reports no bounds of
-// its own (a separate defect), so without it nothing would be painted, with
-// or without the fix for #56.
+// edge. Driven as a costmap node's first cycle is, with the inflation layer
+// a costmap node configures after this one: the node sets the footprint
+// after its plugins are initialised, so the inflation layer asks for the
+// whole window and this layer paints all of it. This layer also reports its
+// own tiles with no chart loaded (#57); UnchartedFixedWindowMarkedUnknown
+// tests that without an inflation layer.
 TEST_F(RollingWindowTest, UnchartedBelowOriginMarkedUnknown)
 {
   makeWindow(false);
@@ -261,6 +261,21 @@ TEST_F(RollingWindowTest, UnchartedBelowOriginMarkedUnknown)
   auto * master = layered_costmap_->getCostmap();
   ASSERT_EQ(master->getOriginX(), -5.0);
   ASSERT_EQ(master->getOriginY(), -5.0);
+  EXPECT_TRUE(everyCellIs(*master, nav2_costmap_2d::NO_INFORMATION));
+}
+
+// allow_uncharted false and no chart, on a window that does not move and
+// with no other layer: the tiles this layer creates while no chart is loaded
+// are reported in its own bounds, so the first cycle marks every cell
+// unknown. Before #57 they were not, and the window stayed free.
+TEST_F(RollingWindowTest, UnchartedFixedWindowMarkedUnknown)
+{
+  makeWindow(false, false);
+  layered_costmap_->updateMap(5.0, 5.0, 0.0);
+
+  auto * master = layered_costmap_->getCostmap();
+  ASSERT_EQ(master->getOriginX(), 0.0);
+  ASSERT_EQ(master->getOriginY(), 0.0);
   EXPECT_TRUE(everyCellIs(*master, nav2_costmap_2d::NO_INFORMATION));
 }
 
