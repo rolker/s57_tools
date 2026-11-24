@@ -502,11 +502,13 @@ bool S57Layer::recordUncovered(const Rect & window, double half_cell)
 // reversal (repeated reversals of 2 cells or more a cycle can make a cell
 // wait 2); on steady diagonal travel the strips go x, gap, y, gap, and no
 // whole window is reported at any heading. Two strips with cells waiting 2
-// cycles happen when the window jitters by 2 cells or more a cycle (station
-// keeping with that much position noise: 3 or more origins per axis), on a
-// sharp turn from oblique travel, and when travel reverses on both axes.
-// A window on 2 origins per axis never reports the whole window, and jitter
-// of under 2 cells a cycle reported none in any run (#57). The whole window
+// cycles happen when station keeping jitters widely enough to put the window
+// on 3 or more origins per axis, on a sharp turn from oblique travel, and
+// when travel reverses on both axes. The whole window is never reported
+// while the window stays on 2 origins per axis, which holds when the
+// position stays within one cell of a point. Wider jitter can report it
+// (measured: uniform noise of 1.5 cells a cycle reported it in 6 to 9 of
+// 600 cycles, 2 cells in about 2 to 3%) (#57). The whole window
 // is also reported on the first cycle, after reset() or matchSize(), on a
 // jump of more than a tile, and whenever tiles are flagged for every cell
 // of it (a tide step over the threshold, a change of the chart set).
