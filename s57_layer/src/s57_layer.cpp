@@ -452,12 +452,16 @@ bool S57Layer::recordUncovered(const Rect & window, double half_cell)
 
   // What has scrolled out of the window needs no repainting. A span that
   // has wholly scrolled out is no longer pending, so it holds back no other
-  // strip (chooseStrip).
+  // strip (chooseStrip). Only a pending span ages: an empty one's age is
+  // reset when cells are next added to it, and aging it every cycle would
+  // overflow the int (undefined behaviour) after 2^31 cycles with nothing
+  // pending on that side, about 13.6 years at 5 Hz.
   for(int s = Strip::x_low; s <= Strip::y_high; s++)
   {
     const bool x = s == Strip::x_low || s == Strip::x_high;
     pending_[s].clip(x ? window.min_x : window.min_y, x ? window.max_x : window.max_y, half_cell);
-    pending_[s].age++;
+    if(pending_[s].valid)
+      pending_[s].age++;
   }
 
   // A cell is uncovered when it lies outside last cycle's window on either
