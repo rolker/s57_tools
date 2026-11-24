@@ -160,8 +160,9 @@ GridPublisher::on_cleanup(const rclcpp_lifecycle::State &state)
   for(auto& p: pending_dataset_grids_)
     if(p.second.valid())
       p.second.wait();
-  // The jobs just waited on were aborted and hold no grid; drop them so the
-  // next configuration does not publish their results.
+  // Every pending job was waited for above and is dropped here, including one
+  // that finished before the cleanup and holds a grid; its grid is not
+  // published, and is rebuilt on the next request for that chart.
   pending_dataset_grids_.clear();
 
   tf_listener_.reset();
@@ -251,8 +252,8 @@ void GridPublisher::checkForNewGrids()
         if(!grid)
         {
           // getGrid returns no grid when the chart cannot be opened (a cell
-          // file missing or unreadable) or placed in the map frame, or when
-          // a cleanup aborted the job. Both uses below dereference it, so
+          // file missing or unreadable) or when its position cannot be
+          // converted to the map frame. Both uses below dereference it, so
           // skip the chart instead: no publisher is made, and the next
           // get_datasets request that lists it tries again.
           RCLCPP_ERROR_STREAM(get_logger(),
