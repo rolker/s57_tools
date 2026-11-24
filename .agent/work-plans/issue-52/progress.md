@@ -350,3 +350,31 @@ Checked:
 
 ### Findings
 - [ ] No issues found. LGTM.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-11-24 09:59 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Dispatch**: resumed (agent a04baf4b92dbadaf5, resume 1 of 3)
+**Reviews-read**: none
+
+**PR**: #53 at `87bfe25`
+**Sources**: 2 (Local Review @ `cda7509`, which covers `87bfe25` through a bookkeeping-only commit; CI run 45418748263)
+**Cross-source confirmations**: 0
+**CI**: all-pass
+
+Round 2. Since my entry at `9a251c0`: the fix commits `504b756` (README) and `04c9f6f` (guard), the records commits `5298c4c` and `cda7509`, and `87bfe25`, which adds the Local Review (approved, nothing open, no cross-model reviewers). The `review_progress.sh sources` helper returns no open local findings. The pre-push review at `5f8d9c4` is now stale (`ci.yml` changed since), and its three items were ruled on in my previous entry: two fixed, one a false positive.
+
+Checked the fixes myself at `87bfe25`:
+- README (`marine_charts/test/data/README.md:24-64`): the five quotations match `USERAGREEMENT.TXT`, and the README's own statements match what my previous entry said the files do and do not meet. The fixtures' sha256 are unchanged (`10a94bcf…40da8f`, `27b503af…599f848f`).
+- Guard (`.github/workflows/ci.yml:243-278`): the on-disk check is kept. `rosdep keys --ignore-src` runs over the closure paths and fails on `^nav2_`, naming the package that declares the key. The header now says what the guard does. The step is in the Rolling job only, so Jazzy's Nav2 keys never reach it.
+
+GitHub: no reviews and no conversation comments on the pull request. The only check-runs are the two CI jobs; there is no Copilot review or check-run.
+
+CI run 45418748263 on `87bfe25`, both jobs success:
+- **build-and-test (jazzy)**, 5m46s (the runner was slower: the build took 3min 26s against 2min 9s in round 1, on the same code as `cda7509`). Strict rosdep: "#All required rosdeps installed successfully". Build `Summary: 12 packages finished [3min 26s]`. Test `Summary: 6 packages finished [5.94s]`. `Summary: 216 tests, 0 errors, 0 failures, 29 skipped`. `test_s57_catalog` passed. `117 passed in 1.41s`. The "Python tests ran" step printed `117 tests, 0 skipped, 0 errors`.
+- **build-and-test (rolling)**, 3m20s. The changed guard listed the 11-package closure (the four packages, `grid_map_cmake_helpers`, `grid_map_core` and five from unh_marine_autonomy), reported no declared `nav2_` key and passed. Strict rosdep: all installed. Build `Summary: 11 packages finished [1min 43s]`. Test `Summary: 4 packages finished [3.48s]`. `Summary: 159 tests, 0 errors, 0 failures, 18 skipped`. `test_s57_catalog` passed. `117 passed in 0.81s`. The "Python tests ran" step printed `117 tests, 0 skipped, 0 errors`.
+- cppcheck was skipped on both, as in round 1. The pull request text already says so.
+
+### Findings
+- [x] No open findings. Round 1's two valid findings are fixed in `504b756` and `04c9f6f` and checked above. The `.gitattributes` false positive stands.
