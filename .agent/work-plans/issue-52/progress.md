@@ -954,7 +954,7 @@ CI at head `ccd6f49`, run 45455754152: `build-and-test (jazzy)` and `build-and-t
 The pull request body is stale against the records (placeholder "Results of both runs are added below."; nothing on the Jazzy hang, its cause and the change in how the node receives transforms; "twelve code commits" where eighteen are to be backported; the review history; test counts; "#56 (fix in its own pull request)" now merged on both branches; what is not shown). Corrected text is in the report to the host, who posts it.
 
 ### Findings
-- [ ] (suggestion, pull request body) Replace the body with the corrected text given to the host (hang and its cause, the new transform handling, 18 commits to backport, review history, test counts, #56 merged, what is not shown) — the body is the host's to edit; no code change
+- [x] (suggestion, pull request body) Replace the body with the corrected text given to the host (hang and its cause, the new transform handling, 18 commits to backport, review history, test counts, #56 merged, what is not shown) — the body is the host's to edit; no code change — done by the host: the body was replaced with that text on 2026-11-24, with two corrections (the description of the read past a row in `generateTile`; that all eighteen commits were trialled onto `jazzy`).
 
 ### False positives
 - none (no external review comments to dismiss)
