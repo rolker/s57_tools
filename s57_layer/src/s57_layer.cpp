@@ -498,12 +498,18 @@ bool S57Layer::recordUncovered(const Rect & window, double half_cell)
 // or more would then wait 4 or more, so if two strips have such cells the
 // whole window is reported instead, which keeps the bound: every uncovered
 // cell is painted at most 3 cycles after the cycle that uncovered it. On
-// travel along one axis that is the same cycle, or the next when the travel
-// reverses; on steady diagonal travel the strips go x, gap, y, gap. The
-// whole window is also reported on the first cycle, after reset() or
-// matchSize(), on a jump of more than a tile, and whenever tiles are flagged
-// for every cell of it (a tide step over the threshold, a change of the
-// chart set).
+// travel along one axis that is the same cycle, or the next after a single
+// reversal (repeated reversals of 2 cells or more a cycle can make a cell
+// wait 2); on steady diagonal travel the strips go x, gap, y, gap, and no
+// whole window is reported at any heading. Two strips with cells waiting 2
+// cycles happen when the window jitters by 2 cells or more a cycle (station
+// keeping with that much position noise: 3 or more origins per axis), on a
+// sharp turn from oblique travel, and when travel reverses on both axes.
+// A window on 2 origins per axis never reports the whole window, and jitter
+// of under 2 cells a cycle reported none in any run (#57). The whole window
+// is also reported on the first cycle, after reset() or matchSize(), on a
+// jump of more than a tile, and whenever tiles are flagged for every cell
+// of it (a tide step over the threshold, a change of the chart set).
 S57Layer::Strip S57Layer::chooseStrip() const
 {
   bool other = false;
