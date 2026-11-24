@@ -154,6 +154,9 @@ void S57Layer::reset()
   //grids_.clear();
   //tiles_.clear();
   current_ = false;
+  // Costmap2DROS::resetLayers resets the whole window before this, so the
+  // next cycle reports all of it, including any tile not generated yet.
+  whole_pending_ = true;
   for(auto& t: tiles_)
     t.second.needs_update = true;
 }
@@ -167,6 +170,7 @@ void S57Layer::matchSize()
   resolution_ = parent->getResolution();
   tiles_.clear();
   current_ = false;
+  whole_pending_ = true;
 }
 
 
@@ -313,10 +317,25 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
   }
 
 
+  // The window by its cell edges. world_max_x and world_max_y above come
+  // from getSizeInMetersX/Y, which is half a cell short on Jazzy; they only
+  // choose the tiles and the chart request.
+  const double half_cell = parent->getResolution()/2.0;
+  Rect window;
+  window.include(world_min_x, world_min_y,
+    world_min_x + parent->getSizeInCellsX()*parent->getResolution(),
+    world_min_y + parent->getSizeInCellsY()*parent->getResolution());
+
+  // Phase 1, rolling window: record the columns and rows this cycle's move
+  // uncovered, or find that the whole window must be reported.
+  const bool rolling = layered_costmap_->isRolling();
+  const bool report_whole = rolling && !recordUncovered(window, half_cell);
+
+  // Phase 2: generate the tiles in the window, and collect the ones that
+  // need repainting into this layer's own rectangle.
   TileID start_tile = worldToTile(world_min_x, world_min_y);
   TileID end_tile = worldToTile(world_max_x, world_max_y);
 
-  // This layer's own rectangle: the tiles that need repainting.
   Rect own;
   bool done = false;
   for(int i = start_tile.first; i <= end_tile.first && !done; i++)
@@ -325,31 +344,127 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
       auto id = std::make_pair(i,j);
       if(!tiles_[id].complete)
         generateTile(id);
+      double tile_min_x = x_origin_+id.first*resolution_*tile_size_;
+      double tile_max_x = tile_min_x + resolution_*tile_size_;
+      double tile_min_y = y_origin_+id.second*resolution_*tile_size_;
+      double tile_max_y = tile_min_y + resolution_*tile_size_;
+      // A tile wholly outside last cycle's window has every cell it has in
+      // this window in the spans phase 1 just recorded, so it is painted
+      // with them. Reporting it as well would add a tile column or row to
+      // this cycle's bounds, and with the next cycle's strip on the other
+      // axis the whole window (see chooseStrip).
+      if(rolling && !report_whole &&
+         (tile_max_x <= last_window_.min_x + half_cell ||
+          tile_min_x >= last_window_.max_x - half_cell ||
+          tile_max_y <= last_window_.min_y + half_cell ||
+          tile_min_y >= last_window_.max_y - half_cell))
+        tiles_[id].needs_update = false;
       if(tiles_[id].needs_update)
-      {
-        double tile_min_x = x_origin_+id.first*resolution_*tile_size_;
-        double tile_max_x = tile_min_x + resolution_*tile_size_;
-        double tile_min_y = y_origin_+id.second*resolution_*tile_size_;
-        double tile_max_y = tile_min_y + resolution_*tile_size_;
-
         own.include(tile_min_x-resolution_, tile_min_y-resolution_,
           tile_max_x+resolution_, tile_max_y+resolution_);
-      }
       if(clock_->now() - start_time > rclcpp::Duration::from_seconds(update_timeout_))
         done = true;
     }
 
-  // Clip this layer's own rectangle to the window, then widen the bounds the
-  // layers before it reported. Never narrow them: they are what those layers
-  // need repainted (Nav2's layer contract; LayeredCostmap::updateMap warns
-  // "Illegal bounds change" when a layer does).
-  own.clip(world_min_x, world_min_y, world_max_x, world_max_y);
+  // Phase 3, rolling window: add this cycle's strip, if any, to the
+  // layer's own rectangle, and remember the window.
+  if(rolling)
+  {
+    const Strip strip = report_whole ? Strip::whole : chooseStrip();
+    switch(strip)
+    {
+      case Strip::whole:
+        own.include(window.min_x, window.min_y, window.max_x, window.max_y);
+        pending_x_ = Span();
+        pending_y_ = Span();
+        break;
+      // A strip's edges are cell edges. Nav2's conversion (the minimum
+      // truncated, the maximum truncated plus one) covers them whichever way
+      // rounding goes; the half-cell margin keeps that from depending on it.
+      case Strip::x:
+        own.include(pending_x_.lo - half_cell, window.min_y, pending_x_.hi + half_cell, window.max_y);
+        pending_x_ = Span();
+        last_axis_ = Strip::x;
+        break;
+      case Strip::y:
+        own.include(window.min_x, pending_y_.lo - half_cell, window.max_x, pending_y_.hi + half_cell);
+        pending_y_ = Span();
+        last_axis_ = Strip::y;
+        break;
+      case Strip::none:
+        break;
+    }
+    last_reported_ = strip;
+    last_window_ = window;
+    whole_pending_ = false;
+  }
+
+  // Phase 4: clip this layer's own rectangle to the window, then widen the
+  // bounds the layers before it reported. Never narrow them: they are what
+  // those layers need repainted (Nav2's layer contract;
+  // LayeredCostmap::updateMap warns "Illegal bounds change" when a layer
+  // does).
+  own.clip(window.min_x, window.min_y, window.max_x, window.max_y);
   if(!own.empty())
   {
     *min_x = std::min(*min_x, own.min_x);
     *min_y = std::min(*min_y, own.min_y);
     *max_x = std::max(*max_x, own.max_x);
     *max_y = std::max(*max_y, own.max_y);
+  }
+}
+
+bool S57Layer::recordUncovered(const Rect & window, double half_cell)
+{
+  if(whole_pending_ ||
+     window.min_x >= last_window_.max_x - half_cell || window.max_x <= last_window_.min_x + half_cell ||
+     window.min_y >= last_window_.max_y - half_cell || window.max_y <= last_window_.min_y + half_cell)
+    return false;
+
+  // A cell is uncovered when it lies outside last cycle's window on either
+  // axis: in a column beyond one of its x edges, or a row beyond one of its
+  // y edges. Each span is the hull of what is pending on its axis, on both
+  // sides; a hull spanning the window after a reversal costs a whole-window
+  // strip, never a missed cell.
+  pending_x_.add(last_window_.max_x, window.max_x, half_cell);
+  pending_x_.add(window.min_x, last_window_.min_x, half_cell);
+  pending_y_.add(last_window_.max_y, window.max_y, half_cell);
+  pending_y_.add(window.min_y, last_window_.min_y, half_cell);
+
+  // What has scrolled out of the window needs no repainting.
+  pending_x_.clip(window.min_x, window.max_x, half_cell);
+  pending_y_.clip(window.min_y, window.max_y, half_cell);
+  return true;
+}
+
+// Why an x strip and a y strip are never reported in consecutive cycles.
+// The inflation layer reports the bounds it was given this cycle merged
+// with last cycle's, padded by its radius (InflationLayer::updateBounds,
+// the same on Jazzy and Rolling), and LayeredCostmap::updateMap resets and
+// repaints that one rectangle. An x strip (the window's full height)
+// followed by a y strip (its full width) would therefore repaint and
+// re-inflate the whole window, which on BEN's 5 km global costmap took
+// 0.3-0.4 s per cycle on a desktop (#57). So the axis changes only after a
+// gap: a cycle in which this layer reports no strip, and the inflation
+// layer re-runs only last cycle's. While both axes are pending the cycles
+// go x, gap, y, gap; on travel along one axis its strip is reported every
+// cycle.
+// Each axis is reported at least once every 4 cycles, so an uncovered cell
+// is painted at most 3 cycles after the cycle that uncovered it.
+S57Layer::Strip S57Layer::chooseStrip() const
+{
+  const bool x = pending_x_.valid;
+  const bool y = pending_y_.valid;
+  switch(last_reported_)
+  {
+    case Strip::x:
+      return y ? Strip::none : (x ? Strip::x : Strip::none);
+    case Strip::y:
+      return x ? Strip::none : (y ? Strip::y : Strip::none);
+    default:
+      if(x && y)
+        return last_axis_ == Strip::x ? Strip::y : Strip::x;
+      return x ? Strip::x : (y ? Strip::y : Strip::none);
   }
 }
 

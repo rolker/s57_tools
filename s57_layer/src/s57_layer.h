@@ -171,6 +171,67 @@ private:
     }
   };
 
+  // Repainting the cells a rolling window's move uncovers (#57).
+  //
+  // When the window moves, Costmap2D::updateOrigin keeps the cells the old
+  // and new windows share and resets the others to the default value, and
+  // LayeredCostmap::updateMap repaints only the bounds its layers report.
+  // So this layer reports the uncovered cells itself, as strips: an x strip
+  // is a span of columns over the window's full height, a y strip a span of
+  // rows over its full width. updateBounds says when each is reported.
+
+  // A span [lo, hi] of world coordinates on one axis; empty unless valid.
+  // Every real span is whole cells wide, so anything narrower than
+  // min_width is rounding between two equal cell edges and is dropped.
+  struct Span
+  {
+    double lo = 0.0;
+    double hi = 0.0;
+    bool valid = false;
+
+    void add(double a, double b, double min_width)
+    {
+      if(b - a < min_width)
+        return;
+      lo = valid ? std::min(lo, a) : a;
+      hi = valid ? std::max(hi, b) : b;
+      valid = true;
+    }
+    void clip(double a, double b, double min_width)
+    {
+      lo = std::max(lo, a);
+      hi = std::min(hi, b);
+      valid = valid && hi - lo >= min_width;
+    }
+  };
+
+  enum class Strip { none, x, y, whole };
+
+  // True when the next rolling cycle must report the whole window: no
+  // window has been seen yet, or reset() or matchSize() ran since.
+  // last_window_ is meaningful only while this is false.
+  bool whole_pending_ = true;
+  // The window of the last rolling cycle, by its cell edges.
+  Rect last_window_;
+  // Columns (x) and rows (y) a move uncovered that have not been reported
+  // since. Each lies within last_window_: its cells are still in the window
+  // and not yet painted from the charts.
+  Span pending_x_;
+  Span pending_y_;
+  // What this layer reported in the last rolling cycle: none in a gap.
+  Strip last_reported_ = Strip::none;
+  // The axis of the strip reported most recently (x or y), so the other
+  // axis goes next when both are pending.
+  Strip last_axis_ = Strip::x;
+
+  // Phase 1 of a rolling cycle: add the columns and rows this cycle's move
+  // uncovered to the pending spans and clip them to window. Returns false
+  // when strips cannot describe the move (whole_pending_, or no overlap
+  // with last_window_): the whole window must be reported.
+  bool recordUncovered(const Rect & window, double half_cell);
+  // Phase 3: which strip to report this cycle (not the whole window).
+  Strip chooseStrip() const;
+
   typedef std::pair<int, int> TileID;
 
   struct TileInfo
