@@ -508,3 +508,13 @@ The port is sound and verified as far as this machine allows. With changes a to 
   - Areas the window reaches later are treated as uncharted: with `allow_uncharted: true` they are left free on the local costmap and unknown on the global one.
   - The layer logs an unthrottled WARN, "The get datasets service is not ready", every cycle. It does not log an ERROR.
 - **The proposed test.** It pins the reset (mutation-checked), not the `clear()` and not the crash (finding 2).
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 10:58 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: owner
+**After**: plan
+**Decision**: proceed
+
+The Plan Review at `007cfce` found part 2's plan ready, with five findings, and confirmed two pre-existing defects on the hazard path. The owner answered both on 2026-11-24. **The tile-addressing defect in `s57_layer` (`worldToTile`, `s57_layer.cpp:157-162`): "Own issue now, fix in parallel (Recommended)".** It is rolker/s57_tools#56, driven on its own branch; **part 2 does not touch `worldToTile` or any other marking line**, and its hand run on Rolling states the defect where it shows (a rolling window reaching west or south of the costmap's configured origin) instead of working round it silently. **The `abort_flag_` defect in `s57_grids`: "Fix in Part 2, with null checks (Recommended)".** So commit 12 is in: reset the flag on configure and drop aborted jobs on cleanup, and check for a missing grid at the two dereferences (`grid_publisher.cpp:259` and `:284`), so a chart that fails to open cannot abort the node either; with a test that pins the reset and, if achievable without a chart cell, the null path; its own commit, backported. Review findings, applied: (1) the plan's account of the tile defect is superseded by the review's (the reference point is the costmap's configured origin; rolling windows only; the line dates from `181c034`, 2021); nothing in part 2's records repeats the old wording. (3) `ament_cmake_ros` is declared in the commit that first uses `ament_add_ros_isolated_gtest`. (4) Both new tests use bounded polling, not fixed sleeps, and the client-to-costmap test uses a static costmap with its origin at or below the grid, so the tile defect cannot fail it. (5) The two-step push is done on this pull request into `rolling`: the branch is first pushed up to the overrides test, so the Jazzy job runs that test against Nav2's own `declareParameter`, then the rest. Host decisions: a third copy of the parameter helper, as the two earlier layers have; the before/after costmap comparison on the owner's Jazzy machine is offered, not required.
