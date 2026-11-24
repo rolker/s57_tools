@@ -185,7 +185,14 @@ S57Layer::TileID S57Layer::worldToTile(double x, double y)
 void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y, double* max_x, double* max_y)
 {
   if (!enabled_)
+  {
+    // Defensive: the window moves on while this layer is disabled, so
+    // last_window_ goes stale; repaint the whole window once it is enabled
+    // again. Unreachable today: enabled_ is read only in onInitialize, and
+    // no parameter callback changes it, so no test can reach this line.
+    whole_pending_ = true;
     return;
+  }
 
   // Tide only matters for the depth ramp; in suppressed mode (D10) skip the
   // lookup entirely so a missing chart_datum TF never warns or invalidates.
