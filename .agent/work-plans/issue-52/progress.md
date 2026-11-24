@@ -378,3 +378,13 @@ CI run 45418748263 on `87bfe25`, both jobs success:
 
 ### Findings
 - [x] No open findings. Round 1's two valid findings are fixed in `504b756` and `04c9f6f` and checked above. The `.gitattributes` false positive stands.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 10:00 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: owner
+**After**: merge
+**Decision**: merge
+
+The owner's answers, 2026-11-24: "Merge when CI is green (Recommended)" for pull request 53 (part 1), with the NOAA catalogue as the test fixture (he was shown what NOAA's agreement asks and the alternative of a synthetic catalogue); "Backport right after (Recommended)" for the hand backport to `jazzy` of the seven code, docs and CI commits; "Open it (Recommended)" for the follow-up issue in this repository. The host merges only after the CI run on the pushed records passes. Part 2 (`s57_grids`, `s57_layer`) is planned at the plan checkpoint after this merge.
