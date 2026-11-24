@@ -736,3 +736,13 @@ CI at `454ae59`, run 45443691212: `build-and-test (jazzy)` and `build-and-test (
 - "Results of both runs are added below." — still a placeholder; the host adds the two runs (`354e860` run 45442344940, `454ae59` run 45443691212) above.
 - "Review. ... One suggestion ... is corrected in this pull request before merge." — true only once the fix pass lands; the other three suggestions are routed to #54 and #59, which the body already lists.
 - No statement found that the records contradict: twelve code commits, no Rolling CI job for these two packages, Jazzy CI the only Jazzy evidence, and the Rolling guard all match the runs.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 12:07 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (one open item, comment wording, already set to be fixed before merge)
+**After**: findings
+**Decision**: address
+
+Read: the Integrated Review for pull request 58 at `454ae59`: no reviews on the pull request, CI green on both jobs. The fix pass corrects the two comments in `s57_grids/src/grid_publisher.cpp` (`:163-164`, `:253-256`) and nothing else. The entry's three other boxes are routed, not fix-pass work, and the fix pass ticks them as routed: state kept across a cleanup and the `TEST_ENC_ROOT` source path go into the comment on rolker/s57_tools#54 at merge; the `generateTile` defects are rolker/s57_tools#59 (the chart-seam gap, opened on the owner's yes, with the map-axis variant in its text) and the #54 list (the read past a row).
