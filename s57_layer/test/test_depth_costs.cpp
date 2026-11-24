@@ -11,10 +11,19 @@
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
 #include "nav2_costmap_2d/cost_values.hpp"
-#include "nav2_util/lifecycle_node.hpp"
 #include "tf2_ros/buffer.h"
 
 #include "s57_layer.h"
+
+// Nav2's lifecycle node moved from nav2_util (Jazzy) to nav2_ros_common
+// (Rolling); Layer::initialize takes a weak pointer to whichever one exists.
+#if __has_include("nav2_ros_common/lifecycle_node.hpp")
+#include "nav2_ros_common/lifecycle_node.hpp"
+using TestLifecycleNode = nav2::LifecycleNode;
+#else
+#include "nav2_util/lifecycle_node.hpp"
+using TestLifecycleNode = nav2_util::LifecycleNode;
+#endif
 
 // Test subclass exposing protected get_cost_from_grid, tide_offset_ and
 // depth_costs_ for direct unit testing of the cost-mapping logic without
@@ -346,7 +355,7 @@ TEST_F(DepthCostsTest, SuppressedUnsetPipsolDepthIsNotLethalBand)
 // (echoboats#408 operational pain).
 TEST_F(DepthCostsTest, SuppressedModeNeedsNoTideTransform)
 {
-  auto node = std::make_shared<nav2_util::LifecycleNode>("test_no_tf_needed");
+  auto node = std::make_shared<TestLifecycleNode>("test_no_tf_needed");
 
   node->declare_parameter("chart_layer.depth_costs", false);
   node->declare_parameter("chart_layer.chart_datum_frame", std::string("chart_datum"));

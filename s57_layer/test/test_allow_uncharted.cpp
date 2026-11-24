@@ -7,10 +7,19 @@
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
 #include "nav2_costmap_2d/cost_values.hpp"
-#include "nav2_util/lifecycle_node.hpp"
 #include "tf2_ros/buffer.h"
 
 #include "s57_layer.h"
+
+// Nav2's lifecycle node moved from nav2_util (Jazzy) to nav2_ros_common
+// (Rolling); Layer::initialize takes a weak pointer to whichever one exists.
+#if __has_include("nav2_ros_common/lifecycle_node.hpp")
+#include "nav2_ros_common/lifecycle_node.hpp"
+using TestLifecycleNode = nav2::LifecycleNode;
+#else
+#include "nav2_util/lifecycle_node.hpp"
+using TestLifecycleNode = nav2_util::LifecycleNode;
+#endif
 
 class AllowUnchartedTest : public ::testing::Test
 {
@@ -44,7 +53,7 @@ static int countCellsWithCost(
 // updateCosts should leave the master costmap untouched.
 TEST_F(AllowUnchartedTest, TrueKeepsMasterCostmapClean)
 {
-  auto node = std::make_shared<nav2_util::LifecycleNode>("test_uncharted_true");
+  auto node = std::make_shared<TestLifecycleNode>("test_uncharted_true");
   auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
 
   // 10x10 cells, 1m resolution, origin at (0,0), track_unknown=false
@@ -76,7 +85,7 @@ TEST_F(AllowUnchartedTest, TrueKeepsMasterCostmapClean)
 // updateCosts should write NO_INFORMATION to all cells.
 TEST_F(AllowUnchartedTest, FalseWritesNoInformation)
 {
-  auto node = std::make_shared<nav2_util::LifecycleNode>("test_uncharted_false");
+  auto node = std::make_shared<TestLifecycleNode>("test_uncharted_false");
 
   // Pre-declare parameter before layer initialization
   node->declare_parameter("chart_layer.allow_uncharted", false);
@@ -107,7 +116,7 @@ TEST_F(AllowUnchartedTest, FalseWritesNoInformation)
 // (tiles are complete even though they have no chart data).
 TEST_F(AllowUnchartedTest, CurrentFlagReflectsCompleteness)
 {
-  auto node = std::make_shared<nav2_util::LifecycleNode>("test_current_flag");
+  auto node = std::make_shared<TestLifecycleNode>("test_current_flag");
   auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
 
   nav2_costmap_2d::LayeredCostmap layered_costmap("map", false, false);
