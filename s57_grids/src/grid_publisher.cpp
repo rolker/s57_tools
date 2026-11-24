@@ -115,8 +115,20 @@ GridPublisher::on_configure(const rclcpp_lifecycle::State &state)
     std::bind(&GridPublisher::getDatasets, this, std::placeholders::_1, std::placeholders::_2)
   );
 
+  // The listener subscribes on this node, and the node's executor serves
+  // /tf, with no spin thread of its own. On Jazzy, a listener with its own
+  // thread can hang in its destructor (on_cleanup, or the node's destruction)
+  // when that comes before the thread has started spinning: its cancel() is
+  // lost and the join never returns (rclcpp issue 3172, fixed for Rolling in
+  // rclcpp 3174 and not backported). Every lookup here is non-blocking (no
+  // timeout), so it needs no thread of its own. Rolling's listener takes the
+  // node's interfaces; Jazzy's takes a pointer to the node.
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+#if TF2_ROS_VERSION_GTE(0, 44, 0)
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, *this, false);
+#else
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
+#endif
 
   // Clamp to >= 1 ms — a zero-duration wall timer is undefined behaviour
   // and would also pin a CPU.

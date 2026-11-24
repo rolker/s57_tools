@@ -16,9 +16,13 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -77,6 +81,32 @@ protected:
   }
   static void TearDownTestSuite() {rclcpp::shutdown();}
 
+  // A lifecycle transition has no timeout of its own: a hung one fails the
+  // test here, with its name, well before CTest's timeout kills the process.
+  void SetUp() override
+  {
+    const std::string test =
+      ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    watchdog_ = std::thread([this, test] {
+        std::unique_lock<std::mutex> lock(watchdog_mutex_);
+        if (!watchdog_cv_.wait_for(lock, 30s, [this] {return test_done_;})) {
+          std::fprintf(stderr, "[  FAILED  ] ReconfigureTest.%s did not finish within 30 s: "
+            "a lifecycle transition or a wait is hung\n", test.c_str());
+          std::fflush(stderr);
+          std::_Exit(1);
+        }
+      });
+  }
+  void TearDown() override
+  {
+    {
+      std::lock_guard<std::mutex> lock(watchdog_mutex_);
+      test_done_ = true;
+    }
+    watchdog_cv_.notify_one();
+    watchdog_.join();
+  }
+
   /// A GridPublisher reading the catalogue fixture.
   static std::shared_ptr<TestGridPublisher> makeNode()
   {
@@ -86,6 +116,12 @@ protected:
     node->declare_parameter("enc_root", std::string(TEST_ENC_ROOT));
     return node;
   }
+
+private:
+  std::thread watchdog_;
+  std::mutex watchdog_mutex_;
+  std::condition_variable watchdog_cv_;
+  bool test_done_ = false;
 };
 
 }  // namespace
@@ -145,12 +181,15 @@ TEST_F(ReconfigureTest, ChartThatCannotBeOpenedDoesNotAbortTheNode)
 
   ASSERT_EQ("inactive", node->configure().label());
   ASSERT_EQ("active", node->activate().label());
-  ASSERT_TRUE(waitFor([&] {return node->tf_buffer_->canTransform("map", "earth", tf2::TimePointZero);}))
-    << "map -> earth never reached the node";
 
+  // The node's own executor serves its TF listener, as in main.cpp.
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(node->get_node_base_interface());
   executor.add_node(helper);
+  ASSERT_TRUE(waitFor([&] {
+      executor.spin_some(20ms);
+      return node->tf_buffer_->canTransform("map", "earth", tf2::TimePointZero);
+    })) << "map -> earth never reached the node";
 
   auto client = helper->create_client<s57_msgs::srv::GetDatasets>("get_datasets");
   ASSERT_TRUE(client->wait_for_service(10s));
