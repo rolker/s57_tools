@@ -99,6 +99,21 @@ if(BUILD_TESTING)
     pluginlib::pluginlib
   )
 
+  # One cycle of a rolling LayeredCostmap with the layer, and Nav2's
+  # inflation layer for the uncharted case (#56).
+  ament_add_gtest(test_rolling_window test/test_rolling_window.cpp)
+  target_include_directories(test_rolling_window PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_link_libraries(test_rolling_window
+    ${PROJECT_NAME}
+    nav2_costmap_2d::layers
+    nav2_costmap_2d::nav2_costmap_2d_core
+    nav2_util::nav2_util_core
+    rclcpp::rclcpp
+    tf2_ros::tf2_ros
+  )
+
   find_package(ament_lint_auto REQUIRED)
   # Skip copyright: existing files lack headers; tracked separately.
   set(ament_cmake_copyright_FOUND TRUE)
