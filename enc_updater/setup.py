@@ -17,7 +17,11 @@ setup(
     maintainer_email='roland@ccom.unh.edu',
     description='Cron-friendly NOAA ENC chart updater (ADR-0010 D7).',
     license='BSD',
-    tests_require=['pytest'],
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
     entry_points={
         'console_scripts': [
             'enc_updater = enc_updater.__main__:main',
