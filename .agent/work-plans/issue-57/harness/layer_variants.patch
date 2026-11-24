@@ -1,0 +1,293 @@
+--- a/src/s57_layer.cpp	2026-11-24 14:12:16.373521477 -0500
++++ b/src/s57_layer.cpp	2026-11-24 14:18:50.494795677 -0500
+@@ -1,6 +1,7 @@
+ #include "s57_layer.h"
+ 
+ #include <cmath>
++#include <limits>
+ 
+ #include "geodesy/ecef.h"
+ #include "geodesy/wgs84.h"
+@@ -148,12 +149,17 @@
+ 
+ }
+ 
++int S57Layer::g_mode = 0;
++bool S57Layer::g_uncharted_fix = false;
++int S57Layer::g_current_flagged = 0;
++
+ void S57Layer::reset()
+ {
+   //pending_grids_.clear();
+   //grids_.clear();
+   //tiles_.clear();
+   current_ = false;
++  whole_pending_ = true;
+   for(auto& t: tiles_)
+     t.second.needs_update = true;
+ }
+@@ -167,6 +173,8 @@
+   resolution_ = parent->getResolution();
+   tiles_.clear();
+   current_ = false;
++  whole_pending_ = true;
++  have_window_ = false;
+ }
+ 
+ 
+@@ -178,7 +186,7 @@
+ }
+ 
+ 
+-void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y, double* max_x, double* max_y)
++void S57Layer::updateBounds(double robot_x, double robot_y, double, double* min_x, double* min_y, double* max_x, double* max_y)
+ {
+   if (!enabled_)
+     return;
+@@ -316,39 +324,173 @@
+   TileID start_tile = worldToTile(world_min_x, world_min_y);
+   TileID end_tile = worldToTile(world_max_x, world_max_y);
+ 
++  const bool rolling = layered_costmap_->isRolling();
++  double own_min_x = std::numeric_limits<double>::max(), own_min_y = own_min_x;
++  double own_max_x = std::numeric_limits<double>::lowest(), own_max_y = own_max_x;
++  auto addRect = [&](double x0, double y0, double x1, double y1) {
++      own_min_x = std::min(own_min_x, x0); own_min_y = std::min(own_min_y, y0);
++      own_max_x = std::max(own_max_x, x1); own_max_y = std::max(own_max_y, y1);
++    };
++
+   bool done = false;
+   int tiles_needing_update = 0;
++  flagged_incomplete_ = 0;
++  flagged_any_ = false;
+   for(int i = start_tile.first; i <= end_tile.first && !done; i++)
+     for(int j = start_tile.second; j <= end_tile.second && !done; j++)
+     {
+       auto id = std::make_pair(i,j);
+-      if(!tiles_[id].complete)
++      double tile_min_x = x_origin_+id.first*resolution_*tile_size_;
++      double tile_max_x = tile_min_x + resolution_*tile_size_;
++      double tile_min_y = y_origin_+id.second*resolution_*tile_size_;
++      double tile_max_y = tile_min_y + resolution_*tile_size_;
++      bool was_complete = tiles_[id].complete;
++      if(!was_complete)
+         generateTile(id);
++      // (d): a tile wholly outside last cycle's window has all its in-window
++      // cells in this cycle's uncovered strips; its own report is redundant.
++      if((mode_ == 3 || mode_ == 4) && rolling && have_window_ && !whole_pending_ &&
++         (tile_max_x <= last_wx0_ || tile_min_x >= last_wx1_ ||
++          tile_max_y <= last_wy0_ || tile_min_y >= last_wy1_))
++        tiles_[id].needs_update = false;
+       if(tiles_[id].needs_update)
+       {
+         tiles_needing_update += 1;
+-        double tile_min_x = x_origin_+id.first*resolution_*tile_size_;
+-        double tile_max_x = tile_min_x + resolution_*tile_size_;
+-        double tile_min_y = y_origin_+id.second*resolution_*tile_size_;
+-        double tile_max_y = tile_min_y + resolution_*tile_size_;
+-
+-        *min_x = std::min(*min_x, tile_min_x-resolution_);
+-        *max_x = std::max(*max_x, tile_max_x+resolution_);
+-        *min_y = std::min(*min_y, tile_min_y-resolution_);
+-        *max_y = std::max(*max_y, tile_max_y+resolution_);
++        flagged_any_ = true;
++        if(!tiles_[id].complete) flagged_incomplete_++;
++        if(mode_ == 0)
++        {
++          *min_x = std::min(*min_x, tile_min_x-resolution_);
++          *max_x = std::max(*max_x, tile_max_x+resolution_);
++          *min_y = std::min(*min_y, tile_min_y-resolution_);
++          *max_y = std::max(*max_y, tile_max_y+resolution_);
++        }
++        else
++          addRect(tile_min_x-resolution_, tile_min_y-resolution_, tile_max_x+resolution_, tile_max_y+resolution_);
+       }
+       if(clock_->now() - start_time > rclcpp::Duration::from_seconds(update_timeout_))
+         done = true;
+     }
+ 
+-  if(tiles_needing_update > 0)
++  if(g_current_flagged == 2)
+   {
+-    *min_x = std::max(*min_x, world_min_x);
+-    *max_x = std::min(*max_x, world_max_x);
+-    *min_y = std::max(*min_y, world_min_y);
+-    *max_y = std::min(*max_y, world_max_y);
++    // current_ when the robot's tile and its eight neighbours (those in the
++    // window) are complete
++    TileID rt = worldToTile(robot_x, robot_y);
++    bool core = true;
++    for(int i = std::max(start_tile.first, rt.first-1); i <= std::min(end_tile.first, rt.first+1); i++)
++      for(int j = std::max(start_tile.second, rt.second-1); j <= std::min(end_tile.second, rt.second+1); j++)
++      {
++        auto it = tiles_.find(std::make_pair(i,j));
++        core = core && it != tiles_.end() && it->second.complete;
++      }
++    current_ = core;
+   }
+ 
++  if(mode_ == 0)
++  {
++    if(tiles_needing_update > 0)
++    {
++      *min_x = std::max(*min_x, world_min_x);
++      *max_x = std::min(*max_x, world_max_x);
++      *min_y = std::max(*min_y, world_min_y);
++      *max_y = std::min(*max_y, world_max_y);
++    }
++    last_report_area_ = tiles_needing_update > 0 ? (*max_x-*min_x)*(*max_y-*min_y)/resolution_/resolution_ : 0;
++    return;
++  }
++
++  const double h = resolution_/2.0;
++  if(rolling)
++  {
++    const double ox = parent->getOriginX(), oy = parent->getOriginY();
++    bool moved = !have_window_ || ox != last_wx0_ || oy != last_wy0_;
++    if(mode_ == 1)
++      addRect(world_min_x, world_min_y, world_max_x, world_max_y);
++    else if(mode_ == 2)
++    {
++      if(moved || whole_pending_)
++        addRect(world_min_x, world_min_y, world_max_x, world_max_y);
++      whole_pending_ = false;
++    }
++    else if(mode_ == 3 || mode_ == 4)
++    {
++      bool whole = !have_window_ || whole_pending_;
++      if(!whole)
++      {
++        if(world_min_x >= last_wx1_ || world_max_x <= last_wx0_ ||
++           world_min_y >= last_wy1_ || world_max_y <= last_wy0_)
++          whole = true;
++        else
++        {
++          addInterval(px_hi_, last_wx1_, world_max_x);
++          addInterval(px_lo_, world_min_x, last_wx0_);
++          addInterval(py_hi_, last_wy1_, world_max_y);
++          addInterval(py_lo_, world_min_y, last_wy0_);
++        }
++      }
++      auto clip = [](Interval & iv, double lo, double hi) {
++          if(!iv.valid) return;
++          iv.lo = std::max(iv.lo, lo); iv.hi = std::min(iv.hi, hi);
++          if(iv.hi <= iv.lo) iv.valid = false;
++        };
++      clip(px_lo_, world_min_x, world_max_x); clip(px_hi_, world_min_x, world_max_x);
++      clip(py_lo_, world_min_y, world_max_y); clip(py_hi_, world_min_y, world_max_y);
++      bool xp = px_lo_.valid || px_hi_.valid, yp = py_lo_.valid || py_hi_.valid;
++      int serve = 0;
++      if(whole)
++        serve = 3;
++      else if(!xp && !yp)
++        serve = 0;
++      else if(last_served_ == 1)
++        serve = yp ? (mode_ == 4 ? 2 : 0) : 1;
++      else if(last_served_ == 2)
++        serve = xp ? (mode_ == 4 ? 1 : 0) : 2;
++      else
++        serve = (xp && yp) ? (last_axis_ == 1 ? 2 : 1) : (xp ? 1 : 2);
++      if(serve == 3)
++      {
++        addRect(world_min_x, world_min_y, world_max_x, world_max_y);
++        px_lo_ = px_hi_ = py_lo_ = py_hi_ = Interval();
++      }
++      else if(serve == 1)
++      {
++        Interval u;
++        if(px_lo_.valid) addInterval(u, px_lo_.lo, px_lo_.hi);
++        if(px_hi_.valid) addInterval(u, px_hi_.lo, px_hi_.hi);
++        addRect(u.lo-h, world_min_y, u.hi+h, world_max_y);
++        px_lo_ = px_hi_ = Interval();
++        last_axis_ = 1;
++      }
++      else if(serve == 2)
++      {
++        Interval u;
++        if(py_lo_.valid) addInterval(u, py_lo_.lo, py_lo_.hi);
++        if(py_hi_.valid) addInterval(u, py_hi_.lo, py_hi_.hi);
++        addRect(world_min_x, u.lo-h, world_max_x, u.hi+h);
++        py_lo_ = py_hi_ = Interval();
++        last_axis_ = 2;
++      }
++      last_served_ = serve;
++      whole_pending_ = false;
++    }
++    have_window_ = true;
++    last_wx0_ = world_min_x; last_wy0_ = world_min_y;
++    last_wx1_ = world_max_x; last_wy1_ = world_max_y;
++  }
++
++  // Clip this layer's own rectangle to the window, then widen what earlier
++  // layers reported; never shrink it.
++  own_min_x = std::max(own_min_x, world_min_x); own_min_y = std::max(own_min_y, world_min_y);
++  own_max_x = std::min(own_max_x, world_max_x); own_max_y = std::min(own_max_y, world_max_y);
++  if(own_min_x < own_max_x && own_min_y < own_max_y)
++  {
++    *min_x = std::min(*min_x, own_min_x); *min_y = std::min(*min_y, own_min_y);
++    *max_x = std::max(*max_x, own_max_x); *max_y = std::max(*max_y, own_max_y);
++    last_report_area_ = (own_max_x-own_min_x)*(own_max_y-own_min_y)/resolution_/resolution_;
++  }
++  else
++    last_report_area_ = 0;
+ }
+ 
+ 
+@@ -367,6 +509,7 @@
+     // chart coverage. updateCosts treats nullptr+complete as uncharted
+     // and handles it according to allow_uncharted_.
+     tiles_[id].costmap = nullptr;
++    if(g_uncharted_fix) tiles_[id].needs_update = true;
+     return;
+   }
+ 
+@@ -522,7 +665,8 @@
+       tiles_[tile].needs_update = false;
+     }
+   }
+-  current_ = complete;
++  if(g_current_flagged == 0) current_ = complete;
++  else if(g_current_flagged == 1) current_ = (flagged_incomplete_ == 0);
+ }
+ 
+ unsigned char S57Layer::get_cost_from_grid(grid_map::GridMap &grid, const grid_map::Index &index)
+--- a/src/s57_layer.h	2026-11-24 14:12:16.373552812 -0500
++++ b/src/s57_layer.h	2026-11-24 14:18:50.494826440 -0500
+@@ -66,7 +66,37 @@
+   std::map<std::string, std::pair<geometry_msgs::msg::Point, geometry_msgs::msg::Point> > chart_bounds_;
+   std::map<std::string, std::shared_ptr<grid_map::GridMap> > grids_;
+ 
++public:
++  // SCRATCH: 0 = today, 1 = (a) whole window when rolling, 2 = (c) whole
++  // window when origin moved, 3 = (d) strips with gap alternation.
++  static int g_mode;
++  static bool g_uncharted_fix;   // needs_update in the empty-charts early return
++  static int g_current_flagged;  // 0 today, 1 over flagged tiles, 2 core 3x3 tiles
++  int mode_ = g_mode;
++  // statistics: area reported by this layer last cycle (cells)
++  double last_report_area_ = 0;
++  int last_served_ = 0;  // 0 none, 1 x, 2 y, 3 whole
++  int last_axis_ = 0;
++  bool isCurrentFlag() const {return current_;}
++  void testChartSetChanged()
++  {
++    for(auto& t: tiles_) {t.second.complete = false; t.second.chart_count = 0; t.second.needs_update = true;}
++  }
++
+ private:
++  struct Interval { double lo = 0, hi = 0; bool valid = false; };
++  static void addInterval(Interval & iv, double lo, double hi)
++  {
++    if(hi <= lo) return;
++    if(!iv.valid) {iv.lo = lo; iv.hi = hi; iv.valid = true; return;}
++    iv.lo = std::min(iv.lo, lo); iv.hi = std::max(iv.hi, hi);
++  }
++  bool have_window_ = false;
++  bool whole_pending_ = true;
++  double last_wx0_ = 0, last_wy0_ = 0, last_wx1_ = 0, last_wy1_ = 0;
++  Interval px_lo_, px_hi_, py_lo_, py_hi_;
++  int flagged_incomplete_ = 0;
++  bool flagged_any_ = false;
+   using GetDatasetsClient =
+     rclcpp::Client<s57_msgs::srv::GetDatasets>;
+ 
