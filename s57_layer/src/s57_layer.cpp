@@ -668,7 +668,12 @@ void S57Layer::getDatasetsCallback(GetDatasetsClient::SharedFuture future)
       latched_qos.transient_local();
       latched_qos.keep_last(1);
 
-      auto grid_sub = node_.lock()->create_subscription<grid_map_msgs::msg::GridMap>(
+      // rclcpp's free function, not the node's member: Nav2 on Rolling wraps
+      // the member with a (topic, callback, qos) signature that Jazzy does not
+      // have. It takes the node as an lvalue, hence the named pointer.
+      auto node = node_.lock();
+      auto grid_sub = rclcpp::create_subscription<grid_map_msgs::msg::GridMap>(
+        node,
         s57_grids_namespace_+"datasets/"+dataset_info.topic,
         latched_qos,
         [this, label=dataset_info.label](const grid_map_msgs::msg::GridMap::SharedPtr msg)
