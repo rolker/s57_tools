@@ -286,3 +286,100 @@ Notes on the other alternatives:
 The owner, 2026-11-24, asked which design fixes the defect, with the planner's and the plan reviewer's measured table in the dialog (today; strips; whole window every cycle; whole window every 10th cycle; measure on his Jazzy machine first): "Repaint only the uncovered strips (Recommended)". So design (d): the uncovered region is reported as thin strips with a gap cycle between the x and the y strip, a cell uncovered at the window's edge is painted within 3 cycles, and how the layer computes `current_` is left as it is. Commit B (the `current_` core rule) is not made.
 
 The Plan Review's verdict is needs-work, on the test section only; the host does not send the plan back for that, because each resolution is concrete and is checked where it can be checked, in the implementation and its review: every test is shown failing on `rolling` under its exact assertion before it is called a regression test. Applied as follows. (1) Tests: on axis-aligned travel every cell is asserted after every move, with no allowance, since the design has no delay there; diagonal cases use a slow step such as (0.6, 0.35) so today's tile-entry repaint does not fall inside the 3-cycle allowance; several cycles are run after a jump back and after `reset()`; a case that cannot fail on today's code is kept only as a guard of the merge and gap logic and is labelled so in its comment, not counted as a regression test; one assertion guards the design's cost property: on steady diagonal travel the layered costmap's bounds are never the whole window. (2) Cell values are compared exactly only with no inflation layer; with one, lethal and unknown cells are compared (Jazzy's inflation over a sub-rectangle differs from a full pass by a few cost units). (3) The measurement harness names the source it patches (a worktree at `021ebe4`, or `jazzy` before the backport) in its usage text. (4) The state is reduced as the review suggests where behaviour is unchanged: one interval per axis, `have_window_` folded into `whole_pending_`; the implementer re-runs the review's adversarial scenarios (59 scenarios under 5 inflation and 4 other-layer set-ups) against the reduced form. (5) Commit A (a tile created while no chart is loaded is reported) goes in first, with its fixed-window test. Follow-up for the host to put to the owner: a waiting tile on a fixed-window costmap holds the layer not current indefinitely (pre-existing; BEN's costmaps are both rolling).
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 15:17 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Branch**: feature/issue-57 at `a65d4c9`
+
+Design (d), as the owner chose at the plan checkpoint, with the plan review's reduced state. No `current_` change (commit B not made).
+
+### Commits (each standalone for `git cherry-pick -x`; the three code commits touch nothing under `.agent/`, end "Backport to jazzy.", and each builds and passes the package's tests on its own)
+
+1. `5b50b5e` s57_layer: report a tile created while no chart is loaded. The one line in `generateTile`'s empty-chart return; new test `UnchartedFixedWindowMarkedUnknown`; `UnchartedBelowOriginMarkedUnknown`'s comment reworded.
+2. `8df1a96` s57_layer: widen the bounds earlier layers report, never narrow them. The clamp at `s57_layer.cpp:344-350` replaced by clip-own-rectangle-then-widen (a small `Rect` helper), split out as the checkpoint allowed; new test `BoundsFromEarlierLayersAreNotNarrowed`.
+3. `3231db9` s57_layer: repaint the cells a rolling window uncovers (#57). Design (d), 10 `MovingWindowTest` cases, comment updates on the two one-cycle 0.1 m tests, the test CMake comment, one README line.
+4. `a65d4c9` harness for #57 (records, `.agent/` only): builds the final source beside today's.
+
+`s57_layer.cpp` +139/-18 and `s57_layer.h` +88/-0 against `origin/rolling`, comments included.
+
+### The code
+- **State (6 members, the review's reduced form):** `whole_pending_` (first cycle, `reset()`, `matchSize()`; replaces `have_window_`), `last_window_` (a `Rect`, cell edges), `pending_x_`/`pending_y_` (one `Span` per axis: the hull of uncovered columns/rows not yet reported, clipped to the window), `last_reported_` (none/x/y/whole; none in a gap) and `last_axis_`. Each member's invariant is in a comment in `s57_layer.h`.
+- **Phases in `updateBounds`:** (1) `recordUncovered` adds this move's uncovered columns and rows to the spans and clips them, or returns false when the whole window must be reported (`whole_pending_`, or no overlap); (2) the tile loop, where a tile wholly outside last cycle's window is left to the spans; (3) `chooseStrip` (x, gap, y, gap while both pending; the same axis every cycle on travel along one axis); (4) clip the layer's own rectangle to the window, widen the shared bounds with min/max.
+- **One place** (the comment above `chooseStrip`) says why x and y strips are never served in consecutive cycles: `InflationLayer::updateBounds` merges this and last cycle's bounds on both distros.
+- The window's max edge comes from the cell count, not `getSizeInMetersX` (half a cell short on Jazzy).
+
+### Tests (`test_rolling_window.cpp`; 20 x 20 window at 1 m, 4-cell tiles; each moving case under no inflation, `InflationLayer` r 2 m and r 6 m with `setFootprint`)
+Every cell is compared after every cycle with a fresh costmap moved to the same origin in its first cycle: exact with no inflation layer, lethal and unknown cells with one. Charts are 200 m square with cell edges at x.25 (#63) and cover every tile reached (#59). Each path is checked step by step to give the same origin under Rolling's and Jazzy's size formulas, and the origin is asserted each cycle. (0.6, 0.35) m per cycle is impossible under that constraint: any step whose fraction is not 0 or 0.5 brings the offset's fraction into [0.75, 1), where the formulas truncate differently. The diagonals use (0.5, 0.5), (1.5, 0.5) and a reversal back at (-1, -1); a tile column or row enters only every 8 cycles at 0.5 m.
+
+Failing output on `origin/rolling`'s layer source with the test file present (scratch build; `ldd` showed the scratch `libs57_layer.so`):
+- `UnchartedFixedWindowMarkedUnknown`: "100 of 100 cells are not 255; window origin (0, 0); first wrong cell (0, 0) ... has cost 0".
+- `BoundsFromEarlierLayersAreNotNarrowed`: the recorded bounds are 15 / 25 (clamped to the window), not -35 / 75.
+- East, North, Reversal, Jump and back, Reset while moving, Late grid (all three set-ups each): "cycle 1, robot at (21.5, 20.5): 20 of 400 cells differ from the oracle ... first (30.5, 10.5) has cost 0 where the oracle has 254" (North: (20.5, 21.5), (10.5, 30.5)). They fail today at the first move, not at the feature each names; what each guards in (d) is below.
+- `SlowDiagonalEveryCellWithinThreeCycles`: all set-ups, e.g. none "cycle 8, robot at (24.5, 24.5): 37 of 400 cells differ ... allowance 3 cycles, the oldest wrong cell has been in the window 3 cycles"; r6 on (1.5, 0.5) "cycle 8 ... 7 of 400".
+- `SlowDiagonalTrackingUnknownMatchesAFreshWindow` (scattered land, `track_unknown_space`): none "cycle 4 ... 33 of 400 ... cost 255 where the oracle has 0"; r2 11, r6 7 cells at cycle 8.
+- `DiagonalTravelNeverRepaintsTheWholeWindow` (the cost property, `LayeredCostmap::getBounds`, with a layer at the end recording whether the cycle had bounds at all, since `getBounds` keeps last cycle's through an empty cycle on both distros): today repaints the whole window at cycles "3 11 19 27 35" (0.5, 0.5, none), "2 3 6 7 10 11 ..." ((1,1), r2 and r6), "4 12 20 28 36" ((1.5, 0.5), r2 and r6). (1.5, 0.5) with no inflation does not fail today.
+- `FixedWindowControl`: passes today, kept as the requested control; it guards nothing in (d).
+
+Deliberate breaks of (d) (same scratch method), and which test fails:
+- x and y served in consecutive cycles (no gap): only `DiagonalTravelNeverRepaintsTheWholeWindow`, "cycles 2 3 4 ... 39" (every cycle) under r2 and r6; cells stay correct, so this is the test that guards the gap.
+- a gap after every strip (axis travel served late): East, North, Reversal, Jump, Reset, Late grid ("cycle 2 ... 20 of 400").
+- the tile rule applied to every tile, or inverted: `LateGridForTilesInTheWindow` ("cycle 4 ... 64 of 400 ... cost 254 where the oracle has 0"); inverted also fails the cost test. The tile rule removed: only the cost test.
+- no-overlap (jump) detection removed: `JumpPastTheWindowAndBack` ("cycle 2 ... 400 of 400").
+- the low-side span not recorded: `ReversalPastTheStart` ("cycle 10 ... 20 of 400") and the slow diagonal.
+- Not caught by any test or by the adversarial run: `reset()` not setting `whole_pending_` (its tile flags already repaint the window; the line covers tiles not generated yet), the span clip in `recordUncovered` (phase 4 clips anyway; it bounds the hull), and the half-cell margin on strips (Nav2's conversion covers cell-edge strips either way, also at 0.1 m). Kept as defensive, and said so in the comments.
+
+Run time: the 12 new tests (with one existing uncharted test) take 0.38 s in one process; `test_rolling_window` 0.69 s under ctest. Each of the 12 new tests passed 30 of 30 as separate processes (99 s for all 360).
+
+Full suite on Rolling (`colcon test --packages-select s57_layer --parallel-workers 4 --ctest-args -j4`, `ROS_DOMAIN_ID` 175): 9 of 9 ctest entries passed, including cppcheck, lint_cmake and xmllint (copyright, cpplint and uncrustify are skipped by the package's CMake); colcon test-result: 73 tests, 0 errors, 0 failures, 8 skipped (cppcheck's, as before). `ldd` showed the worktree's own installed `libs57_layer.so`, built from this source.
+
+### Adversarial re-run (harness at `a65d4c9`, final source beside `afa7403`)
+69 scenarios x 4 other-layer set-ups (none; a 3 m box before; a box after; a one-cell strip at the leading edge after) x 5 inflation set-ups (none; Rolling r2, r6; Jazzy's `InflationLayer` copied from `origin/jazzy`, r2, r9) = 1380 runs, 63 300 cycles, 91 s on 5 processes. Scenarios: 6 random walks (steps up to 3 m and 1.2 m), velocities (0.7, 1.3), (2.3, -1.7), (0.37, 0.11), zig-zags on x and x+y and reversals at each of 4 phases, stops at 5 phases, one-tile steps on 3 headings, a jump past the window and one half a window and back, a path across the origin and a walk around it, windows of 21 and 22 cells, tide step, chart-set change and `reset()` at each of cycles 3-7, late grids at the edge, under the robot and ahead at cycles 3-6, `track_unknown_space` fixed and moving, `allow_uncharted: false` moving, and two at 0.1 m cells.
+- **Final:** oldest wrong cell age 2 in every set-up (painted within 3 cycles; no run had a wrong cell older), longest streak of one world cell wrong 3 cycles, 0 origin mismatches. With inflation, other value differences all lie within the radius of a cell younger than 4 cycles, except 2 cell-cycles under Jazzy r9 (the Jazzy partial-versus-full queue inflation the plan review noted).
+- **Today:** wrong after age 2 in 213 (none), 130 (r2), 109 (r6), 130 (J r2), 54 (J r9) of 276 runs each; oldest wrong cell 134 cycles.
+- The widest pending span reached the full window width (22 cells, a random walk back and forth within 3 cycles): that costs a whole-window strip, not a missed cell.
+- **Before/after, cell by cell:** cell-cycles lethal today and not lethal with the fix: 14 647 (none), 6 659 (r2 both distros), 3 200 (r6), 1 745 (J r9). Every one of them is lethal in the fresh window, and none is in a cell that had been in the window 3 cycles or more. So the fix never removes a hazard the chart has; but a charted hazard that today's whole-tile report showed in the cycle its tile entered can, with the fix, appear up to 2 cycles later (the tile is left to the strips, which wait for their turn). The same counts hold for cells at or above the inscribed cost. Nothing marked today stays unmarked: no such cell is older than age 2.
+
+### Measurements (desktop: Intel Core Ultra 7 265, Release, Rolling's source-built Nav2, single-threaded inflation), mean / worst ms per `updateMap`
+Global 5000 x 5000 at 1 m, 1 Hz, 100 cycles:
+
+| | E 2 m/s | E 5 m/s | 45° 2 m/s | 45° 5 m/s |
+|---|---|---|---|---|
+| today, Rolling inflation | 8.7 / 21.0 | 9.3 / 21.1 | 14.5 / **307** | 26.1 / **309** |
+| final, Rolling inflation | 19.3 / 22.3 | 19.5 / 27.3 | 18.3 / 21.5 | 18.8 / 22.5 |
+| today, Jazzy inflation | 8.8 / 31.6 | 10.2 / 32.1 | 14.8 / **345** | 28.9 / **359** |
+| final, Jazzy inflation | 26.6 / 32.8 | 27.0 / 34.1 | 26.6 / 32.3 | 26.5 / 35.6 |
+
+Local 700 x 700 at 0.5 m, 5 Hz, 300 cycles: today 0.10-0.18 / 3.0-4.1 (Rolling), 0.13-0.26 / 5.6-7.4 (Jazzy); final 2.6-2.7 / 2.9-3.6 (Rolling), 4.8-5.6 / 6.1-7.1 (Jazzy). No inflation, global, 45° 2 m/s: today 8.2 / 9.2, final 8.5 / 10.1.
+
+The final code costs what the owner chose on, slightly less in absolute terms (18-19.5 / 21-27 against 22-26 / 28-30 Rolling; 26.5-27 / 32-36 against about 31 / 38-40 Jazzy), but today's figures in this run are lower by about as much (8.7 against 11.2 ms), so the difference is the machine's, not the code's: the fix adds about 10 ms (Rolling) and 17 ms (Jazzy inflation) per global cycle over today's typical cycle and removes today's 0.3-0.36 s diagonal spikes.
+
+### Nav2 calls the tests depend on, `origin/jazzy` against Rolling's working tree (bodies read)
+- `LayeredCostmap::updateMap`: same, except Jazzy returns early on empty bounds where Rolling skips the block; both leave `bx0_..byn_` unchanged then.
+- `LayeredCostmap::getBounds`: same (inline, returns the last non-empty cycle's bounds on both; the test records emptiness with a last layer for that reason).
+- `LayeredCostmap::resizeMap`, `addPlugin`, `isRolling`, `getCostmap`: same. `setFootprint`: same behaviour (atomic store spelled differently), calls `onFootprintChanged` on each plugin.
+- `Costmap2D::updateOrigin`, `resetMap`, `worldToMapEnforceBounds`, `mapToWorld`, `getCost`: same. `getSizeInMetersX/Y`: differs (Jazzy `(size - 0.5) * res`); the layer no longer uses it for the window edge, and every test path gives the same origin under both formulas (checked in the test).
+- `InflationLayer::onInitialize`: parameters declared if not declared on both, so the pre-declared `inflation_radius` is used; Rolling also has `custom_inscribed_radius` (unset). `updateBounds`: identical. `onFootprintChanged`: both set `need_reinflation_` (Rolling via `updateInscribedRadius`, Jazzy from the layered costmap; a warning versus an error when the radius is under the inscribed radius, not reached here). `reset()`: same (`matchSize`, not current, reinflate). `updateCosts`: different algorithms (Rolling distance transform, Jazzy queue), which is why the tests compare only lethal and unknown cells under inflation.
+- `Layer` (the tests' `BoundsLayer`): the same pure virtuals and a protected `current_` on both. `Layer::initialize` takes the lifecycle node the existing tests already handle.
+Jazzy CI on the pull request will be the first Jazzy compile and run of these tests.
+
+### Differed from the plan or checkpoint
+- The clamp is its own commit (`8df1a96`) with a contract test that fails today; the plan had it inside C with no test.
+- (0.6, 0.35) m per cycle cannot keep Jazzy's and Rolling's origins equal; (0.5, 0.5) and (1.5, 0.5) are used, slow enough that today fails.
+- The window edge uses the cell count, not `getSizeInMetersX`.
+- `layer_variants.patch` is dropped from the harness (it is at `021ebe4`); designs (a) and (c) were not re-measured.
+- The before/after comparison shows hazards can appear up to 2 cycles later than today's tile-entry report in the cycle a tile enters (above). The plan did not state this.
+
+### Statements for the pull request
+- **Design:** on a rolling costmap the layer reports the cells each move of the window uncovers as thin strips, columns or rows, never both in consecutive cycles (the inflation layer would merge them into the whole window). On travel along one axis they are painted in the same cycle; otherwise within 3 cycles. The first cycle, a reset and a jump past the window report the whole window.
+- **Cost (desktop timings, not a vessel computer):** global costmap 18-19.5 ms mean / 21-27 ms worst per cycle with Rolling's inflation and 26.5-27 / 32-36 ms with Jazzy's, against today's 8.7-26 / 21-31 ms typical and 307-359 ms worst on diagonal travel; local costmap 2.6-5.6 / 2.9-7.1 ms per cycle.
+- **For a vessel on BEN's two costmaps:** the global costmap's leading-edge band, and the far side after a reversal, show charted land within 3 s (3 cycles at 1 Hz) instead of after up to a tile of travel or never; the local costmap within 0.6 s. Nothing that is charted stays unmarked longer than 3 cycles; a hazard today's tile-entry report showed at once may appear up to 2 cycles later. Tiles waiting for a chart grid are now painted unknown when the strip reaches them (as any reported tile always was).
+- **Not established:** a vessel computer's timings; how often the tide estimate steps over 1 cm (each step reports the whole window, as today); Jazzy's `LayeredCostmap`/`Costmap2D` under this design until Jazzy CI runs; anything on a vessel or with a planner.
+- **What the tests pin:** every cell after every cycle on axis-aligned travel, reversal, jump and back, reset, a late grid; each cell within 3 cycles on slow diagonals and every cell after 3 cycles stopped; the bounds never the whole window on steady diagonal travel; earlier layers' bounds not narrowed; the uncharted fixed window. **Not pinned:** inflation cost values (only lethal and unknown under inflation), timing, the reset line, the span clip and the half-cell margin (defensive), resolutions other than 1 m (the adversarial run covers 0.1 m), BEN's tile size.
+
+### Left alone
+rolker/s57_tools#59, #63 and the fixed-window `current_` stickiness: not touched. The tests keep them out by charts whose cell edges lie a quarter cell off the tile edges and that cover every tile a path reaches; no test depends on `isCurrent()`.
+
+### Clean-up
+No `build/`, `install/` or `log/` left in the package worktree; scratch files removed; no ROS daemon started.
