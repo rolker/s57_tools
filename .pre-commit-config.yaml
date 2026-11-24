@@ -2,7 +2,10 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
+      # trailing-whitespace and mixed-line-ending skip NOAA's user agreement,
+      # kept byte for byte as NOAA ships it: see marine_charts/test/data/README.md.
       - id: trailing-whitespace
+        exclude: ^marine_charts/test/data/enc_root/USERAGREEMENT\.TXT$
       - id: end-of-file-fixer
       - id: check-yaml
         args: ['--unsafe']  # allow ROS YAML tags
@@ -10,6 +13,7 @@ repos:
       - id: check-merge-conflict
       - id: check-executables-have-shebangs
       - id: mixed-line-ending
+        exclude: ^marine_charts/test/data/enc_root/USERAGREEMENT\.TXT$
       - id: check-added-large-files
         args: ['--maxkb=500']
 
