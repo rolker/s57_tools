@@ -274,3 +274,15 @@ Notes on the other alternatives:
 - [ ] Pin `measure.sh`'s source to a pre-fix commit in the plan's deadpool command and in its usage text.
 - [ ] If (d) is chosen: one pending interval per axis, and `have_window_` folded into `whole_pending_`.
 - [ ] Owner: choose (d), (a)+B or (f)+B from the table above. Decide whether the Jazzy backport waits for a deadpool or vessel measurement.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 14:37 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: owner
+**After**: plan
+**Decision**: proceed
+
+The owner, 2026-11-24, asked which design fixes the defect, with the planner's and the plan reviewer's measured table in the dialog (today; strips; whole window every cycle; whole window every 10th cycle; measure on his Jazzy machine first): "Repaint only the uncovered strips (Recommended)". So design (d): the uncovered region is reported as thin strips with a gap cycle between the x and the y strip, a cell uncovered at the window's edge is painted within 3 cycles, and how the layer computes `current_` is left as it is. Commit B (the `current_` core rule) is not made.
+
+The Plan Review's verdict is needs-work, on the test section only; the host does not send the plan back for that, because each resolution is concrete and is checked where it can be checked, in the implementation and its review: every test is shown failing on `rolling` under its exact assertion before it is called a regression test. Applied as follows. (1) Tests: on axis-aligned travel every cell is asserted after every move, with no allowance, since the design has no delay there; diagonal cases use a slow step such as (0.6, 0.35) so today's tile-entry repaint does not fall inside the 3-cycle allowance; several cycles are run after a jump back and after `reset()`; a case that cannot fail on today's code is kept only as a guard of the merge and gap logic and is labelled so in its comment, not counted as a regression test; one assertion guards the design's cost property: on steady diagonal travel the layered costmap's bounds are never the whole window. (2) Cell values are compared exactly only with no inflation layer; with one, lethal and unknown cells are compared (Jazzy's inflation over a sub-rectangle differs from a full pass by a few cost units). (3) The measurement harness names the source it patches (a worktree at `021ebe4`, or `jazzy` before the backport) in its usage text. (4) The state is reduced as the review suggests where behaviour is unchanged: one interval per axis, `have_window_` folded into `whole_pending_`; the implementer re-runs the review's adversarial scenarios (59 scenarios under 5 inflation and 4 other-layer set-ups) against the reduced form. (5) Commit A (a tile created while no chart is loaded is reported) goes in first, with its fixed-window test. Follow-up for the host to put to the owner: a waiting tile on a fixed-window costmap holds the layer not current indefinitely (pre-existing; BEN's costmaps are both rolling).
