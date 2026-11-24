@@ -1,0 +1,2 @@
+found 1 charts
+/usr/include/c++/15/bits/shared_ptr_base.h:1344: _Tp* std::__shared_ptr_deref(_Tp*) [with _Tp = grid_map::GridMap]: Assertion '__p != nullptr' failed.

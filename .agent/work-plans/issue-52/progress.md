@@ -388,3 +388,583 @@ CI run 45418748263 on `87bfe25`, both jobs success:
 **Decision**: merge
 
 The owner's answers, 2026-11-24: "Merge when CI is green (Recommended)" for pull request 53 (part 1), with the NOAA catalogue as the test fixture (he was shown what NOAA's agreement asks and the alternative of a synthetic catalogue); "Backport right after (Recommended)" for the hand backport to `jazzy` of the seven code, docs and CI commits; "Open it (Recommended)" for the follow-up issue in this repository. The host merges only after the CI run on the pushed records passes. Part 2 (`s57_grids`, `s57_layer`) is planned at the plan checkpoint after this merge.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 10:17 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (part 1 merged as pull request 53 at `ce1eb2b`; the plan details part 1 and only outlines part 2, so it is refreshed rather than implemented as it stands)
+**After**: plan
+**Decision**: revise
+
+Part 1 (the four Nav2-free packages and CI on both distros) is merged; its backport to `jazzy` is pull request 55. The plan is refreshed for part 2: `s57_grids` and `s57_layer`, checked on Rolling by hand (owner: no CI job builds Nav2 source), on Jazzy by the existing CI job, which already builds and tests both. To carry into the refreshed plan: the causes the issue review and part 1's plan found in `s57_layer` (1, 8, 2, 6 with 15 `declareParameter` calls, 7, 13 in tests, and the new one: `nav2::LifecycleNode::create_client` returns Nav2's wrapper; candidate 17 on rolker/unh_marine_autonomy#415); how the two earlier costmap layers were ported (`bathymetry_layer`, `ais_layer`: a local parameter helper kept rather than Nav2's newer API, tracked in rolker/unh_marine_autonomy#428; parameter-override and `initialize()` tests proved by mutation); cause 11 for `grid_map_ros`, `grid_map_msgs` and `tf2_ros`; the pre-existing defect in `s57_grids`' `grid_publisher` (`abort_flag_` set at cleanup and never reset, so after a cleanup and a new configure every grid request returns null and is then dereferenced): the plan says what the facts are and puts the choice (fix in the port, or track) to the host; `s57_layer` is on the navigation path (it marks charted hazards in the costmap), so the plan's validation statement says how the port is shown not to change what it marks. Left-alone items go to rolker/s57_tools#54 as a comment drafted for the owner.
+
+## Plan Authored
+**Status**: complete
+**When**: 2026-11-24 10:46 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Dispatch**: resumed (agent a6b786e00becb0946, resume 1 of 3)
+**Plan**: `.agent/work-plans/issue-52/plan.md` at `007cfce`
+
+Part 1 recorded as delivered (pull requests 53 and 55). Part 2 to implement now. On a scratch copy, seven changes make `s57_layer` build on Rolling and pass its 23 gtests: causes 1 and 8 (geodesy and grid_map_ros variables, 1.0.7 floor), 2, 6 (the local helper, a third copy), new cause 17 (free `rclcpp::create_client`), 7 and 13. `s57_grids` builds and passes unchanged; causes 9, 12, 14 and 16 were checked and no change is needed; cause 11 adds keys to both manifests. There are two new tests (overrides, and client-to-costmap), because a hard-coded prefix and a misnamed service both pass the existing 23. A Rolling costmap hand run against GDAL's own reading of the chart was piloted. The plan puts two defects that exist without the port to the host: the `abort_flag_` crash in `s57_grids`, reproduced (recommend fixing it in this port), and tile mis-addressing in `s57_layer`'s `worldToTile`, which leaves charted land free in a rolling window near its origin (recommend its own issue now). No workflow change. The draft cause 17 comment for #415 is in the plan.
+
+## Plan Review
+**Status**: complete
+**When**: 2026-11-24 10:58 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: ready
+
+**Issue**: #52 — Port s57_tools to ROS 2 Rolling
+**Plan**: `.agent/work-plans/issue-52/plan.md` at `007cfce`
+**Branch**: `feature/issue-52`
+**Serves**: none written down (s57_tools has no goals or design document); for the workspace, the Project11 Rolling port, rolker/unh_marine_autonomy#415. Checked: the plan's line says the same.
+
+Reviewed: Part 2 (`s57_grids`, `s57_layer`). Part 1 is a delivered record and was not re-reviewed.
+
+What I ran (session scratch copy of `007cfce`, my own colcon workspace, Rolling, DDS domain 187 checked empty, `DISPLAY` unset; removed afterwards):
+- Changes a to g applied by hand: `--packages-up-to s57_layer` builds (4 packages). `colcon test` on `s57_grids s57_layer`: the 23 existing gtests pass (12, 7, 3, 1) and `s57_grids` 6/6 ctest. Without my own scratch test this is the plan's 57 results with 11 skipped.
+- `diff` of the ported `s57_layer.cpp` against the branch: only line 10, the helper lambda, line 124 and the subscription at 655 change. No line of `get_cost_from_grid`, `generateTile`, `updateCosts` or `worldToTile` is touched.
+- A scratch gtest (`#define private public`; a hand-filled all-land grid; `ldd` shows the scratch `libs57_layer.so` is the one loaded) for the tile defect, listed under finding 1. I also ran a `charts.unsurveyed_cost = 77` override: it is declared as an integer and the member reads 77 on Rolling.
+- Rolling CI guard re-run locally with cause 11's keys added to both manifests: the four-package closure is unchanged, its keys have no `nav2_`, and `grid_map_ros` and `grid_map_msgs` are outside it. `rosdep resolve` for every added key: all resolve on noble/jazzy. On resolute/rolling all resolve except `grid_map_core`, `grid_map_msgs` and `grid_map_ros`.
+- `gh api` reads of upstream: rclcpp `jazzy` `create_client.hpp` and `lifecycle_node_impl.hpp` (the member calls the free function with the same QoS default and the same callback group), nav2 `jazzy` `layer.cpp` (`declareParameter` declares `name_ + "." + param` when it is not already declared), and grid_map `jazzy` `grid_map_ros/CMakeLists.txt` (it exports only include directories and libraries, no target, as 2.5.0 does).
+
+### Evaluation
+
+| Dimension | Verdict | Notes |
+|---|---|---|
+| Scope | Good | Two packages, 11 commits plus one optional, one fix per commit. The two pre-existing defects are put to the host, not folded in. |
+| Issue alignment | Good | Every cause the issue review listed for these two packages is handled: 1, 8, 2, 6, 7, 13, 11 and new 17. Causes 9, 12 and 14 were checked and need no change. The two tests the issue review asked for (overrides, and `initialize()` with the client and subscription) are planned and mutation-checked. |
+| File targeting | Good | Matches what my scratch port touched. Only the abort fix touches `s57_grids` sources. |
+| Consequences | Needs work | The tile defect's risk statement names the wrong origin (finding 1). The abort fix leaves another null path (finding 2). |
+| Principle alignment | Good | Test what breaks: two mutations that pass the 23 tests today become caught. Verify before claiming: the Jazzy and Rolling limits are stated. Minor: `ament_cmake_ros` is declared in a later commit than the one that first uses it (finding 3). |
+| ADR compliance | Good | ADR-0013: entries and records are kept out of the code commits. |
+| ROS conventions | Good | Cause 17's free `rclcpp::create_client` gives the same QoS (`ServicesQoS`) and the same callback group (default, `nullptr`) as Jazzy's member, and it compiles on both distros. The CMake-variable linking of `grid_map_ros` and `geodesy` is forced: neither exports a target, on Jazzy or Rolling. It matches `s57_grids/CMakeLists.txt:30-34` and bathymetry_layer. |
+
+### Findings
+
+1. **[Consequences]** (major, wording that goes to the owner) The tile defect is confirmed. The plan's account of when it happens is wrong, and its age is understated.
+   - **What `x_origin_` is.** `x_origin_` and `y_origin_` are set only in `matchSize()` (`s57_layer.cpp:145-150`). That runs from `onInitialize` and from `LayeredCostmap::resizeMap`. `Costmap2DROS::on_configure` resizes the map to the `origin_x`/`origin_y` parameters (default 0) before the plugins are initialised (`costmap_2d_ros.cpp:149-152`), and a rolling window's `updateOrigin` never calls `matchSize`. So the reference point is the costmap's configured origin, by default the global frame's origin. It is not "where its costmap window started".
+   - **When it triggers.** A rolling window is affected whenever its lower-left corner is west or south of that point: the robot within half a window east or north of the frame's origin, or anywhere west or south of it. On ben, `map` is anchored at the first position fix unless a map origin is configured (mru_transform README), so the defect is present from the first cycle.
+   - **Static costmaps.** Never affected, because the origin captured is the window's own origin (scratch test 5).
+   - **Age.** The truncation came with tiles in `181c034` (2021-09-21). `9938802` (2026-02-19) only renamed the members. The plan's line numbers (`:174-175`) are the post-port ones; on the branch the lines are `:159-160`.
+   - Correct the plan's "What it means for the vehicle" text before the owner relies on it.
+2. **[Consequences]** (minor) The abort fix makes this one cleanup path safe. It does not touch the dereference itself.
+   - `checkForNewGrids` still dereferences an unchecked `grid` at `grid_publisher.cpp:259` and `:284`.
+   - `getGrid` also returns null when `open()` fails (`s57_dataset.cpp:151-153`), for example a cell file replaced or removed after the catalogue scan, and when `llToMap` fails. Either aborts the node the same way.
+   - The planned state test pins the `abort_flag_ = false` reset: deleting it fails the test. It cannot pin `pending_dataset_grids_.clear()`, because without a chart cell no job is pending at cleanup. Nor does it pin the crash, as the plan says.
+   - Either add `if(!grid)` handling at the two dereferences in the same commit (the owner's call: a third change), or list the other null paths explicitly in the #54 comment.
+3. **[Principle alignment]** (minor) Commit 5 introduces `ament_add_ros_isolated_gtest`, but `ament_cmake_ros` is declared only in commit 10. With strict rosdep, declare it in commit 5 so the commit stands alone. This also keeps the two-step push from depending on what `ros:jazzy-ros-core` happens to ship.
+4. **[Principle alignment]** (minor) Both new tests need bounded polling, not fixed sleeps:
+   - test 1's `get_client_names_and_types_by_node`, because graph discovery is asynchronous even in one process;
+   - test 2's `service_is_ready`, the reply, the latched grid and the costmap.
+   Test 2's window should be a static `LayeredCostmap` whose origin is at or below the grid, otherwise the tile defect can fail it. Say both in the plan.
+5. **[Scope]** (note) The two-step push can be done on the Part 2 pull request into `rolling` rather than on the backport. The `ci.yml` Jazzy job runs on pull requests into `rolling` and builds `s57_layer`, and the Rolling job does not build it. That yields the same evidence (test 1 against Nav2's own `declareParameter`) one pull request earlier.
+
+### Summary
+
+The port is sound and verified as far as this machine allows. With changes a to g, both packages build on Rolling and the 23 existing tests pass. The marking functions are untouched. Cause 17's fix keeps Jazzy's client semantics, and the planned tests close the two gaps that compile-only evidence leaves. Ready for implementation once the tile-defect risk text (finding 1) is corrected for the owner. Findings 2 to 5 can be taken up during implementation.
+
+### Recommended Actions
+
+- [ ] Rewrite the plan's tile-defect consequence (finding 1): reference point, trigger, static case, age `181c034`.
+- [ ] Abort fix: decide about the `if(!grid)` guard, or name the other null paths for #54 (finding 2).
+- [ ] Move `ament_cmake_ros` into commit 5 (finding 3).
+- [ ] Specify the polling and the window placement for tests 1 and 2 (finding 4).
+- [ ] Consider doing the two-step push on the `rolling` pull request (finding 5).
+
+### Tile addressing (for the host and the owner)
+
+- **(a) Which positions, and what follows.** `worldToTile` truncates toward zero, so for `(x - x_origin_)/(resolution_*tile_size_)` in (-1, 0) it returns 0 instead of -1, and every negative tile index is one too high.
+  - A tile's bounds come from its id (`x_origin_ + id*T` at `:314`, `:341`), and `updateCosts` copies by an offset computed from that id (`:469-474`). The data that is copied lands in the right place: no two regions share a tile, and nothing is stale data from somewhere else.
+  - What goes wrong is the loop range. `updateCosts` starts at `worldToTile(mapToWorld(min_i))`, a cell centre, so whenever the window's minimum is below the origin the westmost (or southmost) partial tile is never iterated or generated. Its cells receive nothing from the layer.
+  - Those cells are left at the master grid's reset value: FREE_SPACE with `track_unknown_space: false`, NO_INFORMATION with `true`. With `allow_uncharted: false` they are also not marked NO_INFORMATION. The strip is up to one tile wide (`tile_size_` cells, default 100), at the window's west and/or south edge.
+  - It is always "free or unknown where it should be lethal". It is never "lethal where it should be free".
+- **(b) When.** Only rolling windows are affected: the window's lower-left corner west or south of the costmap's configured `origin_x`/`origin_y`, by default the global frame's origin. On ben's `map_tide` (anchored at the first fix unless configured), that is:
+  - local costmap (350 m, 0.5 m): the strip is up to 50 m wide and begins 175 m from the vessel;
+  - global costmap (5000 m, 1 m, `track_unknown_space: true`): up to 100 m of unknown begins 2500 m away.
+  Because the strip is always at the window's edge, the cells under and near the vessel stay correct while half the window exceeds one tile. The exposure is plans made through the strip (global path, coverage), which are then corrected only as the strip slides inward. Inflation from the missing land is missing too.
+- **(c) Reproduced.** Scratch gtest, 10x10 cells at 1 m:
+  - rolling window, robot at (0, 0), tile 100: 25 of 100 cells lethal, should be 100 (the west 5 columns and south 5 rows free);
+  - the same window uncharted with `allow_uncharted: false`: 25 of 100 cells NO_INFORMATION;
+  - rolling window at (-20, -20) with tile 4: 81 of 100;
+  - rolling window at (+20, +20): 100 of 100;
+  - static window with origin -5: 100 of 100.
+  With `std::floor` in a scratch copy, all five give 100. That copy was discarded.
+- **(d) Why the 23 tests missed it.** Every test that calls `updateCosts` uses a non-rolling 10x10 `LayeredCostmap` at origin 0 (`test_allow_uncharted.cpp:52`, `test_depth_costs.cpp:358`, `test_tide_offset.cpp:96` etc.), so the window minimum always equals `x_origin_`. No test moves the origin.
+- **(e) Age.** Since `181c034` (2021-09-21). It is identical on `jazzy` (`git diff origin/jazzy` on the file is empty).
+- **Order.** The facts support a separate issue and pull request (B). They do not support gating it on Part 2.
+  - The fix lines and the port's lines are disjoint, so either order cherry-picks cleanly, and the port's "no marking line changed" claim holds either way.
+  - The `ci.yml` Jazzy job runs on pull requests into `rolling` and builds `s57_layer`, so a fix pull request can be checked on Jazzy by CI before Part 2. On Rolling it can only be checked by hand after Part 2.
+  - The defect is live on the deployed Jazzy code today. Landing it first or in parallel shortens the exposure and lets Part 2's hand run show full agreement.
+  - The scratch test above is the shape of its regression test.
+
+### `abort_flag_` (for the host and the owner)
+
+- **Mechanism, confirmed by reading.** The flag is set at `grid_publisher.cpp:148` and never reset (`grid_publisher.h:122`). `getGrid` then returns null at `s57_dataset.cpp:177`, and `checkForNewGrids` dereferences it at `:259` (and at `:284` when `publish_costmaps` is on) if the label was requested. `:487` is guarded. I did not re-run the crash.
+- **Who can trigger it.** Only an operator: `ros2 lifecycle set`, or ros2launch_gui's Cleanup entry (`launch_description_widget.py:39`). No lifecycle manager lists `s57_grids` in ben (`navigation_launch.py:46-56`). `s57_grids_launch.py` transitions once and respawns the node unconfigured.
+- **The costmap afterwards.**
+  - Grids already received keep marking.
+  - Tiles of a chart listed in the last reply but never delivered get NO_INFORMATION, whatever `allow_uncharted` says (`all_charts_available` false).
+  - Areas the window reaches later are treated as uncharted: with `allow_uncharted: true` they are left free on the local costmap and unknown on the global one.
+  - The layer logs an unthrottled WARN, "The get datasets service is not ready", every cycle. It does not log an ERROR.
+- **The proposed test.** It pins the reset (mutation-checked), not the `clear()` and not the crash (finding 2).
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 10:58 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: owner
+**After**: plan
+**Decision**: proceed
+
+The Plan Review at `007cfce` found part 2's plan ready, with five findings, and confirmed two pre-existing defects on the hazard path. The owner answered both on 2026-11-24. **The tile-addressing defect in `s57_layer` (`worldToTile`, `s57_layer.cpp:157-162`): "Own issue now, fix in parallel (Recommended)".** It is rolker/s57_tools#56, driven on its own branch; **part 2 does not touch `worldToTile` or any other marking line**, and its hand run on Rolling states the defect where it shows (a rolling window reaching west or south of the costmap's configured origin) instead of working round it silently. **The `abort_flag_` defect in `s57_grids`: "Fix in Part 2, with null checks (Recommended)".** So commit 12 is in: reset the flag on configure and drop aborted jobs on cleanup, and check for a missing grid at the two dereferences (`grid_publisher.cpp:259` and `:284`), so a chart that fails to open cannot abort the node either; with a test that pins the reset and, if achievable without a chart cell, the null path; its own commit, backported. Review findings, applied: (1) the plan's account of the tile defect is superseded by the review's (the reference point is the costmap's configured origin; rolling windows only; the line dates from `181c034`, 2021); nothing in part 2's records repeats the old wording. (3) `ament_cmake_ros` is declared in the commit that first uses `ament_add_ros_isolated_gtest`. (4) Both new tests use bounded polling, not fixed sleeps, and the client-to-costmap test uses a static costmap with its origin at or below the grid, so the tile defect cannot fail it. (5) The two-step push is done on this pull request into `rolling`: the branch is first pushed up to the overrides test, so the Jazzy job runs that test against Nav2's own `declareParameter`, then the rest. Host decisions: a third copy of the parameter helper, as the two earlier layers have; the before/after costmap comparison on the owner's Jazzy machine is offered, not required.
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 11:38 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Branch**: feature/issue-52 at `2a9d081`
+
+Part 2 of 2 (`s57_grids`, `s57_layer`), per the plan and the Checkpoint of 10:58 (commit 12 in, with null checks; tile addressing left to #56). Twelve code commits, none touching `.agent/`, each ending "Part of #52. Backport to jazzy.", then one records commit (`2a9d081`, hand-run scripts and raw results under `hand-runs/`, not backported):
+
+1. `f14c0a0` s57_layer: link geodesy and grid_map_ros through their CMake variables (#415 causes 1 and 8)
+2. `98182eb` s57_layer: state the geodesy 1.0.7 floor that geodesy/ecef.h needs (#415 cause 8)
+3. `3b63f8b` s57_layer: include tf2/utils.hpp (#415 cause 2)
+4. `5d44873` s57_layer: include Nav2's lifecycle node from where each distro has it, in the tests (#415 cause 13)
+5. `354e860` s57_layer: test that every parameter override is read under the layer's name. **The first push stops here.** `ament_cmake_ros` is declared in this commit.
+6. `1eeec53` s57_layer: declare parameters without Layer::declareParameter (#415 cause 6)
+7. `ac29320` s57_layer: create the get_datasets client with rclcpp's free function (#415 cause 17)
+8. `02d7617` s57_layer: create grid subscriptions with rclcpp's free function (#415 cause 7)
+9. `a91812a` s57_layer: test that initialize()'s client reaches get_datasets and a grid reaches the costmap
+10. `91a4d4e` s57_layer: declare the packages it uses (#415 cause 11)
+11. `fa07b2c` s57_grids: declare the packages it uses (#415 cause 11)
+12. `8ab87bf` s57_grids: start each configuration with grid jobs enabled, and skip a chart that gives no grid
+
+On Rolling `s57_layer` first compiles at commit 8, so commits 1 to 7 were not built one by one here; the sequence was built and tested where it first compiles and at the head. All twelve cherry-pick cleanly, in order, onto `origin/jazzy` `89b552d` (scratch worktree, removed). Commit 5 on Jazzy, by reading `origin/jazzy` of navigation2 (`c704655`) and rclcpp/geometry2 `jazzy`: the test uses `nav2_util::LifecycleNode(name, "", options)`, `Layer::isEnabled`, `initialize(..., WeakPtr, nullptr)`, `get_client_names_and_types_by_node` and `tf2_ros/buffer.hpp`, all present; Jazzy's `Layer::declareParameter` declares `name_ + "." + param` unless declared, and its node's `create_client` is rclcpp_lifecycle's member, so the overrides test should pass there unchanged. Not run on Jazzy.
+
+### Verification (Rolling, this machine; tree `8ab87bf`; DDS domains 163 and 177, each checked empty with `ros2 node list --no-daemon`; `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`; `DISPLAY` unset; everything started was stopped)
+
+- **Underlay** (`/home/roland/project11/rolling/underlay`): navigation2 install built 2026-11-19 from `dcffa939` (clone 08:51, `libnav2_costmap_2d_core.so` 12:09); the checkout is `9113449e` (fast-forward on 11-23), and `git diff dcffa939 9113449e -- nav2_ros_common nav2_costmap_2d nav2_util` is empty. grid_map `0ece1b5` (2.5.0) and geographic_info `f70b81a` (geodesy 1.0.7), checkout and install alike (one clone each in the reflog).
+- **Clean build** from empty `build/ install/ log/`: `MAKEFLAGS=-j4 ./build.sh --parallel-workers 4 --packages-up-to s57_grids s57_layer --cmake-args -DBUILD_TESTING=ON` → `Summary: 4 packages finished [32.0s]`. Warnings in the two packages: only the `tf2_ros/buffer.h` (7) and `transform_listener.h` (4) header deprecations, from the old tests and `grid_publisher.h`.
+- **Full test run**: `./test.sh --parallel-workers 4 --packages-select s57_grids s57_layer` → `s57_grids` `100% tests passed, 0 tests failed out of 7` (launch test, `test_reconfigure` 3 tests, lint); `s57_layer` `100% tests passed, 0 tests failed out of 8` (`test_allow_uncharted` 3, `test_tide_offset` 7, `test_depth_costs` 12, `test_initialize` 9, `test_plugin_loading` 1, lint); `colcon test-result`: `Summary: 73 tests, 0 errors, 0 failures, 13 skipped` (cppcheck).
+- **Repeats, each run a separate process**: `test_initialize` 50/50, `test_reconfigure` 50/50; `test_depth_costs`, `test_tide_offset`, `test_allow_uncharted`, `test_plugin_loading` 10/10 each; launch test 20/20 as separate `ctest -R test_node_launch` runs, and `--repeat until-fail:20 -V` shows 20 passes. No failure in any run.
+- **rosdep**: every added key resolves with `--os=ubuntu:noble --rosdistro=jazzy` (`geographic_msgs`, `grid_map_core`, `grid_map_msgs`, `grid_map_ros`, `tf2`, `tf2_ros`, `ament_cmake_ros`, `geometry_msgs`, `nav_msgs`, `tf2_geometry_msgs`, `launch`, `launch_ros`, `rclpy`, `rcl_interfaces`); with `--os=ubuntu:resolute --rosdistro=rolling` all resolve except `grid_map_core`, `grid_map_msgs`, `grid_map_ros` ("no rosdep rule": source-only on Rolling, from the underlay). `rosdep check --ignore-src --from-paths s57_grids s57_layer` (no `-r`): "All system dependencies have been satisfied". `ament_xmllint` on both manifests: "No problems found".
+- **Part 1's Rolling CI steps, re-run** from the workflow's own `run:` blocks (extracted from `ci.yml`), `env -i` plus `HOME`, `PATH`, `ROS_DISTRO=rolling`, the job's `PACKAGES`, on a `git archive` of HEAD with grid_map at `0ece1b5` and unh_marine_autonomy `rolling` `0ca4a58` (local clones): guard exit 0, closure the same 11 packages as Part 1 (the four, `grid_map_cmake_helpers`, `grid_map_core`, five from unh_marine_autonomy), no declared `nav2_` key; strict rosdep (`--simulate` plus `rosdep check`, no `-r`) "All system dependencies have been satisfied".
+- pre-commit 4.7.0 (scratch venv) on every changed file and the records: all hooks pass.
+
+### Mutations (scratch copy of HEAD built outside the source tree; each mutated test run with the scratch build directory first on `LD_LIBRARY_PATH`, `ldd` showing the scratch `libs57_layer.so` loaded each time; raw output in `hand-runs/mutations_*.txt`)
+
+Baseline: `test_initialize` 9/9, old tests 12, 7, 3, 1 pass, `test_reconfigure` 3/3.
+- Helper hard-codes `"chart_layer."`: `test_initialize` fails 8 of 9 (all but `ReadsEnabledFalse`); the 23 old tests all pass, as the plan found.
+- Each read-back misnamed (`name_+".<p>_x"`): `enabled` fails 5 (`ReadsLethalDecisionOverrides`, `ReadsAllowUnchartedOverride`, `ReadsTideOverrides`, `DefaultsEnableTheLayer`, `ChartReachesTheCostmap`); `minimum_depth`, `maximum_caution_depth`, `overhead_clearance`, `unsurveyed_cost`, `depth_costs` each fail `ReadsLethalDecisionOverrides`; `allow_uncharted` fails `ReadsAllowUnchartedOverride`; `chart_datum_frame`, `sea_surface_frame`, `tide_invalidate_threshold` each fail `ReadsTideOverrides`; `s57_grids_namespace` fails `ClientUsesTheOverriddenNamespace` and `ChartReachesTheCostmap`; `get_datasets_service` fails `ClientUsesTheOverriddenServiceName`. `update_timeout`, `tile_size`, `buffer_fraction`: nothing fails (declared-only, as planned).
+- Service misnamed (`service_name += "_x"`): fails `ClientUsesTheOverriddenServiceName`, `ClientUsesTheOverriddenNamespace`, `ChartReachesTheCostmap`; the 23 old tests pass.
+- Grid topic without the namespace prefix: fails `ChartReachesTheCostmap`; the 23 old tests pass.
+- `abort_flag_ = false` deleted: fails `ConfigureAfterCleanupClearsTheAbortFlag`. `pending_dataset_grids_.clear()` deleted: fails `CleanupDropsAbortedJobs`. Missing-grid check disabled: the test process aborts (exit -6) with `__shared_ptr_deref ... Assertion '__p != nullptr' failed`.
+- `unsurveyed_cost` declared from an `unsigned char`: declared as an integer, and 77 reads back as 77 on Rolling (no failure).
+
+### The `s57_grids` fix (commit 12)
+
+- `on_configure` clears `abort_flag_`; `on_cleanup` drops the jobs it waited on; `checkForNewGrids` checks the grid once, before both dereferences (`toMessage(*grid)` and `toOccupancyGrid(*grid, ...)`, `grid_publisher.cpp:259` and `:284` on the base), logs an error naming the chart and skips it: no publisher made, `requested_grids_to_publish_` and the start time erased, so the next `get_datasets` that lists the chart tries again. One check rather than two because both uses are in the same block and a skipped chart must not create the empty `grid_publishers_` entry that marks a chart as done.
+- `pending_dataset_grids_`, `tf_buffer_` and `abort_flag_` are made `protected` **in place** (access specifiers only), so declaration and destruction order are unchanged; moving them would have destroyed `tf_buffer_` before the `tf_listener_` that references it.
+- **Reproduction on Rolling** (`hand-runs/repro_abort.py`, NOAA cells US5PSMCC and US5PSMCD from unh_marine_simulation `55926d0` `asv_sim/enc`, as an ENC_ROOT of per-cell folders in the scratchpad; static earth→map ENU at 43.07 N, 70.75 W):
+  - before (binary built at `fa07b2c`): configure, activate, request west: "Grid ready: US5PSMCC.000 (1.74826 s from request to publish)"; deactivate, cleanup, configure, activate (all `True`), request east: node exited with -6, "`_Tp* std::__shared_ptr_deref(_Tp*) [with _Tp = grid_map::GridMap]: Assertion '__p != nullptr' failed.`"
+  - control, same binary, no cycle: both "Grid ready", node alive.
+  - after (`8ab87bf`): both "Grid ready: US5PSMCC.000 (1.74795 s …)" and "Grid ready: US5PSMCD.000 (1.84657 s …)" across the cycle; node alive, exit 0 on SIGTERM.
+  - missing cell (ENC_ROOT = marine_charts' catalogue fixture, `minimum_scale -1`): before, exit -6 with the same assertion; after, "No grid for chart US5PSMCC.000 (it could not be opened or placed in the map frame); not publishing it." and the node alive.
+- **What `test_reconfigure` pins**: the reset (configure, cleanup, configure through the lifecycle API); the dropping of an aborted job (a finished future holding no grid, put in by hand, because no job can be in flight without a chart cell); and the missing-grid path end to end in-process: Part 1's fixture is a catalogue whose one chart has no cell file, the test serves the request (`minimum_scale -1`, because an unopenable cell's scale reads 0), and the node logs the error on `/rosout` and the process lives. **What it does not pin**: the crash after a real cleanup cycle with a chart that opens (needs a chart cell); a chart that opens but cannot be placed in the map frame (`llToMap` failing); the precompute path, which lists charts by position alone and reaches the same grid job. It reads the fixture through `../marine_charts/test/data/enc_root` (`s57_grids/CMakeLists.txt:113`), so it needs the whole repository checked out; without it the test fails, not passes.
+
+### The costmap hand run (`hand-runs/costmap_run.py`, `oracle.py`; tree `8ab87bf`)
+
+Setup: `nav2_costmap_2d` (navigation2 install `dcffa939`) with only `s57_layer::S57Layer` ("chart": `minimum_depth` 2, `maximum_caution_depth` 6, `s57_grids_namespace` "/"), 1000 × 1000 cells at 1 m, `track_unknown_space` false; `s57_grids` (`8ab87bf`) serving US5PSMCC and US5PSMCD; static earth→map ENU at 43.07 N, 70.75 W and map→base_link at the robot position. The oracle is GDAL's own S-57 reading of the same cells: a sample is "lethal" if in LNDARE or in DEPARE/DRGARE with DRVAL1 < 2, "deep" if in DEPARE/DRGARE with DRVAL1 ≥ 6 and not land. Every 10th cell each way is sampled (10,000 per window); a disagreement is "at a boundary" when the oracle's class changes within 7.5 m (the grid is 3.75 m). Both cells were received in every run that overlaps them.
+
+| Window | Oracle lethal → costmap lethal | Oracle deep → costmap free/ramp | Disagreements not at a boundary |
+|---|---|---|---|
+| static, origin (1500, 0) | 5289 of 5549 | 3005 of 3025 | 222 land samples **free** in x 2000–2037 (the cell seam, below); 8 deep samples lethal in one cluster near (1900, 850), the three checked under charted pontoons (PONTON) |
+| rolling, robot (1000, 1000), window [500, 1500]² | 7181 of 7191 | 2260 of 2310 | 19 deep samples lethal along one line from (905, 775) to (785, 995), the three checked on a charted obstruction (OBSTRN) |
+| rolling, robot (2500, 500), window [2000, 3000] × [0, 1000] | 3961 of 4223 | 4415 of 4415 | 222 land samples **free** in x 2000–2037 (the cell seam) |
+| rolling, robot (0, 0), window [-500, 500]² | 8100 of 10000 (all land) | none | **1900 land samples free, all in the west strip x [-500, -400) and south strip y [-500, -400): 190,000 cells, the tile-addressing defect, rolker/s57_tools#56** |
+
+PONTON and OBSTRN are rasterised lethal by `s57_grids` (`marine_charts/src/s57_dataset.cpp`, cases 95 and 86); the oracle does not model them, so those are correct marks. The rest of the disagreements are at chart boundaries (lethal → ramp, deep → lethal within 7.5 m).
+
+- **#56 shows where expected**: only the window reaching west and south of the costmap's configured origin (0, 0), and only its west and south strip, one tile (100 m) wide. Everywhere else in that window agrees with the chart. Not worked round: the tests use a static costmap with its origin at the grid's south-west.
+- **New, pre-existing: the cell seam.** US5PSMCC and US5PSMCD meet at 70.725 W, x ≈ 2036 m. The layer's tile [2000, 2100] has its centre (2050) east of the seam, so `grid_map::SubmapGeometry` fails for the west cell (`getSubmapInformation` returns false when the requested centre is outside the grid, grid_map `GridMapMath.cpp:338-341`, the same on grid_map's `jazzy` branch), `generateTile` (`s57_layer.cpp:425`) skips it, and the strip of the tile on the west cell's side, about 36 m by 1000 m, gets no chart data: charted land left free in a static and a rolling window alike. Any chart edge inside a tile whose centre is outside that chart behaves the same; overlapping coarser charts would fill it with coarser data. `s57_layer.cpp` is identical on `origin/jazzy` and `origin/rolling`, so this is on Jazzy too by reading (not run). **A grounding risk like #56; recommend its own issue.** Not touched here: it is in `generateTile`.
+
+### Differences from the plan and the checkpoint
+
+- Commit 12's subject adds "and skip a chart that gives no grid" (the owner's null checks); one check guards both dereferences (reason above). Its test also pins `pending_dataset_grids_.clear()` (by a hand-made aborted job), which the plan said could not be pinned; it pins the null path through the catalogue fixture. `ament_cmake_ros` and `rcl_interfaces` are declared as test dependencies of `s57_grids` in commit 12, where they are first used.
+- Commit 12 makes three `GridPublisher` members protected in place instead of only `abort_flag_` (the test needs the pending jobs and the tf buffer too).
+- The overrides test (commit 5) has 8 cases, not one: `enabled` is read both ways (true differs from Nav2's starting false; false differs from the default) plus a defaults case. `depth_costs` is overridden to false, which suppresses the ramp, so the test switches the protected member back on by hand after checking it, to read `minimum_depth`, `maximum_caution_depth` and the tide.
+- Test 2's chart grid is 110 m square at a quarter-cell offset, not 20 m square: a 20 m grid did not reach the costmap, because of the tile-centre behaviour above and a grid_map precision edge case (a request clipped to a grid edge at map coordinate 0 loses its epsilon, `GridMapMath.cpp:262-267`), and an integer-aligned grid wrote lethal cells into column 0 of the next row (the edge-wrap defect below). Both are documented in the test; neither is worked round in the layer.
+- The new tests include `tf2_ros/buffer.hpp`, which exists on Jazzy too; the old tests keep `buffer.h`.
+- Plan's repeat counts were 50 for the new tests: done (the handoff asked for at least 30). One extra hand-run window (robot (2500, 500)) shows the seam in a rolling window.
+- `nav2_ros_common` is not declared: the tests include it only where `__has_include` finds it, and Jazzy has no such key.
+
+### Left alone (for the comment on rolker/s57_tools#54)
+
+- `s57_grids`: `GridCreationContext`'s constructor calls `lookupTransform(map, "earth")` (`marine_charts/src/grid_creation_context.cpp:14`) from the `checkForNewGrids` timer (`s57_grids/src/grid_publisher.cpp:236`) with no `try`: a missing transform throws out of the timer (not reproduced; the new test waits for the transform first).
+- `s57_grids`: `on_cleanup` (`grid_publisher.cpp:150-170`) keeps `grid_publishers_`, `costmap_publishers_`, `dataset_grids_`, `requested_grids_`, `requested_grids_to_publish_`, `grid_request_start_times_` and `did_precompute_`.
+- `s57_grids`: `s57_grids_launch.py:18-19` respawns the node, but its `LifecycleTransition` (`:22`) runs once, so a respawned node stays unconfigured.
+- `s57_grids`: after commit 12 a chart that cannot be opened is retried, with an unthrottled ERROR, on every `get_datasets` that lists it (`grid_publisher.cpp:259`).
+- `s57_layer`: `unsurveyed_cost` is declared from an `unsigned char` (`s57_layer.cpp:60-61`, `s57_layer.h:97`): it is an integer parameter, and the override reads back correctly on Rolling, but a value outside 0 to 255 wraps silently (no range check).
+- `s57_layer`, **new**: chart data dropped at chart edges inside a tile whose centre is outside the chart (`s57_layer.cpp:425`; grid_map `GridMapMath.cpp:338-341`), shown above at the US5PSMCC/US5PSMCD seam. Recommend its own issue.
+- `s57_layer`, **new**: `generateTile` (`s57_layer.cpp:438-455`) uses `Costmap2D::worldToMapEnforceBounds`, which returns `size` (one past the last cell) when a coordinate equals the tile's east or north edge exactly (navigation2 `costmap_2d.cpp:335-346` on Rolling, `:328-339` on Jazzy). A grid cell edge exactly on the tile's east edge then writes into column 0 of the next row (seen in a test draft: 9 water cells lethal); exactly on the north edge, the write goes past the end of the tile's array. Needs exact floating-point alignment, which real chart grids rarely give.
+- Tests include the deprecated `tf2_ros/buffer.h`: `s57_layer/test/test_allow_uncharted.cpp:10`, `test_tide_offset.cpp:14`, `test_depth_costs.cpp:14`; and `s57_grids/src/grid_publisher.h:15-16` (`buffer.h`, `transform_listener.h`).
+- Both manifests are format 2 (`s57_grids/package.xml:1`, `s57_layer/package.xml:1`): `ament_xmllint` checks well-formedness only.
+- `s57_layer/package.xml:21` declares `marine_charts`, and `CMakeLists.txt:71` exports it, though nothing in the package includes it.
+- cppcheck skips on both distros (13 results skipped here).
+
+### Draft comment for rolker/unh_marine_autonomy#415 (cause 17)
+
+> **Cause 17: Nav2's lifecycle node wraps `create_client`.** On Rolling, `nav2::LifecycleNode::create_client<SrvT>(name, use_internal_executor = false)` returns `nav2::ServiceClient<SrvT>::SharedPtr` (`nav2_ros_common/lifecycle_node.hpp:211`, built by `nav2::interfaces::create_client`, `interface_factories.hpp:255`), not `rclcpp::Client<SrvT>::SharedPtr`. Code that stores the result in an `rclcpp::Client` pointer fails to compile (`no match for 'operator='` between the two). Jazzy's `nav2_util::LifecycleNode` inherits rclcpp_lifecycle's member, `create_client(name, qos = rclcpp::ServicesQoS(), group = nullptr)`.
+>
+> Remedy that builds on both distros and keeps the same client: `rclcpp::create_client<SrvT>(node->get_node_base_interface(), node->get_node_graph_interface(), node->get_node_services_interface(), name)`, the free function Jazzy's member calls, with the same defaults on both (rclcpp `create_client.hpp`). It is the client counterpart of cause 7. Found in `s57_layer` (rolker/s57_tools#52, part 2, commit `ac29320`), which keeps `service_is_ready`, `async_send_request` and `prune_requests_older_than` on an `rclcpp::Client`.
+>
+> Compiling is not evidence the client still reaches its service: `s57_layer`'s 23 existing tests pass with the service name deliberately misnamed. Its new `test_initialize` checks that the ROS graph lists exactly one `GetDatasets` client on the layer's own node under the configured name, and serves `get_datasets` in-process to follow a chart from the request, through the reply's latched grid subscription, to lethal cells in the costmap. The misnamed service fails three of its cases. Checked on Rolling; on Jazzy by CI.
+>
+> Where else: any Nav2 plugin or node that calls `create_client` on Nav2's node type and keeps an `rclcpp::Client`. Search for `create_client<` in code built on Nav2 before trusting a clean build.
+
+### Validation statement for the pull request
+
+- **No marking line changed.** `git diff origin/rolling -- s57_layer/src/s57_layer.cpp` has four hunks: line 10 (`tf2/utils.hpp`, `3b63f8b`), the parameter helper inserted in `onInitialize` (+11, `1eeec53`), the client creation in `onInitialize` (+6 −1, `ac29320`), and the subscription creation in `getDatasetsCallback` (+6 −1, `02d7617`). `s57_layer.h` is unchanged. The bodies of `get_cost_from_grid`, `generateTile`, `updateCosts`, `worldToTile`, `updateBounds`, `matchSize`, `reset`, `worldToLatLon`, `llToWorld` and `mapGridCallback` are byte-identical to `origin/rolling` (compared by extraction).
+- **What the two new tests pin.** The overrides test: all 15 parameters declared under the layer's own name (not `chart_layer.`, not bare) and read back through what the layer does: the lethal decisions of `get_cost_from_grid`, the uncharted handling of `updateCosts`, the tide offset of `updateBounds`, and the `get_datasets` client's name on the ROS graph. `tile_size`, `update_timeout` and `buffer_fraction` are checked as declared only. The client-to-costmap test: the request reaches an in-process `get_datasets`, the layer's node subscribes once to `<namespace>/datasets/<topic>`, and the chart's land becomes `LETHAL_OBSTACLE` and its water `FREE_SPACE` in a static costmap. A hard-coded `chart_layer.` prefix, a misnamed service and a wrong topic prefix, each of which passes the 23 existing tests, fail them; so does a misnamed read of each of the 12 observable parameters.
+- **`s57_grids`.** A cleanup and a new configure no longer leave grid jobs aborted, aborted jobs are dropped, and a chart that gives no grid is logged and skipped instead of aborting the node. Reproduced before and shown gone after with NOAA cells on Rolling; the reset, the drop and the missing-cell path are pinned by `test_reconfigure`; the crash after a real cleanup with an openable chart is not.
+- **The hand run on Rolling** (one pair of NOAA cells, one layer configuration, four 1 km windows; no vessel, no planner, no other layer or inflation using the costmap): the ported layer fetches both charts through Rolling's Nav2 and marks land and shallow water lethal where GDAL's own reading of the cells says they are, except in two places, both pre-existing. One is the tile-addressing defect, rolker/s57_tools#56, known and not changed here: 190,000 cells free in the west and south strip of the window that reaches west and south of the configured origin. The other is a newly found gap at the seam between the two cells: a strip about 36 m wide left free, in a static and a rolling window alike, because `generateTile` drops a chart that does not contain the tile's centre.
+- **Jazzy**: the existing CI job (which builds and tests both packages with strict rosdep) is the check; nothing was run on Jazzy locally. The branch is pushed first up to `354e860`, so the Jazzy job runs the overrides test against Nav2's own `Layer::declareParameter` before the helper replaces it.
+
+### Unverified
+
+Everything on Jazzy (build, tests, the abort reproduction, the hand run, the seam gap): by reading only. A before/after costmap is not possible on Rolling (the pre-port tree does not compile); the deadpool comparison remains on offer. The seam gap with overlapping coarser charts present (here there is none). The `llToMap`-failure null path. The crash-level test with a real cleanup cycle.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-11-24 11:51 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: approved
+
+**Branch**: feature/issue-52 at `28924ab` (code head `8ab87bf`)
+**Base**: origin/rolling
+**Depth**: Deep (reason: 31 files, about 2,500 lines; s57_layer is on the hazard-marking path and is backported to the deployed Jazzy code)
+**Must-fix**: 0 | **Suggestions**: 4
+**Round**: 1 | **Ship**: recommended (no must-fix findings; the suggestions can be applied or tracked)
+
+Part 2 (`s57_grids`, `s57_layer`). Specialists: governance, plan drift, a Claude adversarial subagent, and Gemini and Codex (both completed). Static analysis was not run separately: the implementer's pre-commit run is recorded.
+
+### What I ran or read
+- **No marking line changed.** I read the whole of `git diff origin/rolling...HEAD -- s57_layer/src`. `s57_layer.h` is unchanged. `s57_layer.cpp` has four hunks: the include, the helper lambda, the client and the subscription. `get_cost_from_grid`, `generateTile`, `updateCosts`, `updateBounds`, `worldToTile` and `matchSize` are untouched.
+- **The helper matches Jazzy.** Nav2 `origin/jazzy` (`c704655`), `layer.cpp:76-87` and `node_utils.hpp:95-104`: `Layer::declareParameter` declares `name_+"."+param` with the default descriptor when it is not already declared. Its only other effect, `local_params_.insert`, is never read on Jazzy. The `ParameterValue(...)` expressions are unchanged, so `unsurveyed_cost` is still an integer, from the `unsigned char` promoted to `int`. Rolling `nav2::LifecycleNode` does not wrap `declare_parameter` or `has_parameter`.
+- **The free functions match Jazzy.**
+  - Client: Jazzy's `LifecycleNode::create_client` (`lifecycle_node_impl.hpp:137-145`) calls the same free function with the same node interfaces, `ServicesQoS` and a null group.
+  - Subscription: Jazzy's `create_subscription` member calls `rclcpp::create_subscription(*this, ...)` with default options, and `create_subscription.hpp:176` takes `NodeT &`.
+  - On Rolling, Nav2's wrapper only adds parameter QoS overrides and passes the callback group through. Bypassing it changes no activation, executor or callback group.
+- **`s57_grids` threading.**
+  - `main.cpp` uses a single-threaded executor, so the lifecycle transitions, the timer and the services never run concurrently.
+  - `on_cleanup` waits on every job before `clear()`, and the reset in `on_configure` can only run after that. No worker can still be reading the flag, so the reset is race-free.
+  - A healthy chart takes the unchanged branch.
+  - A chart skipped for having no grid is retried only when the layer next sends a request, which happens when its window moves past the buffer (`s57_layer.cpp:238-313`). Until then, that chart's tiles stay incomplete and NO_INFORMATION. That fails safe. Before the fix, the node aborted.
+- **Mutations of my own**, built in a scratch workspace from `git archive`. `ldd` showed the scratch `libs57_layer.so`, with its directory first on `LD_LIBRARY_PATH`:
+  - grid subscription with volatile QoS `rclcpp::QoS(1)`: `ChartReachesTheCostmap` fails after 10 s;
+  - null-grid branch without `done_grids.push_back`: `ChartThatCannotBeOpenedDoesNotAbortTheNode` fails at `:175`.
+- **Repeats under load**: `ctest --repeat until-fail:20` for `test_initialize` and for `test_reconfigure` (isolated runner, `ROS_DOMAIN_ID` 193 checked empty), alongside a `make -j4` loop with load average 6 to 9: 20 of 20 each.
+  - An earlier attempt that started the load from the same shell failed in the runner with `ModuleNotFoundError: ament_cmake_test` before any test ran. Re-run from a separate shell, it passed. I attribute it to how I ran it, not to the tests.
+- **Jazzy, by reading.**
+  - `tf2/utils.hpp`, `tf2_ros/buffer.hpp` and `static_transform_broadcaster.hpp` exist on geometry2 `jazzy`.
+  - `ament_add_ros_isolated_gtest` and its `domain_coordinator` runner exist on ament_cmake_ros `jazzy`.
+  - `get_subscriptions_info_by_topic` and `get_node_*_interface` exist on Jazzy's `LifecycleNode`.
+  - grid_map `origin/jazzy` `GridMapMath.cpp` and `SubmapGeometry` are identical to `0ece1b5`.
+  - `354e860` declares `ament_cmake_ros`, and its test uses only APIs present on Jazzy.
+  - `ci.yml`: the Jazzy job runs on pull requests into `rolling` and builds and tests both packages with strict rosdep. The Rolling job's `PACKAGES` and its guard leave both out.
+- **Commits.** None of the 12 code commits touches `.agent/`. Each has one subject, one cause, and the trailer "Part of #52. Backport to jazzy.".
+
+### Pre-existing `generateTile` defects (scratch ASan executable compiling `s57_layer.cpp` itself; not findings of this diff)
+- **Seam.** Reproduced in a static costmap at origin 1000. A land chart covering the west 36.25 m or 49.25 m of a tile: 0 of 3,430 and 0 of 4,704 land cells are lethal. A chart with its seam at 50.25 m or 64.25 m, so that it covers the tile's centre, paints every land cell. The gap is up to just under half a tile on whichever side does not hold the centre: 50 m on the global costmap, 25 m on the local one.
+  - **A second mechanism near map x = 0 or y = 0.** At origin 0, a tile corner at coordinate 0 that is clipped to a grid edge loses grid_map's epsilon (`GridMapMath.cpp:262-267`). The chart is then dropped even though it covers the tile's centre. With the seam inside tile [0, 100], both charts were dropped and the whole tile was empty.
+- **Edge.** Reproduced with a grid cell edge exactly on a tile edge.
+  - East edge: 99 lethal cells written into column 0 of the next row.
+  - North edge: the read one row past the 10,000-byte array always happens (ASan). The write happens only where that byte reads 255. Real chart grids are placed from lat/lon, so the alignment needs bit-exact coincidence.
+- The committed `ChartReachesTheCostmap` avoids all three on purpose (110 m grid, quarter-cell offset, no clipped corner at 0) and says so. It asserts nothing false.
+
+### Cross-model
+- **Gemini, rejected:**
+  - `.hpp` headers missing on Jazzy: they exist.
+  - The `/rosout` race: no other ERROR is logged on that logger along that path.
+  - Defaults of the 4-argument `create_client` on Jazzy: they exist.
+- **Pre-existing, outside the diff:** Gemini's null node and future exceptions; Codex 1, the TF throw at a request, already listed for #54; Gemini 9 and Codex 4, CMake export.
+- **Codex 2 and 3** are pre-existing. Their consequences go under suggestion 2.
+
+### Findings
+- [ ] (suggestion) Two comments in commit 12 say more than the code does. A job that finished before the cleanup does hold a grid, and it is dropped too; it is rebuilt on the next request. The null branch's "or when a cleanup aborted the job" can no longer happen, because cleanup clears the pending jobs. — `s57_grids/src/grid_publisher.cpp:163-164`, `:253-256`
+- [ ] (suggestion) Add the consequences of state kept across a cleanup to the #54 comment:
+  - `requested_grids_` survives the cleanup, so a reconfigure with a different `enc_root` while a label is queued dereferences a null dataset (`grid_publisher.cpp:230-231`);
+  - after a `map_frame` or resolution change, latched grids are served stale;
+  - after a cleanup and configure cycle, a chart that was aborted is regenerated only when the layer's window next moves. — `s57_grids/src/grid_publisher.cpp:150-171`
+- [ ] (suggestion) `TEST_ENC_ROOT` reads the sibling package's source fixture. That works in this repository and in CI, but not in a standalone or bloom test build. Note it for #54. — `s57_grids/CMakeLists.txt:113`
+- [ ] (suggestion, the owner's) The new issue for the seam gap should include the map-axis variant. The edge defect is an out-of-bounds read every time and a conditional write. Both are pre-existing. — `s57_layer/src/s57_layer.cpp:425`, `:438-455`
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 11:53 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (pre-push review round 1 approved part 2 with no must-fix; three outside reviewers ran)
+**After**: publish
+**Decision**: publish
+
+Read: the Local Review (Pre-Push) at `8ab87bf`, approved, four suggestions. Published in two steps, as the plan checkpoint set: the branch is first pushed up to `354e860` and the pull request opened there, so the Jazzy job runs the parameter-overrides test against Nav2's own `Layer::declareParameter`; the rest follows once that run is in. Suggestion 1 (two comments in commit 12 that say more than the code does) is not deferred: it is fixed in the fix pass after the pull request's review, with whatever that review finds. Suggestions 2 and 3 go into the comment on rolker/s57_tools#54 at merge. Suggestion 4, and the review's confirmation of two more pre-existing `generateTile` defects (chart data dropped where a tile's centre is outside the chart's grid; a read and conditional write one past a row when a grid cell edge falls exactly on a tile edge), go to the owner as issue text; neither is changed here.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-11-24 12:06 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+**Reviews-read**: none
+
+**PR**: #58 at `454ae59`
+**Sources**: 2 (Local Review (Pre-Push) @ `28924ab` covering the head via bookkeeping, CI rollup); 0 pull-request reviews, 0 inline comments, 0 conversation comments
+**Cross-source confirmations**: 0
+**CI**: all-pass
+
+CI at `454ae59`, run 45443691212: `build-and-test (jazzy)` and `build-and-test (rolling)` SUCCESS. Jazzy: `Summary: 232 tests, 0 errors, 0 failures, 31 skipped`; `s57_layer` 8/8 CTest entries (`test_initialize` `[  PASSED  ] 9 tests.`); `s57_grids` 7/7 (`test_reconfigure` `[  PASSED  ] 3 tests.`, launch test passed); strict `rosdep install --ignore-src -y --from-paths $paths` (no skip keys) ended `#All required rosdeps installed successfully`. Rolling: `PACKAGES: s57_msgs marine_charts s57_to_geotiff enc_updater`, its closure guard passed, `Summary: 159 tests, 0 errors, 0 failures, 18 skipped`; neither `s57_grids` nor `s57_layer` is built there. Run 45442344940 at `354e860`: Jazzy `test_initialize` `[  PASSED  ] 8 tests.` (4/8 Passed) against Nav2's own `Layer::declareParameter`, `226 tests, 0 errors, 0 failures, 30 skipped`. No pull-request review, inline comment or conversation comment exists; the pre-push review's verdict was approved, no must-fix.
+
+### Findings
+- [x] (suggestion, Local Review (Pre-Push) @ `28924ab`, decided: fix before merge) Two comments in commit `8ab87bf` say more than the code does: a job that finished before the cleanup holds a grid and is dropped too (rebuilt on the next request), and "or when a cleanup aborted the job" can no longer happen because cleanup clears pending jobs — `s57_grids/src/grid_publisher.cpp:163-164`, `:253-256`
+- [x] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: goes into a comment on #54 at merge, not a code change) State kept across a cleanup: `requested_grids_` survives, a different `enc_root` with a queued label dereferences a null dataset; stale latched grids after a frame or resolution change; an aborted chart is regenerated only when the layer's window next moves — `s57_grids/src/grid_publisher.cpp:150-171` (deferred: routed, not fixed: goes into the comment on rolker/s57_tools#54 at merge)
+- [x] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: goes into a comment on #54 at merge, not a code change) `TEST_ENC_ROOT` reads the sibling package's source fixture; fails in a standalone or bloom test build — `s57_grids/CMakeLists.txt:113` (deferred: routed, not fixed: goes into the comment on rolker/s57_tools#54 at merge)
+- [x] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: carried by #59 (seam gap, includes the map-axis variant) and the #54 list (edge read and conditional write)) pre-existing `generateTile` defects, no change in this pull request — `s57_layer/src/s57_layer.cpp:425`, `:438-455` (deferred: routed, not fixed: carried by rolker/s57_tools#59 and the #54 list)
+
+### False positives
+- none (no external review comments to dismiss)
+
+### Pull request body
+- "Results of both runs are added below." — still a placeholder; the host adds the two runs (`354e860` run 45442344940, `454ae59` run 45443691212) above.
+- "Review. ... One suggestion ... is corrected in this pull request before merge." — true only once the fix pass lands; the other three suggestions are routed to #54 and #59, which the body already lists.
+- No statement found that the records contradict: twelve code commits, no Rolling CI job for these two packages, Jazzy CI the only Jazzy evidence, and the Rolling guard all match the runs.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 12:07 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (one open item, comment wording, already set to be fixed before merge)
+**After**: findings
+**Decision**: address
+
+Read: the Integrated Review for pull request 58 at `454ae59`: no reviews on the pull request, CI green on both jobs. The fix pass corrects the two comments in `s57_grids/src/grid_publisher.cpp` (`:163-164`, `:253-256`) and nothing else. The entry's three other boxes are routed, not fix-pass work, and the fix pass ticks them as routed: state kept across a cleanup and the `TEST_ENC_ROOT` source path go into the comment on rolker/s57_tools#54 at merge; the `generateTile` defects are rolker/s57_tools#59 (the chart-seam gap, opened on the owner's yes, with the map-axis variant in its text) and the #54 list (the read past a row).
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 12:07 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+
+**PR**: #58 at `d331930`
+**Addressed**: Integrated Review at `454ae59` (2026-11-24 12:06 -05:00)
+**Commits**: d331930
+
+### Actions
+- [x] Two comments corrected, comments only, no code line changed; `s57_grids` rebuilt (`--parallel-workers 4`) — `s57_grids/src/grid_publisher.cpp:163-165`, `:254-256`
+- [x] State kept across a cleanup — `grid_publisher.cpp:150-171` (routed, not fixed: goes into the comment on #54 at merge)
+- [x] `TEST_ENC_ROOT` source fixture path — `s57_grids/CMakeLists.txt:113` (routed, not fixed: comment on #54 at merge)
+- [x] pre-existing `generateTile` defects — `s57_layer/src/s57_layer.cpp:425`, `:438-455` (routed, not fixed: #59 and the #54 list)
+
+## Local Review
+**Status**: complete
+**When**: 2026-11-24 12:08 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+**Verdict**: approved
+
+**PR**: #58 at `74d2467`
+**Depth**: Light (reason: narrow re-review of one comment-only commit, d331930, per handoff; no cross-model or adversarial reviewers)
+**Must-fix**: 0 | **Suggestions**: 0
+
+### Findings
+- [ ] No issues found. LGTM.
+
+Checked: `git diff 454ae59..74d2467 -- . ':!.agent'` changes two comment blocks in `s57_grids/src/grid_publisher.cpp` and nothing else. on_cleanup sets abort_flag_, waits on every valid future, then clears the whole map, so finished jobs are dropped too; grid_publishers_ lacks their labels, so the next request rebuilds. The null branch is reached only by getGrid's two null returns: open() failing, or llToMap failing (an abort also returns null, but cleanup clears the futures before any tick reads them, so the branch never sees it). Commit d331930 touches no .agent file; message ends "Part of #52. Backport to jazzy.". CI at review time: build-and-test (jazzy) and (rolling) both pending. No reviews or comments on the PR since the triage.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-11-24 12:16 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+**Reviews-read**: none
+
+**PR**: #58 at `813c836`
+**Sources**: 2 (Local Review @ `74d2467` covering the head via bookkeeping, CI rollup); 0 pull-request reviews, 0 inline comments, 0 conversation comments
+**Cross-source confirmations**: 0
+**CI**: failures-noted
+
+The four settled items of the previous Integrated Review (at `454ae59`) stay settled. The newest Local Review (at `74d2467`) approved the comment-only commit d331930 with no finding. No review, inline comment or conversation comment exists on the pull request.
+
+CI. Run 45445136398 (head `74d2467`): `build-and-test (rolling)` passed; `build-and-test (jazzy)` FAILED: `2/7 Test #2: test_reconfigure .................***Timeout  60.01 sec`, `Finished <<< s57_grids [1min 2s]	[ with test failures ]`, `Summary: 230 tests, 1 error, 1 failure, 31 skipped`. Everything the test printed, in full: `Running with ROS_DOMAIN_ID 1`, `Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc`, `[==========] Running 3 tests from 1 test suite.`, `[----------] 3 tests from ReconfigureTest`, `[ RUN      ] ReconfigureTest.ConfigureAfterCleanupClearsTheAbortFlag`, `found 1 charts` (17:12:21.57), then nothing until the timeout kill at 17:13:21.4. No `[       OK ]`, no second `found 1 charts` (a second `configure()` would print it again). Parallel at that moment: colcon had finished marine_charts, s57_msgs and s57_to_geotiff; the `enc_updater` package's 117 pytest cases ran from 17:12:20.8 to 17:12:22.1, overlapping the first second of the test; no other package was running during the other 59 s. Run 45443691212 (head `454ae59`, only comment changes since): same test passed in 0.45 s, `[  PASSED  ] 3 tests.`. Head `813c836` adds only progress.md; its run 45446251629 was still in progress at this triage, so CI at the head is unknown.
+
+### Findings
+- [x] (must-fix, CI rollup) Intermittent hang of `test_reconfigure` on Jazzy, test added by this pull request for a defect fixed by this pull request; it must be diagnosed in the fix pass, not re-run away, and the pull request is not mergeable on a green re-run. The fix pass must establish (1) where it hangs: reproduce with `timeout`/`gdb -batch -ex "thread apply all bt"` or a loop of the test binary under load (`stress`/parallel copies, 200+ iterations, ideally in the Jazzy CI image or on deadpool; 50/50 and 20/20 on Rolling prove nothing about Jazzy), and take thread backtraces of the hung process; (2) whether it is the test's own waiting (the first case has no wait: it calls `configure()`, `cleanup()`, `configure()`, so a test-side wait is not a candidate there; `waitFor` and `spin_until_future_complete` are bounded to 10 s in the other cases) or inside the node (`on_cleanup`, `on_configure`, the destructor, a worker thread); (3) whether it is a test-only defect or a deadlock or unbounded wait in `s57_grids` that a vessel could also hit (a lifecycle configure followed shortly by cleanup or shutdown); (4) the fix and a test that makes the failure deterministic or at least a loop that no longer hangs. Hypotheses, not established: (a) most likely, a race in `tf2_ros::TransformListener` between construction and destruction: `on_configure` creates it with its own spinner thread (`s57_grids/src/grid_publisher.cpp:119`; tf2_ros starts `std::thread([&]{executor_->spin();})` right after construction), and `on_cleanup` resets it (`:168`) whose destructor calls `executor_->cancel()` then joins the thread; if the cancel runs before the new thread has entered `spin()`, the cancel is lost and `join()` never returns. This test does configure then cleanup within microseconds, the only place in the suite (and in field use, a configure immediately followed by cleanup or shutdown) where the window is open; it fits the lack of any output after `found 1 charts` (the hang is after the catalogue is built in `on_configure`, `:41`, in the first cleanup or the destruction of the node's listener) and the passing runs that spend time between creation and destruction. If so it is a real, rare hang in the node (vessel-reachable on a fast configure/cleanup cycle by a lifecycle manager), and the fix is in `s57_grids` (e.g. create the listener with `spin_thread=false` and spin it on the node's executor, or ensure the thread is running before cleanup), not a test change. (b) `on_cleanup` waits on every valid future in `pending_dataset_grids_` (`:160-162`) with no bound; unlikely here, since this case starts no job (`requested_grids_` is empty and the chart has no cell), but it is the same unbounded wait if a job ever blocks, and worth a bounded wait or a log. (c) A second `configure()` blocking on `S57Catalog` (`marine_charts/src/s57_catalog.cpp:55-75`, GDAL/OGR opens) is less likely: it would have printed `found 1 charts` again only after returning, so it cannot be excluded from the log, but nothing in it waits on a thread. (d) A test-only cause (the isolated runner's `ROS_DOMAIN_ID 1` shared with the `s57_grids` launch test's node, or leftover discovery from the previous test) cannot hang `configure()` and `cleanup()`, which make no graph call that blocks, so it is the least likely. — `s57_grids/test/test_reconfigure.cpp`, `s57_grids/src/grid_publisher.cpp:119`, `:160-168` (fixed in 3542b04: hypothesis (a), confirmed by source and a scratch reproducer: on Jazzy, rclcpp's `Executor::cancel()` before the listener's thread enters `spin()` is lost (ros2/rclcpp#3172, fixed on Rolling by #3174 only), so `~TransformListener` in `on_cleanup` never joins; the listener now has no thread of its own)
+- [x] (suggestion, pull request body) Fill the body's "Results of both runs are added below." placeholder and add the failed run 45445136398 and its diagnosis; carried over from the previous entry, still open. (deferred: the pull request body is the host's to edit (no GitHub posts from a fix pass); the text for it, with run 45445136398 and the diagnosis, is in the Implementation entry below)
+
+### False positives
+- none (no external review comments to dismiss)
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 12:16 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (a must-fix from CI: an intermittent hang is diagnosed, not re-run)
+**After**: findings
+**Decision**: address
+
+Read: the Integrated Review for pull request 58. The Jazzy job failed on `74d2467`: `test_reconfigure` hung in its first case (configure, cleanup, configure) after the first configure's catalogue line and was killed at 60 s; it passed on the previous head, which differs only in comments. The fix pass establishes where it hangs and whether the cause is in the test or in `s57_grids` (the triage's leading hypothesis, unverified: `tf2_ros::TransformListener`'s own spin thread, started at configure and joined at cleanup, where a cancel that lands before the thread spins is lost), fixes the cause, and shows a long repeat loop without a hang. If the cause is in the node and a vessel can reach it, the fix is made in the node, in its own commit, backported with the rest.
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 12:58 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+
+**PR**: #58 at `3542b04`
+**Addressed**: Integrated Review at `813c836` (2026-11-24 12:16 -05:00)
+**Commits**: `3542b04` (code: s57_grids: serve the TF listener on the node's executor), `1c96fbf` (records: tick the finding)
+
+### Actions
+- [x] (must-fix) Intermittent Jazzy hang of `test_reconfigure`: diagnosed and fixed in the node — `s57_grids/src/grid_publisher.cpp:118-131`, `s57_grids/test/test_reconfigure.cpp`
+- [x] (suggestion) Pull request body — deferred: the body is the host's to edit; text below
+
+### Mechanism (hypothesis (a), confirmed by source; Jazzy run not possible here)
+- `on_configure` built `tf2_ros::TransformListener(*tf_buffer_)`: its own hidden node and a dedicated thread (geometry2 `jazzy`, `tf2_ros/src/transform_listener.cpp:42-67`; `include/tf2_ros/transform_listener.hpp:266-269` makes a `SingleThreadedExecutor` and `std::thread([&]{executor_->spin();})`). `on_cleanup` reset it (`grid_publisher.cpp:168` at `74d2467`); `~TransformListener` (`transform_listener.cpp:97-103`) calls `executor_->cancel()` then `join()`.
+- rclcpp `jazzy`: `Executor::cancel()` (`src/rclcpp/executor.cpp:455-465`) only does `spinning.store(false)` and triggers the interrupt guard condition; `SingleThreadedExecutor::spin()` (`src/rclcpp/executors/single_threaded_executor.cpp:27-45`) starts with `spinning.exchange(true)` and loops `while (rclcpp::ok(context_) && spinning.load())`. A cancel that lands before the thread reaches `spin()` is overwritten: the guard condition wakes one wait, the loop goes on, and with no `/tf` traffic the thread waits forever, so the join in `on_cleanup` never returns. This is ros2/rclcpp#3172 ("Race condition in executor when canceling before spin"), fixed on Rolling by ros2/rclcpp#3174 (merged 2026-07-31: a separate `cancel_requested_` flag held until the next spin consumes it; Rolling `single_threaded_executor.cpp:30-47`, `executor.cpp:493-504`; installed rclcpp 33.2.0 has it, `executor.hpp:571-576`). Not backported: rclcpp `jazzy` head `354a21b9` has no `cancel_requested_`; a maintainer comment on #3174 says the change alters class layout and may not be ABI compatible.
+- Fits the CI log: the first case printed the first configure's `found 1 charts` and nothing after it; the hang is in the first `cleanup()`. The window is from the thread's creation in `on_configure` to its first `spin()` entry: normally well under a millisecond, which the test's configure-then-cleanup with nothing between can still lose when the CPU is busy (enc_updater's 117 pytest cases were running in parallel at that second).
+- Hypotheses (b) to (d) ruled out for this hang: no job was pending (b); the second configure never started (c); nothing in configure/cleanup waits on the graph (d).
+
+### Reproduction (Rolling, this machine; what is reproduced and what is inferred)
+- No gdb, eu-stack or pstack on this machine (ptrace_scope 1), so no thread backtraces of a hung Jazzy process: Jazzy cannot be run here. Rolling's rclcpp has the fix, so `test_reconfigure` cannot hang here, and did not: pre-fix binary (`74d2467`) 1500 runs, 0 hangs.
+- Scratch reproducer (scratchpad, removed): `TransformListener::init(spin_thread=true)`'s set-up and `~TransformListener`'s teardown line for line on Rolling's real rclcpp, with an executor subclass whose `spin()` and `cancel()` are Jazzy's bodies copied verbatim (sound: the loop uses the same `get_next_executable`/`execute_any_executable`/guard-condition machinery; Rolling's own `cancel_requested_` is never set by it). A hang is detected when the thread is still alive 2 s after `cancel()`; the reproducer then prints `is_spinning()`:
+  - Jazzy semantics, cancel straight after thread start: 5 of 5 hang (`HANG: spin thread still running 2 s after cancel(); is_spinning()=1`; a second cancel releases it, proving the first was lost).
+  - Jazzy semantics, 1 ms between thread start and cancel (no delay injected in the thread): idle 0 of 500; under load (20 busy loops on 20 CPUs) 26 of 300. This is the intermittency CI showed.
+  - Rolling's stock executor, same set-up: 0 of 2000 idle, 0 of 2000 under load, 0 of 300 with a 2 ms delay injected at the thread's start (the window deliberately widened).
+  - Real `tf2_ros::TransformListener(buffer)` build-and-destroy on Rolling: 0 of 2000 idle and under load. With `spin_thread=false` on a node (the fix): 0 of 2000 idle and under load.
+- Inferred, not run: the same hang in the released Jazzy binaries (the code read is the `jazzy` branch heads; the released 28.1.x/0.36.x packages are cut from them).
+
+### Whose defect, vessel reach
+- Upstream (rclcpp on Jazzy), reached through tf2_ros' default listener; the node's use was correct API use. Rolling does not have it.
+- A vessel on Jazzy can reach it: a `cleanup` transition, or the node's destruction (the `tf_listener_` member is destroyed the same way), any time after `configure` but before the listener's thread first enters `spin()`. That is normally sub-millisecond, so in practice a lifecycle manager or script that configures and immediately cleans up or shuts down (a rollback after another node's failure) on a loaded CPU. The effect: `on_cleanup` blocks the node's only executor thread, so lifecycle services, `get_datasets` and grid publishing all stop. Inferred from the loop condition `rclcpp::ok(context_)`: a SIGINT (context shutdown) would release it.
+
+### The fix (`3542b04`)
+- The listener subscribes on the GridPublisher node with `spin_thread = false`: no hidden node, no executor, no thread, nothing to cancel or join. Rolling: `TransformListener(*tf_buffer_, *this, false)` (NodeInterfaces); Jazzy: `TransformListener(*tf_buffer_, this, false)` (the `NodeT &&` template, `transform_listener.hpp:108-129` on `jazzy`; exact template match beats the `(BufferCore &, bool, bool)` constructor's pointer-to-bool conversion), chosen by `TF2_ROS_VERSION_GTE(0, 44, 0)` (NodeInterfaces came in geometry2 0.44.0, `46220a65`; Jazzy is 0.36.x) [correction, 2026-11-24: the node-interfaces constructor first appears in tf2_ros 0.45.0 (CHANGELOG "0.45.0: Adding NodeInterfaces API Design (#714)"); 0.44.0 has only the `NodeT &&` template; the version switch is replaced by a type test in `d5b3f6b`]. Jazzy branch not compiled here.
+- What changes for the running node: `/tf` and `/tf_static` callbacks run on the node's own single-threaded executor (`main.cpp`) instead of a dedicated thread; the subscriptions now belong to the grid publisher node in the graph (no `transform_listener_impl_*` node). TF messages wait behind the node's timers and services; the longest is `checkForNewGrids`, which can block up to 10 ms per pending job (`wait_for(10ms)`); `/tf` QoS depth 100 queues meanwhile. All lookups (`grid_publisher.cpp` `tryPrecompute`, `GridCreationContext`) use `TimePointZero` and no timeout, so none needed the thread; `setUsingDedicatedThread` stays false, so a future lookup with a timeout would fail at once rather than wait: worth knowing before adding one.
+- Rejected: keeping the thread and waiting until it spins before the reset (the listener's executor is private; nothing to observe); a node-owned executor and thread with a cancel-until-joined loop (reimplements tf2_ros for no gain over the node's executor); a delay between configure and cleanup (hides the window, does not close it).
+- Test: `ChartThatCannotBeOpenedDoesNotAbortTheNode` now spins the node's executor while waiting for `map -> earth` (needed: nothing else serves the listener now). Complement, not the fix: each test has a 30 s watchdog that prints `[  FAILED  ] ReconfigureTest.<name> did not finish within 30 s: a lifecycle transition or a wait is hung` and exits 1, before CTest's 60 s. Not exercised by a real hang here (none occurs on Rolling).
+
+### Proof (Rolling)
+- `s57_grids` and `s57_layer` suites (`test.sh --packages-select s57_grids s57_layer --parallel-workers 2`): 7 of 7 and 8 of 8 passed; `Summary: 73 tests, 0 errors, 0 failures, 13 skipped`.
+- `test_reconfigure` (fixed build) as separate processes, 4 in parallel, 16 busy loops, 60 s KILL per run: 500 runs, 499 passed, 0 hangs, 1 segfault; then 1500 runs, 1498 passed, 0 hangs, 2 segfaults. Pre-fix binary, same loop: 1500 runs, 1496 passed, 0 hangs, 4 segfaults.
+- The segfaults are a separate, pre-existing defect, not from this change: an LD_PRELOAD SIGSEGV handler (dladdr backtrace) shows every one in a Fast DDS thread, `TypeLookupRequestListener::process_request` → `check_get_type_...` → `answer_request` → `TypeLookupManager::send` → `WriterHistory::create_change` → `pthread_mutex_lock` (addr 0x10), during a test case (node set-up or teardown), libfastdds.so.3.6 (Rolling). Inferred cause: a type-lookup request from another process in the same domain answered while a writer is being destroyed; my loop ran all copies in one domain, which `ament_add_ros_isolated_gtest` does not do in CI. Not fixed here; for the owner to weigh (a Fast DDS upstream issue).
+- Hand run (`hand-runs/repro_abort.py`, NOAA US5PSMCC and US5PSMCD from unh_marine_simulation `bf57f58` `asv_sim/enc` as per-cell folders, fixed node binary): configure, activate (`True`), request west, "Grid ready: US5PSMCC.000 (1.90115 s from request to publish)"; deactivate, cleanup, configure, activate (all `True`); request east, "Grid ready: US5PSMCD.000 (2.05317 s …)"; node alive, exit 0. A grid is only made after the job looks up `map -> earth`, so transforms reach the node through its own executor, across a cleanup cycle.
+- CI data point: run 45446691940 on the records-only head `cd4aa27`: Jazzy and Rolling both passed.
+
+### Unverified until Jazzy CI
+- That the Jazzy branch of the `#if` compiles and the hang is gone there (no Jazzy here). A green Jazzy job is weak evidence alone (the pre-fix code passed 2 of 3); the source mechanism and the reproducer are the argument.
+
+### For the owner
+- Upstream (draft, not posted), for ros2/rclcpp: "Backport request: #3174 (cancel before spin is lost, #3172) to Jazzy. On Jazzy, `tf2_ros::TransformListener` with its default dedicated thread hangs in its destructor when destroyed before the thread first enters `spin()`: `~TransformListener` cancels then joins, `Executor::cancel()` only stores `spinning = false`, and `SingleThreadedExecutor::spin()` sets it back to true. A lifecycle node that builds its listener in `on_configure` and resets it in `on_cleanup` hangs its cleanup intermittently under CPU load (seen in CI). #3174 changed class layout; an ABI-compatible variant for Jazzy (for example re-checking a cancel generation counter stored outside the class, or `spin()` not overwriting a cancel issued after the executor was constructed) would fix every Jazzy user of the default listener." Downstream packages using `TransformListener(buffer)` and resetting it soon after (marine_sidescan_mosaic's `mosaic_node.cpp:167` builds one the same way) share the exposure on Jazzy.
+- Pull request body text for the host (replaces the "Results of both runs are added below." placeholder): "Jazzy run 45445136398 hung in `test_reconfigure` (first case, killed at 60 s): ros2/rclcpp#3172 on Jazzy, a cancel before the TF listener's spin thread starts is lost and `on_cleanup`'s join never returns. Fixed in `3542b04` by serving the listener on the node's executor (no thread of its own); see the Implementation entry in progress.md."
+
+## Local Review
+**Status**: complete
+**When**: 2026-11-24 12:46 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: changes-requested
+
+**PR**: #58 at `9ead2ad`
+**Depth**: Standard (reason: new code commit 3542b04 changes how a deployed node receives transforms, backported to Jazzy; scoped to that commit per handoff; Claude adversarial run, cross-model skipped as optional per handoff)
+**Must-fix**: 1 | **Suggestions**: 4
+
+### Findings
+- [x] (must-fix) `tf2_ros/version.h` exists on Jazzy only from tf2_ros 0.36.22 (tagged 2026-07-28; `ament_generate_version_header` absent from tf2_ros/CMakeLists.txt at 0.36.0 to 0.36.21, CHANGELOG "0.36.22: Add generated version header for tf2_ros (backport #955)"). On a Jazzy vehicle with tf2_ros 0.36.21 or older the include is a fatal error and the backport does not build. CI passes only because its image installs 0.36.23. Guard it: `#if __has_include("tf2_ros/version.h")` include it, then a nested `#if defined(TF2_ROS_VERSION_GTE)` / `#if TF2_ROS_VERSION_GTE(0, 45, 0)` (nested, since an undefined function-like macro in a `#if` is a syntax error even behind `&&`), else the pointer form; or confirm in writing that every Jazzy target has tf2_ros >= 0.36.22 — `s57_grids/src/grid_publisher.h:17`, `s57_grids/src/grid_publisher.cpp:127`
+- [x] (suggestion) The cut-off is 0.45.0, not 0.44.0: tf2_ros 0.44.0's transform_listener.hpp has only the `NodeT && node` template (`*this` would not compile there); `RequiredInterfaces` first appears at 0.45.0. No released distro is at 0.44.x, so nothing breaks today; fix the number with the guard above (the Implementation entry's "NodeInterfaces came in 0.44.0" is wrong the same way) — `s57_grids/src/grid_publisher.cpp:127`
+- [x] (suggestion) `/tf` now waits behind `checkForNewGrids`, which blocks up to 10 ms per pending job (`wait_for(10ms)`); with many precompute jobs the tick can take longer than its 100 ms period and the executor takes about one `/tf` message per cycle, so the depth-100 queue overflows and the buffer lags. Lookups are `TimePointZero`, so the cost is staleness (harmless for `map -> earth` and the 5 km precompute), not failure; `wait_for(0s)` removes it at no cost — `s57_grids/src/grid_publisher.cpp:261`
+- [x] (suggestion) No test pins the design: restoring the own-thread listener passes every test on Rolling and is caught on Jazzy only by a timing-dependent hang. `EXPECT_FALSE(node->tf_buffer_->isUsingDedicatedThread())` after configure is deterministic on both distros (the listener sets it only in its spin-thread branch) — `s57_grids/test/test_reconfigure.cpp:133`
+- [x] (suggestion) The 30 s watchdog is shorter than `ChartThatCannotBeOpenedDoesNotAbortTheNode`'s four 10 s waits, so a slow failing run can be reported as "hung" instead of naming the failed assertion; only failing runs are affected (e.g. 60 s, or shorter waits) — `s57_grids/test/test_reconfigure.cpp:92`
+
+Checked. Diagnosis: Jazzy rclcpp `Executor::cancel()` (executor.cpp:456-465) only stores `spinning=false`; `SingleThreadedExecutor::spin()` begins `spinning.exchange(true)` and loops on `spinning.load()`; `~TransformListener` (jazzy transform_listener.cpp:97-103) cancels then joins. Rolling's spin() returns on `cancel_requested_` set before it (fetched from `rolling`); `jazzy` has no `cancel_requested_`. ros2/rclcpp#3172 "Race condition in executor when canceling before spin" (closed); #3174 "honor cancel() issued before spin_until_future_complete()" merged into rolling 2026-07-31, touches single_threaded_executor.cpp too; no backport pull request found. Jazzy fix by reading: `(*tf_buffer_, this, false)` resolves to the `NodeT&&` template (identity vs pointer-to-bool for the `(BufferCore&, bool, bool)` overload), which calls the four `get_node_*_interface()` getters LifecycleNode has; with `spin_thread=false` both distros create `/tf` and `/tf_static` with the default options (null callback group, same QoS and QoS-override options as before), so the node's default group, served by main.cpp's executor; plain subscriptions, not gated by activation. QoS-override parameters (`qos_overrides./tf.subscription.*`) now appear on this node; re-declare after cleanup is safe (`declare_parameter_or_get` catches ParameterAlreadyDeclared, jazzy qos_parameters.hpp:99). All lookups are no-timeout (`grid_creation_context.cpp:14`, `grid_publisher.cpp:350,368`); `GridCreationContext` runs on the executor thread, workers use only the copied transform. Cleanup resets listener then buffer; member order destroys listener first; single thread, no callback in flight. CI run 45450980411 on `9ead2ad`: Jazzy (tf2_ros 0.36.23) built s57_grids and passed test_reconfigure 3/3 (167 ms), 232 tests 0 failures; Rolling passed. Local (Rolling): s57_grids 7/7, s57_layer 8/8; test_reconfigure 100/100 sequential separate processes on domain 173 (42 s, libraries from this worktree's install, built from this source); scratch-copy mutations (abort reset deleted, `clear()` deleted, null check disabled) each fail (line 138, line 152, abort exit 134). The 3 segfaults in 2000 same-domain runs: the recorded backtraces are in Fast DDS 3.6's type-lookup reply path, before and after the fix alike, so not this commit; CI's isolated runner gives each test its own domain, so CI is barely exposed; Jazzy ships Fast DDS 2.14, so the field path differs; worth an upstream report with the backtrace, not a blocker here. 3542b04 touches no `.agent/` file and its message ends "Part of #52. Backport to jazzy." The Implementation entry's `**When**` (12:58) is later than this review's clock (12:46).
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 12:57 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+
+**PR**: #58 at `e680b27`
+**Addressed**: Local Review at `9ead2ad` (2026-11-24 12:46 -05:00)
+**Commits**: d5b3f6b, 9ccdd2c, 95eadc5, e680b27 (code); 752a3d8 (records: boxes ticked, earlier entry's 0.44.0 corrected)
+
+### Actions
+- [x] (must-fix) version.h exposure — `s57_grids/src/grid_publisher.h`, `s57_grids/src/grid_publisher.cpp` (`d5b3f6b`): no header and no version number. `makeTransformListener` picks the constructor by whether `tf2_ros::TransformListener` declares `RequiredInterfaces` (the node-interfaces constructor's parameter type), in an `if constexpr` on a template parameter so the branch not taken is never instantiated; the same helper as cube_bathymetry and mru_transform.
+- [x] (suggestion) cut-off 0.45.0, not 0.44.0 — covered by the type test (no number left); earlier entry corrected in `752a3d8`.
+- [x] (suggestion) `wait_for(10ms)` blocking the executor — `grid_publisher.cpp` checkForNewGrids (`9ccdd2c`): now `wait_for(0s)`. The jobs run on std::async threads and nothing in the loop depended on the wait (with a deferred policy neither form ever reads ready). A job that finishes mid-tick is picked up on the next tick, at most one 100 ms period later.
+- [x] (suggestion) deterministic design test — `s57_grids/test/test_reconfigure.cpp` `TransformListenerHasNoThreadOfItsOwn` (`e680b27`): `EXPECT_FALSE(tf_buffer_->isUsingDedicatedThread())` after configure. `isUsingDedicatedThread` is on `tf2::BufferCore` at 0.36.21 (buffer_core.hpp:260) and Rolling; the listener calls `setUsingDedicatedThread(true)` only inside its `spin_thread` branch on both (0.36.21 transform_listener.hpp:271,338; 0.45.0 :253; installed 0.46.5 :209). On Rolling it fails with `spin_thread = true` and with `TransformListener(*tf_buffer_)` (line 155), passes as committed.
+- [x] (suggestion) watchdog vs. waits — `test_reconfigure.cpp` (`95eadc5`): 45 s, above the 40 s of the longest test's own waits, under CTest's 60 s for the process.
+
+### Facts verified (ros2/geometry2 via gh api, public paths only)
+- `ament_generate_version_header` in tf2_ros/CMakeLists.txt: absent at 0.36.0 and 0.36.21, present at 0.36.22 (tag commit 2026-07-28; CHANGELOG "Add generated version header for tf2_ros (backport #955) (#958)") and 0.36.23. On Rolling: absent at 0.44.0, 0.45.0 to 0.46.2, present from 0.46.3 (#955).
+- Node-interfaces constructor (`RequiredInterfaces`): absent at 0.44.0 (only the unconstrained `NodeT &&` template), present from 0.45.0 (CHANGELOG "Adding NodeInterfaces API Design (#714)"). 0.45.0 to 0.46.1 keep a deprecated `NodeT &&` template constrained to pointers; 0.46.2 "Removed deprecated code (#940)" drops it.
+- So the reviewer's `__has_include` route with a pointer fallback would also be wrong on Rolling 0.46.2 (no version.h, no pointer constructor). The single pointer form `(*tf_buffer_, this, false)` compiles silently on Rolling 0.46.2+ and is wrong: the pointer converts to `bool spin_thread` of the simplified constructor (`(BufferCore &, bool, bool)`), which makes a hidden node with its own thread (cause 14). An `is_constructible<TransformListener, BufferCore &, LifecycleNode &, bool>` test is unsound: on 0.36.23 it is true, and the construction then fails in the template's body ("base operand of '->' has non-pointer type").
+
+### Proof on Rolling (scratch shim directory first on the include path holding each tag's transform_listener.hpp, a poisoned `tf2_ros/version.h` (`#error`), and the real grid_publisher.cpp with a `static_assert` on the branch taken; `-fsyntax-only` with the package's compile command)
+- 0.36.21, 0.36.23, 0.44.0: pointer branch, compiles, no warning. 0.45.0, 0.46.2, installed 0.46.5: interfaces branch, compiles, no deprecation warning. Expecting the wrong branch fails the static_assert. The previous commit's code against 0.36.21 with version.h hidden: fatal error.
+- Real build and link only on Rolling 0.46.5. What Jazzy CI shows: the pointer branch built and linked against real Jazzy rclcpp with 0.36.23, and the new test there. What nothing here shows: a build on a Jazzy machine with tf2_ros 0.36.21 or older (CI's image has 0.36.23); the reading is strong because the selection no longer depends on any header 0.36.22 added and the 0.36.21 listener header was compiled through the shim, but against Rolling's rclcpp, not Jazzy's.
+
+### Checks (Rolling, ROS_DOMAIN_ID 173, checked empty, DISPLAY unset)
+- Build of s57_grids: clean (only the existing tf2_ros `.h` header deprecation warnings).
+- `./test.sh --packages-select s57_grids s57_layer --parallel-workers 1 --ctest-args -j1`: s57_grids 7/7, s57_layer 8/8 (74 results, 0 errors, 0 failures, 13 skipped).
+- test_reconfigure (now 4 tests): 200/200 sequential separate processes, 101 s; `ldd` shows libmarine_charts from this worktree's install.
+- Earlier mutations, in-tree and reverted: abort-flag reset deleted fails line 142; `clear()` deleted fails line 170; null check disabled aborts (exit 134).
+- Hand run `repro_abort.py` (NOAA US5PSMCC, US5PSMCD from unh_marine_simulation `55926d0` asv_sim/enc as per-cell folders in the scratchpad, installed node): west "Grid ready: US5PSMCC.000 (1.75 s)"; deactivate, cleanup, configure, activate all True; east "Grid ready: US5PSMCD.000 (1.85 s)"; node alive, exit 0. Live node after configure: node list only `/s57_check` (no `transform_listener_impl_*`), `qos_overrides./tf.subscription.*` and `./tf_static.subscription.*` parameters on the node, `/tf` and `/tf_static` subscribers on it.
+
+### For the pull request and the owner
+- What changed in the running node: `/tf` and `/tf_static` are subscribed by the node itself and served by its own executor (main.cpp's); no `transform_listener_impl_*` node; the `qos_overrides./tf...` parameters now appear on the node; any lookup with a timeout added later would fail at once (the buffer has no dedicated thread, which the new test pins); grid jobs are polled without blocking.
+- The Jazzy hang: `~TransformListener` cancels its executor and joins the spin thread, and on Jazzy a `cancel()` issued before that thread has entered `spin()` is lost, because `SingleThreadedExecutor::spin()` sets its spinning flag back to true and waits forever. A cleanup soon after configure (or the node's destruction then) therefore hangs, intermittently and more under load. Upstream: ros2/rclcpp#3172, fixed on Rolling by ros2/rclcpp#3174 (merged 2026-07-31), not backported to Jazzy.
+- Other project packages with the same exposure (a `TransformListener` with its own thread that can be destroyed soon after it is made), as the earlier entry gave it: marine_sidescan_mosaic `mosaic_node.cpp:167`. Not checked on its Jazzy branch.
+- Listener construction elsewhere (Rolling checkouts read, not changed): cube_bathymetry and coverage_assessment (`make_transform_listener.hpp`) and mru_transform (`mru_transform.cpp:50`) use the same `RequiredInterfaces` type test, so they have no missing-header exposure; none includes `tf2_ros/version.h`. marine_ais and bathymetry_layer construct no listener (Nav2 hands them its buffer).
+
+### Persistence
+Full pre-commit pass left to the host; no workspace scripts changed.
+
+## Local Review
+**Status**: complete
+**When**: 2026-11-24 13:04 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: approved
+
+**PR**: #58 at `da4f220`
+**Depth**: Standard (reason: narrow re-review of the fix commits d5b3f6b, 9ccdd2c, 95eadc5, e680b27 against the Local Review at `9ead2ad`, per handoff; no cross-model reviewers and no adversarial subagent, per handoff)
+**Must-fix**: 0 | **Suggestions**: 0
+
+### Findings
+- [ ] No issues found. LGTM.
+
+Checked. (1) `d5b3f6b`: `makeTransformListener<ListenerT = tf2_ros::TransformListener, NodeT>(BufferCore &, NodeT &)`; `TakesNodeInterfaces<ListenerT>` is a `void_t` detection on a template parameter, so both `if constexpr` branches are dependent and the untaken one is not instantiated; `static_assert(!is_pointer_v<NodeT>)` stops a pointer argument. Headers fetched from ros2/geometry2 (public): 0.36.21 has no `RequiredInterfaces`; the pointer branch passes `(Buffer &, GridPublisher * prvalue, bool)` through make_shared as `GridPublisher *&&`; the candidates are the non-template `(BufferCore &, bool, bool)` (pointer-to-bool, a boolean conversion) and the `NodeT &&` template (NodeT = `GridPublisher *`, identity), the first and third arguments equal in both, so the template wins on the second; the other 2-arg and 8-arg forms are not viable. 0.45.0 declares `RequiredInterfaces`; the reference branch passes `GridPublisher &`: `(BufferCore &, bool, bool)` is not viable (no node-to-bool conversion), the deprecated `NodeT &&` is removed by its `is_pointer` constraint, so the `RequiredInterfaces` constructor through `NodeInterfaces`' converting constructor. The implementer's shim compile of the real file against 0.36.21, 0.36.23, 0.44.0, 0.45.0, 0.46.2, 0.46.5 with a poisoned version.h is consistent with this; not repeated. Same in substance as cube_bathymetry's `make_transform_listener.hpp` (identical trait, signature, static_assert and branches); only `spin_thread` differs (false here, true there), by design. (2) `9ccdd2c`: only the wait changed; `valid()` guards, `get()` once per ready future, names collected in `done_grids` and erased after the loop, so a not-ready job stays for the next tick; no result missed, none consumed twice, no moved-from future queried. (3) `e680b27`: `setUsingDedicatedThread(true)` only inside the `spin_thread_` branch at 0.36.21 transform_listener.hpp:271,338 and 0.45.0:253. Mutation `spin_thread = true` in the helper, Rolling: the test fails at test_reconfigure.cpp:155, the other 3 pass; restored, 4/4. `95eadc5`: 4 x 10 s waits = 40 s < 45 s watchdog < CTest 60 s ("Test timeout computed to be: 60" in CI). (4) CI run 45454306548 on `da4f220`: success. Jazzy (tf2_ros 0.36.23): "Finished <<< s57_grids [1min 5s]", "[  PASSED  ] 4 tests.", "2/7 Test #2: test_reconfigure .................   Passed    0.59 sec", "Summary: 244 tests, 0 errors, 0 failures, 32 skipped"; build-and-test (jazzy) pass 6m12s, (rolling) pass 3m29s; no failure or flake in the run. (5) Rolling, ROS_DOMAIN_ID 187 checked empty, DISPLAY unset: `./test.sh --packages-select s57_grids --parallel-workers 1 --ctest-args -j1`: 7/7, test_reconfigure 4/4. (6) The four commits touch only s57_grids source and test, none `.agent/`, one change each, each message ends "Part of #52. Backport to jazzy." All 18 Part 2 code commits (f14c0a0 98182eb 3b63f8b 5d44873 354e860 1eeec53 ac29320 02d7617 a91812a 91a4d4e fa07b2c 8ab87bf d331930 3542b04 d5b3f6b 9ccdd2c 95eadc5 e680b27) cherry-picked onto origin/jazzy in order with no conflict (scratch worktree, removed). origin/rolling moved to 474c755 (pull request 60 merged); `git merge-tree` of this branch into it: clean. (7) Previous review's five items all closed: version.h gone, no version number left (0.44/0.45 cut-off moot), `wait_for(0s)`, the dedicated-thread test, 45 s watchdog. Still unshown, as the Implementation entry says: a real build on a Jazzy machine with tf2_ros older than 0.36.22.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-11-24 13:11 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+**Reviews-read**: none
+
+**PR**: #58 at `ccd6f49`
+**Sources**: 2 (Local Review @ `da4f220` covering the head via bookkeeping, CI rollup); 0 pull-request reviews, 0 inline comments, 0 conversation comments
+**Cross-source confirmations**: 0
+**CI**: all-pass
+
+Part 2 only (after the newest Plan Authored). The Local Review at `da4f220` approved with no findings and closed the previous review's one must-fix and four suggestions; the earlier Integrated Review's must-fix (the intermittent Jazzy hang of `test_reconfigure`) was addressed by `3542b04` and the four commits after it. Settled items stay settled: the suggestions routed to the comment on #54; the `generateTile` defects (#59 and the #54 list); #57; no Rolling CI for these two packages. No review, inline comment or conversation comment exists on the pull request.
+
+CI at head `ccd6f49`, run 45455754152: `build-and-test (jazzy)` and `build-and-test (rolling)` SUCCESS. Jazzy: `test_reconfigure` `[  PASSED  ] 4 tests.` in 0.50 s, `Summary: 244 tests, 0 errors, 0 failures, 32 skipped`. Rolling: `Summary: 159 tests, 0 errors, 0 failures, 18 skipped`. Every Jazzy run of this pull request since `3542b04`, `test_reconfigure`: 45450980411 (`9ead2ad`) passed, 3 tests; 45452353909 (`24aa73b`) passed, 3 tests; 45454306548 (`da4f220`) passed, 4 tests, 0.59 s; 45455754152 (`ccd6f49`) passed, 4 tests, 0.50 s. The one failure was before the fix: 45445136398 (`74d2467`), 60 s timeout. Four green runs are four data points on an intermittent hang; that the hang is gone on Jazzy rests on the mechanism (the node has no listener thread to cancel; `TransformListenerHasNoThreadOfItsOwn` pins it) and the emulation, not on a count of green runs. Not shown: a build on a Jazzy machine with tf2_ros older than 0.36.22 (CI's image has 0.36.23).
+
+The pull request body is stale against the records (placeholder "Results of both runs are added below."; nothing on the Jazzy hang, its cause and the change in how the node receives transforms; "twelve code commits" where eighteen are to be backported; the review history; test counts; "#56 (fix in its own pull request)" now merged on both branches; what is not shown). Corrected text is in the report to the host, who posts it.
+
+### Findings
+- [x] (suggestion, pull request body) Replace the body with the corrected text given to the host (hang and its cause, the new transform handling, 18 commits to backport, review history, test counts, #56 merged, what is not shown) — the body is the host's to edit; no code change — done by the host: the body was replaced with that text on 2026-11-24, with two corrections (the description of the read past a row in `generateTile`; that all eighteen commits were trialled onto `jazzy`).
+
+### False positives
+- none (no external review comments to dismiss)
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 13:13 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: owner
+**After**: merge
+**Decision**: merge
+
+The owner, 2026-11-24, asked whether to merge pull request 58 (part 2) with the decision summary in the dialog: "Merge, then prepare the backport (Recommended)". The eighteen code commits are then backported to `jazzy` by hand and that pull request is brought to him with its CI result before it is merged. The owner also reported the same day that a whole-project Jazzy build on his Jazzy machine, synced before this merge, "built fine".

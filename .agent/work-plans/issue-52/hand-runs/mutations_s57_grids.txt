@@ -1,0 +1,10 @@
+## baseline
+  test_reconfigure: exit 0; passed ['3']; failed []
+## abort_flag_ reset deleted
+  test_reconfigure: exit 1; passed ['2']; failed ['ReconfigureTest.ConfigureAfterCleanupClearsTheAbortFlag']
+## pending_dataset_grids_.clear() deleted
+  test_reconfigure: exit 1; passed ['2']; failed ['ReconfigureTest.CleanupDropsAbortedJobs']
+## missing-grid check deleted
+  test_reconfigure: exit -6; passed []; failed []
+    /usr/include/c++/15/bits/shared_ptr_base.h:1344: _Tp* std::__shared_ptr_deref(_Tp*) [with _Tp = grid_map::GridMap]: Assertion '__p != nullptr' failed.
+## done

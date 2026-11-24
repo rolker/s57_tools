@@ -98,6 +98,36 @@ if(BUILD_TESTING)
     TIMEOUT 30
   )
 
+  # GridPublisher across a cleanup and a new configuration. It builds
+  # grid_publisher.cpp itself (the node is only an executable) and reads
+  # marine_charts' catalogue fixture, whose one chart has no cell file. It
+  # serves get_datasets and reads /rosout, so it gets its own ROS domain.
+  find_package(ament_cmake_ros REQUIRED)
+  find_package(geometry_msgs REQUIRED)
+  find_package(rcl_interfaces REQUIRED)
+  ament_add_ros_isolated_gtest(test_reconfigure
+    test/test_reconfigure.cpp
+    src/grid_publisher.cpp
+  )
+  target_compile_definitions(test_reconfigure PRIVATE
+    TEST_ENC_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../marine_charts/test/data/enc_root")
+  target_include_directories(test_reconfigure PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${grid_map_ros_INCLUDE_DIRS}
+  )
+  target_link_libraries(test_reconfigure
+    ${geometry_msgs_TARGETS}
+    ${grid_map_ros_LIBRARIES}
+    ${lifecycle_msgs_TARGETS}
+    marine_charts::marine_charts
+    ${rcl_interfaces_TARGETS}
+    rclcpp::rclcpp
+    rclcpp_lifecycle::rclcpp_lifecycle
+    ${s57_msgs_TARGETS}
+    ${tf2_geometry_msgs_TARGETS}
+    tf2_ros::tf2_ros
+  )
+
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   # See s57_layer/CMakeLists.txt for rationale on cpplint/uncrustify skips.

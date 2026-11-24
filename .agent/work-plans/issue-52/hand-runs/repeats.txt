@@ -1,0 +1,8 @@
+test_initialize: 50/50 passed, 0 failed
+test_reconfigure: 50/50 passed, 0 failed
+test_depth_costs: 10/10 passed, 0 failed
+test_tide_offset: 10/10 passed, 0 failed
+test_allow_uncharted: 10/10 passed, 0 failed
+test_plugin_loading: 10/10 passed, 0 failed
+1/1 Test #1: test_test_node_launch.py .........   Passed    1.58 sec
+100% tests passed, 0 tests failed out of 1
