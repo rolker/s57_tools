@@ -259,3 +259,13 @@ Gemini findings rejected: cpplint `runtime/string` and missing copyright header 
 - [ ] (suggestion) README paraphrases NOAA's redistribution condition as "shown with redistributed copies"; the agreement (section 3) says "displayed and accepted by anyone accessing" plus a website reference, and adds full liability for products incorporating ENCs in altered form: quote the conditions verbatim — `marine_charts/test/data/README.md:27`
 - [ ] (suggestion) Add a `.gitattributes` `-text` rule for `marine_charts/test/data/enc_root/*`: git treats both fixtures as text (no NUL bytes), so a `core.autocrlf=true` checkout can rewrite the agreement's mixed line endings and break the documented sha256 (Codex and Gemini) — `marine_charts/test/data/README.md:32`
 - [ ] (suggestion) The Rolling closure guard sees only packages on disk in `src/`, so its `nav2_.*` branch cannot match a Nav2 dependency (none is cloned); such a dependency would fail later at strict `rosdep install` while Nav2 is unreleased for Rolling, but would pass if Nav2 ever releases. Reword the header claim ("fails the job if the closure ever takes in a Nav2 package") to "Nav2 source", or also check the closure's declared keys (Codex and Gemini) — `.github/workflows/ci.yml:243`
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 09:31 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (the pre-push review approved round 1 with no must-fix; Jazzy cannot be built on the development machine, so the pushed branch's first run is the first Jazzy evidence, and the first CI build anywhere of two of the six packages)
+**After**: publish
+**Decision**: publish
+
+Read: the Local Review (Pre-Push) at `5f8d9c4`, verdict approved, ship recommended, three suggestions open: the fixture README paraphrases NOAA's redistribution conditions where it should quote them (`marine_charts/test/data/README.md:27`); a `.gitattributes` rule should keep git from rewriting the two fixtures' line endings on checkout, which would break the recorded checksums (`marine_charts/test/data/README.md:32`); the Rolling job's closure guard can only see packages on disk, so the workflow header should say it guards against Nav2 source entering the build, not against any Nav2 dependency (`.github/workflows/ci.yml:243`). They stay open and go through triage after publish together with what the first CI run shows, so one fix pass serves both. Also from the review, for the pull request text: neither CI job will run cppcheck (it skips on cppcheck 2.x on both distros), and CI tests the freshly built library. The pull request says `Part of #52` (part 1 of 2).
