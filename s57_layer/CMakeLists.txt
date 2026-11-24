@@ -9,7 +9,11 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
-find_package(geodesy REQUIRED)
+# 1.0.7 first has geodesy/ecef.h, which src/s57_layer.cpp includes. The floor
+# is necessary, not sufficient: the 1.0.7 tag itself needs upstream #64
+# (f70b81a, still versioned 1.0.7) to compile, which no version check can tell
+# apart.
+find_package(geodesy 1.0.7 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(grid_map_ros REQUIRED)
 find_package(s57_grids REQUIRED)
