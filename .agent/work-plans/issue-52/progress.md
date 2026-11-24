@@ -388,3 +388,13 @@ CI run 45418748263 on `87bfe25`, both jobs success:
 **Decision**: merge
 
 The owner's answers, 2026-11-24: "Merge when CI is green (Recommended)" for pull request 53 (part 1), with the NOAA catalogue as the test fixture (he was shown what NOAA's agreement asks and the alternative of a synthetic catalogue); "Backport right after (Recommended)" for the hand backport to `jazzy` of the seven code, docs and CI commits; "Open it (Recommended)" for the follow-up issue in this repository. The host merges only after the CI run on the pushed records passes. Part 2 (`s57_grids`, `s57_layer`) is planned at the plan checkpoint after this merge.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 10:17 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (part 1 merged as pull request 53 at `ce1eb2b`; the plan details part 1 and only outlines part 2, so it is refreshed rather than implemented as it stands)
+**After**: plan
+**Decision**: revise
+
+Part 1 (the four Nav2-free packages and CI on both distros) is merged; its backport to `jazzy` is pull request 55. The plan is refreshed for part 2: `s57_grids` and `s57_layer`, checked on Rolling by hand (owner: no CI job builds Nav2 source), on Jazzy by the existing CI job, which already builds and tests both. To carry into the refreshed plan: the causes the issue review and part 1's plan found in `s57_layer` (1, 8, 2, 6 with 15 `declareParameter` calls, 7, 13 in tests, and the new one: `nav2::LifecycleNode::create_client` returns Nav2's wrapper; candidate 17 on rolker/unh_marine_autonomy#415); how the two earlier costmap layers were ported (`bathymetry_layer`, `ais_layer`: a local parameter helper kept rather than Nav2's newer API, tracked in rolker/unh_marine_autonomy#428; parameter-override and `initialize()` tests proved by mutation); cause 11 for `grid_map_ros`, `grid_map_msgs` and `tf2_ros`; the pre-existing defect in `s57_grids`' `grid_publisher` (`abort_flag_` set at cleanup and never reset, so after a cleanup and a new configure every grid request returns null and is then dereferenced): the plan says what the facts are and puts the choice (fix in the port, or track) to the host; `s57_layer` is on the navigation path (it marks charted hazards in the costmap), so the plan's validation statement says how the port is shown not to change what it marks. Left-alone items go to rolker/s57_tools#54 as a comment drafted for the owner.
