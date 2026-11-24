@@ -293,8 +293,11 @@ void GridPublisher::checkForNewGrids()
   std::vector<std::string> done_grids;
   for(auto& pg: pending_dataset_grids_)
   {
+    // Poll without waiting: this timer runs on the node's only executor
+    // thread, which also serves /tf. A job that finishes after this check
+    // is picked up on the next tick.
     if(pg.second.valid())
-      if(pg.second.wait_for(std::chrono::milliseconds(10)) == std::future_status::ready)
+      if(pg.second.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
       {
         auto grid = pg.second.get();
         if(!grid)
