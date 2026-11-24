@@ -238,3 +238,24 @@ The pull request's first CI run is the first Jazzy evidence for all of Part 1. I
 - The test has the plan's two gtests; the outside-box test checks all four edges (east, west, north, south), not only east and north.
 - The workflow names each job's packages once, in a job-level `PACKAGES` variable, so no line exceeds yamllint's 120 characters; the rosdep and guard steps do not source `/opt/ros/<distro>/setup.bash` (they run under `set -u`, and need only colcon and rosdep from the image).
 - Commit 2 also changes `.pre-commit-config.yaml` (the exclusion), which the plan's file table did not list.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-11-24 09:25 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: approved
+
+**Branch**: feature/issue-52 at `5f8d9c4`
+**Base**: origin/rolling
+**Depth**: Deep (reason: CI workflow rewrite plus vendored C++ reader, third-party fixtures and packaging across 4 packages; 18 files, +992 -37)
+**Must-fix**: 0 | **Suggestions**: 3
+**Round**: 1 | **Ship**: recommended — no must-fix findings; remaining suggestions can be applied or tracked
+
+Part 1 scope: s57_msgs, marine_charts, s57_to_geotiff, enc_updater, CI on both distros. Checked: `79d64d6` touches only the six `CPL_CVSID` lines; the fixtures are byte-identical to `ENC_ROOT/CATALOG.031` and `ENC_ROOT/USERAGREEMENT.TXT` in NOAA's current `US5PSMCC.zip` (fetched for this review; sha256 `10a94bcf…40da8f`, `27b503af…f848f`) and to unh_marine_simulation's copy of the agreement; the test's expected bounds equal the `.000` CATD bytes, and each of the four clear boxes fails exactly one comparison in `S57Dataset::intersects`; nothing under `test/` is installed. Under `colcon test`, a package's own install prefix is in its test environment (colcon_core `verb/test.py`, "for testing a package include itself"), so `test_s57_catalog` loads `install/marine_charts/lib`, which LD_LIBRARY_PATH puts ahead of the build-tree RUNPATH; in CI and `./build.sh` that copy is installed by the same build, so the fresh library is tested; only a build-tree rebuild without install (the mutation method) is fooled. The same rule lets the `s57_layer` plugin test and the `s57_grids` launch test find their own packages without sourcing the overlay. All five code commits cherry-pick cleanly onto `origin/jazzy` (scratch worktree, removed); none touches `.agent/`. Not verifiable here: anything Jazzy (no Jazzy install). Note: ament_cppcheck skips every cppcheck 2.x unless `AMENT_CPPCHECK_ALLOW_SLOW_VERSIONS` is set, Jazzy's 2.13 included, so neither job runs cppcheck (the plan expects Jazzy to).
+
+Gemini findings rejected: cpplint `runtime/string` and missing copyright header in `test_s57_catalog.cpp` (both linters are disabled in `marine_charts/CMakeLists.txt`); unknown names in `$PACKAGES` passing silently (`--packages-up-to` errors on an unknown name).
+
+### Findings
+- [ ] (suggestion) README paraphrases NOAA's redistribution condition as "shown with redistributed copies"; the agreement (section 3) says "displayed and accepted by anyone accessing" plus a website reference, and adds full liability for products incorporating ENCs in altered form: quote the conditions verbatim — `marine_charts/test/data/README.md:27`
+- [ ] (suggestion) Add a `.gitattributes` `-text` rule for `marine_charts/test/data/enc_root/*`: git treats both fixtures as text (no NUL bytes), so a `core.autocrlf=true` checkout can rewrite the agreement's mixed line endings and break the documented sha256 (Codex and Gemini) — `marine_charts/test/data/README.md:32`
+- [ ] (suggestion) The Rolling closure guard sees only packages on disk in `src/`, so its `nav2_.*` branch cannot match a Nav2 dependency (none is cloned); such a dependency would fail later at strict `rosdep install` while Nav2 is unreleased for Rolling, but would pass if Nav2 ever releases. Reword the header claim ("fails the job if the closure ever takes in a Nav2 package") to "Nav2 source", or also check the closure's declared keys (Codex and Gemini) — `.github/workflows/ci.yml:243`
