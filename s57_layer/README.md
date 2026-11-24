@@ -35,6 +35,7 @@ local_costmap:
     *   **Low Overhead**: LETHAL_OBSTACLE
     *   **Depth < minimum_depth**: LETHAL_OBSTACLE
     *   **Depth < maximum_caution_depth**: Scaled cost (Non-Lethal to Free)
+5.  On a rolling costmap, reports the cells each move of the window uncovers as thin strips (the whole window only on the first update, after a reset, or after a jump further than the window): on travel along one axis they are painted in the same update, otherwise within 3 updates (x and y strips take turns, with an update between, so the inflation layer never re-inflates the whole window).
 
 ## Suppressed-depth mode (ADR-0010 D10)
 
