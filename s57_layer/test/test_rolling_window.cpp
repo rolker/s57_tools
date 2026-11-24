@@ -183,20 +183,32 @@ protected:
   std::shared_ptr<nav2_costmap_2d::InflationLayer> inflation_;
 };
 
+// The robot positions are chosen so that Jazzy and Rolling put the window at
+// the same origin. LayeredCostmap::updateMap centres the window with
+// robot - getSizeInMetersX() / 2, and Costmap2D::updateOrigin then truncates
+// the offset from the old origin, in cells, toward zero. Rolling's
+// getSizeInMetersX is size * resolution (10 m here, since Nav2 #6028);
+// Jazzy's is (size - 1 + 0.5) * resolution (9.5 m), which asks for an origin
+// a quarter metre further east and north. Every position below truncates to
+// the same cell under both: at -0.5, Rolling asks for -5.5 and Jazzy for
+// -5.25, both -5; at 20, Rolling asks for 15 and Jazzy for 15.25, both 15.
+// Each case asserts the origin, so a wrong assumption fails on the origin,
+// not on a cell count.
+
 // The window's lower-left corner is west and south of the layer origin.
 TEST_F(RollingWindowTest, BelowOriginOnBothAxes)
 {
-  EXPECT_TRUE(allLandAt(0.0, 0.0, -5.0, -5.0));
+  EXPECT_TRUE(allLandAt(-0.5, -0.5, -5.0, -5.0));
 }
 
 TEST_F(RollingWindowTest, BelowOriginOnXOnly)
 {
-  EXPECT_TRUE(allLandAt(0.0, 20.0, -5.0, 15.0));
+  EXPECT_TRUE(allLandAt(-0.5, 19.5, -5.0, 14.0));
 }
 
 TEST_F(RollingWindowTest, BelowOriginOnYOnly)
 {
-  EXPECT_TRUE(allLandAt(20.0, 0.0, 15.0, -5.0));
+  EXPECT_TRUE(allLandAt(19.5, -0.5, 14.0, -5.0));
 }
 
 // Not a control: updateCosts finds its first tile from the centre of cell 0,
@@ -204,7 +216,7 @@ TEST_F(RollingWindowTest, BelowOriginOnYOnly)
 // a whole tile column and row.
 TEST_F(RollingWindowTest, BelowOriginOnAnExactTileMultiple)
 {
-  EXPECT_TRUE(allLandAt(-3.0, -3.0, -8.0, -8.0));
+  EXPECT_TRUE(allLandAt(-3.5, -3.5, -8.0, -8.0));
 }
 
 // Far from the origin, with a robot position that is not on a cell; the
@@ -243,7 +255,8 @@ TEST_F(RollingWindowTest, UnchartedBelowOriginMarkedUnknown)
   }
   layered_costmap_->setFootprint(footprint);
 
-  layered_costmap_->updateMap(0.0, 0.0, 0.0);
+  // Robot at -0.5: the same origin on Jazzy and Rolling (see above).
+  layered_costmap_->updateMap(-0.5, -0.5, 0.0);
 
   auto * master = layered_costmap_->getCostmap();
   ASSERT_EQ(master->getOriginX(), -5.0);
@@ -252,7 +265,8 @@ TEST_F(RollingWindowTest, UnchartedBelowOriginMarkedUnknown)
 }
 
 // The master-to-layer cell offset at a resolution that is not binary-exact.
-// At 0.1 m, moving the window from 0 towards 0.35 puts its origin at
+// At 0.1 m, moving the window from 0 towards 0.35 (0.375 on Jazzy, see the
+// size formulas above; both truncate to 3 cells) puts its origin at
 // 0 + 3*0.1 = 0.30000000000000004, so the offset of the tile above it is
 // -0.9999999999999996 cells, which truncates to 0 and copies that tile one
 // cell west. The oracle is a window that never moved, over the same chart
