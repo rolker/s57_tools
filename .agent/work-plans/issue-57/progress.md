@@ -432,3 +432,83 @@ Reviewers: static (cppcheck: nothing on changed lines), governance, plan drift, 
 - **Commits A and B.** Each correct with a test that fails without it; B changes nothing on BEN (chart_layer first) and stops the "Illegal bounds change" a later position would cause.
 - **Threads.** The new members are touched only in `updateBounds`, `reset` and `matchSize`, all under the costmap mutex (`updateMap`, `clearEntirely`); the grid and dataset callbacks do not touch them.
 - **Hygiene.** No `.agent/` file in the three code commits; each ends "Backport to jazzy.". Not taken up: Gemini's extra tile at a window edge on a tile boundary (pre-existing, cleared by `updateCosts`), Codex's stale trailing-edge inflation (Nav2's behaviour on any rolling costmap).
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 16:23 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+
+**Branch**: feature/issue-57 at `bbc87c5`
+**Addressed**: Local Review (Pre-Push) at `ae38308` (2026-11-24 15:41 -05:00)
+**Commits**: `9b54db7` `5abf172` `db8c5c2` `f480aea` `251aa67` (code, each ends "Backport to jazzy.", none touches `.agent/`); `4cdda55` (harness, records); `bbc87c5` (boxes, records)
+
+### Actions
+- [x] (must-fix) Axis reversal re-inflates the whole window — `s57_layer/src/s57_layer.cpp` `recordUncovered`, `chooseStrip`; `s57_layer.h` (`9b54db7`)
+- [x] (must-fix) Statements — README item 5 (`251aa67`), the `chooseStrip` comment (`9b54db7`, `5abf172`), the pull-request statements below
+- [x] (suggestion) A jump: whole window on a move of more than a tile on either axis — `recordUncovered` (`5abf172`)
+- [x] (suggestion) Tests and defensive lines: fast zig-zag every-cell case (`9b54db7`); `reset()`, `matchSize()` and the half-cell margin labelled defensive (`f480aea`); the span clip now caught (station keeping and zig-zags)
+- [x] (suggestion) `whole_pending_ = true` on the `!enabled_` return, labelled unreachable (`db8c5c2`)
+
+### Fix 1: what was built, and why not the prototype
+- **State:** four spans, one per window edge (`pending_[x_low, x_high, y_low, y_high]`), each with an `age` (cycles its oldest cell has waited), and `last_reported_` (which strip, none, or whole). `last_axis_` is gone. Spans are clipped to the window and aged before a move's cells are added.
+- **Rule (`chooseStrip`):** a strip follows last cycle's only if it is the same strip and nothing else is pending; otherwise a gap. After a gap (or a whole report) the oldest strip goes; if two strips have cells that have waited 2 cycles, the whole window is reported instead. Proof of the bound: the next chance for a different strip after one is served is two cycles later, so a strip passed over at age 2 or more would be painted at age 4; the escape prevents it, so every uncovered cell is painted at age 3 at most (wrong at ages 0, 1, 2).
+- **One span per axis was not adequate.** I built the reviewer's prototype first (clip before add; no strip after a strip on the other side of the same axis; one flag for the side). A diagonal turned back on both axes then joins a still-pending north row with the new south row into a hull spanning the window, and zig-zags do the same. Measured on the extended harness (105 scenarios x 4 other-layer set-ups, before the jump rule): whole-window cycles, Rolling r2, today 2587, one span per axis 2575, one per side 1627; zig-zag x+y phase 3 88 against 17; fast zig-zag x+y 3 m 84 against 0. Oldest wrong cell age 2 in both. Station keeping on the global costmap: 0 whole-window cycles with one per side.
+- **What is still whole:** a diagonal turned back on both axes in one cycle (all four sides pending; the escape fires once: the unit test pins one report, cycles " 11" with no inflation, " 11 12" with it). On the local costmap, station keeping with +-1 m of noise every 0.2 s (moves of up to 4 cells per cycle on both axes) gives 24 whole-window cycles of 300, costing 3.5 ms worst (Rolling) and 5.2 ms (Jazzy) on that 700 x 700 window. On the global costmap station keeping gives 0 of 150.
+- **Worst delay:** 3 cycles, unchanged. On travel along one axis 0, or 1 in the cycle the travel turns back (the reversal test now allows 1 cycle).
+
+### Fix 3: the jump rule
+A move of more than a tile (`tile_size * resolution`, plus half a cell) on either axis in one cycle reports the whole window. Either axis, because a jump along one axis would otherwise wait a cycle behind the other axis's strip of the cycle before: the test's second case (travel north, then a 10 m jump east) fails with the rule on both axes only. BEN never triggers it in travel: at 5 m/s the global costmap (1 m, 1 Hz) moves 5 cells a cycle and the local one (0.5 m, 5 Hz) 2, against 100-cell tiles. The no-overlap test stays for a tile as wide as the window (removing it alone is caught by nothing now; removing both is caught).
+
+### Tests (`test_rolling_window.cpp`) and their failures without their fix (scratch builds compiling the layer source into the test; `ldd` shows no `libs57_layer.so`)
+- `WholeWindowTest.ReversalNeverRepaintsTheWholeWindow` (east then west, north then south, first step back 2 m so the window turns back at once; north-east, a stop, south-west): on the reviewed layer (`3231db9`) "these cycles repainted the whole window: 8" under r2 and r6, east-west and north-south. A 1 m step back from x.5 truncates to no move, a free gap, so the first version of this test passed on the reviewed layer; that is why the step is 2 m.
+- `WholeWindowTest.StationKeepingNeverRepaintsTheWholeWindow` (+-1 m around (30.5, 30.5), a fixed pseudo-random sequence, 80 cycles): reviewed layer "7 15 17 19 37 53 55 59" (no inflation), 22 cycles under r2 and r6. Without the clip: fails. With a strip allowed after one on the other side of the same axis: "8".
+- `WholeWindowTest.SharpDiagonalReversalRepaintsTheWholeWindowOnce`: reviewed layer " 9" / " 9 10" against the expected " 11" / " 11 12".
+- `WholeWindowTest.DiagonalTravelNeverRepaintsTheWholeWindow`: moved into the new fixture; every cost case now asserts the window origin each cycle under both size formulas.
+- `MovingWindowTest.FastZigZagsEveryCellWithinTheBound` (+-2 m reversing every 1 and 2 cycles, x only within 1 cycle, x+y within 3): with `last_window_` updated only on strip cycles (the reviewer's break) "cycle 16, robot at (22.5, 20.5): 20 of 400 cells differ ... allowance 1 ... first (31.5, 10.5) has cost 0 where the oracle has 254". Passes on the reviewed layer (a guard, not a regression test).
+- `MovingWindowTest.JumpShorterThanTheWindowEveryCellEveryCycle` (10 m jumps, the robot's own column uncovered; every cell every cycle): without the rule "cycle 4, robot at (33.5, 30.5): 300 of 400 cells differ ... first (33.5, 20.5) has cost 0 where the oracle has 254" and "(30.5, 23.5): 200 of 400 ... first (30.5, 13.5)"; with the rule on both axes only, the second.
+- `ReversalPastTheStartEveryCellEveryCycle` became `...WithinOneCycle` (allowance 1).
+- Every path in `drive` and in the cost helper asserts, each cycle, that Rolling's `size * resolution` and Jazzy's `(size - 1 + 0.5) * resolution` give the same origin and that the window has it; all pass, so each path (the jitter at x.5 +- whole metres included) was re-derived step by step by the test itself.
+
+### Deliberate breaks of the final source (16), and what catches each
+gap after every strip: East, North, FastZigZags, JumpPastTheWindow, JumpShorter, Reset, LateGrid · no gap: Diagonal, Reversal, SharpDiagonal, StationKeeping (every cycle whole) · other side of the same axis allowed next: Reversal, StationKeeping · tile rule removed: Diagonal ("3 11 19 27 35"), Reversal, SharpDiagonal, StationKeeping · low-side spans not recorded: ReversalPastTheStart, FastZigZags, SlowDiagonal, SharpDiagonal · no clip: FastZigZags, StationKeeping · `last_window_` only on strip cycles: FastZigZags · ages not kept: FastZigZags, both SlowDiagonals, SharpDiagonal · escape removed: FastZigZags ("cycle 18 ... allowance 3 cycles, the oldest wrong cell has been in the window 3 cycles"), SharpDiagonal · jump rule removed: JumpShorter · jump rule on both axes: JumpShorter · jump rule and no-overlap test removed: JumpPastTheWindow, JumpShorter.
+**Caught by nothing:** `reset()` and `matchSize()` setting `whole_pending_`, the half-cell margin (labelled defensive, `f480aea`; a resize while running reaches the `matchSize` line but no test drives one), the no-overlap test alone (covered by the jump rule while a tile is narrower than the window), and the `!enabled_` line (unreachable).
+
+### Runs on the final code
+- Package suite on Rolling, package worktree (`build.sh --packages-up-to s57_layer --parallel-workers 4`; `test.sh --packages-select s57_layer --parallel-workers 4 --ctest-args -j4`, `ROS_DOMAIN_ID` 177): 9 of 9 ctest entries passed; colcon test-result 78 tests, 0 errors, 0 failures, 8 skipped (cppcheck's). `ldd` showed the worktree's own installed `libs57_layer.so`. `build/`, `install/`, `log/` removed afterwards.
+- The 7 new or changed tests, 30 runs each as separate processes: 30/30 each (68 s).
+- Harness adversarial set (`4cdda55`, final beside `afa7403`): 105 scenarios x 4 other-layer set-ups x 5 inflation set-ups = 2100 runs, 89 060 cycles, 149 s on 5 processes.
+
+| | none | Rolling r2 | Rolling r6 | Jazzy r2 | Jazzy r9 |
+|---|---|---|---|---|---|
+| today: oldest wrong age / streak | 134 / 135 | 127 / 128 | 102 / 125 | 127 / 128 | 76 / 125 |
+| final: oldest wrong age / streak | 2 / 3 | 2 / 3 | 2 / 3 | 2 / 3 | 2 / 3 |
+| whole-window cycles today / final | 1120 / 1075 | 2587 / 1718 | 2910 / 2524 | 2587 / 1718 | 10101 / 11170 |
+
+Per scenario group, Rolling r2, oldest wrong age / longest streak / whole-window cycles summed over the 4 other-layer set-ups (with no other layer alone), today -> final: station keeping (4) 22/23/0(0) -> 2/3/91(0); lawnmower 0° 34/35/4(1) -> 2/3/46(0); lawnmower 30° 36/39/30(6) -> 2/3/32(0); fast zig-zag x 1-3 m 24/29/0 -> 0/1/0(0); fast zig-zag x+y 1-3 m 24/29/4(1) -> 1/2/0(0); stop then reverse (4 phases) 8/9/72(15) -> 2/3/27(0); reversal (4 phases) 8/9/129(26) -> 2/3/56(4, the sharp diagonal escape); sub-window jumps on one axis (6.2, 0), (0, -7.3), (4.6, 0.4) and both (6.2, 5.1), (-9.1, 8.7) at 4 phases each: final oldest age 2 or less, 8 whole cycles alone per jump of more than a tile (the jump and the inflation merge), 4 for (4.6, 0.4); random walks of 3 m steps 102/124/76(12) -> 2/3/373(54); tide step, chart-set change, reset at 5 cycles each -> 40(10), 40(10), 20(5). Whole-window cycles with another layer come mostly from set-up 3 (a layer reporting a strip at the east edge every cycle, whose union with this layer's west strip is the window). Jazzy r9 on a 20-cell window repaints nearly everything whatever the layer does. The full per-scenario lines are in the run's output (`PER_SCENARIO=1`), not kept.
+- Before/after: cell-cycles lethal today and not lethal in the final code: 19 738 (none), 7 932 (r2, both distros), 4 217 (r6), 2 176 (J r9); every one lethal in the fresh window, none in a cell that had been in the window 3 cycles or more. 0 origin mismatches.
+
+### Measurements, desktop (Intel Core Ultra 7 265, Release, Rolling's source-built Nav2), mean / worst ms per `updateMap`, whole-window cycles in brackets
+Global 5000 x 5000 at 1 m, 1 Hz, 150 cycles:
+
+| | E 2 m/s | E 5 | 45° 2 | 45° 5 | lawnmower 2 | lawnmower 5 | station keeping +-1 m |
+|---|---|---|---|---|---|---|---|
+| today, Rolling inflation | 8.6 / 21.1 | 9.3 / 23.6 | 16.2 / **310** (4) | 28.1 / **309** (10) | 8.5 / 20.9 | 8.6 / 20.9 | 8.2 / 10.6 |
+| final, Rolling inflation | 19.3 / 22.1 | 19.5 / 22.5 | 18.0 / 22.4 | 18.8 / 23.9 | 19.0 / 21.7 | 19.2 / 24.1 | 15.3 / 19.9 (0) |
+| today, Jazzy inflation | 8.9 / 31.7 | 10.0 / 34.0 | 16.9 / **349** (4) | 31.6 / **378** (10) | 8.7 / 31.4 | 9.1 / 31.7 | 8.2 / 9.6 |
+| final, Jazzy inflation | 26.3 / 34.8 | 27.6 / 33.7 | 25.4 / 32.2 | 27.1 / 36.7 | 25.8 / 32.2 | 26.2 / 33.9 | 22.4 / 33.7 (0) |
+
+All final global runs: 0 whole-window cycles. The reviewed code (`3231db9`), reviewer's measurement: station keeping 65.2 / 314 (Rolling), 76.7 / 355 (Jazzy), 26 of 150 whole. No inflation, global, 45° 2 m/s: today 8.1 / 9.0, final 8.2 / 8.9.
+
+Local 700 x 700 at 0.5 m, 5 Hz, 300 cycles (lawnmower 40 m legs, 10 m turns): today 0.06-0.17 / 3.0-4.1 (Rolling), 0.06-0.26 / 4.6-7.2 (Jazzy), 4 and 8 whole cycles on the 45° runs; final 2.58-2.66 / 2.9-3.5 (Rolling), 4.6-5.6 / 5.2-7.2 (Jazzy), 0 whole except station keeping, 24 of 300 (worst 3.5 Rolling, 5.2 Jazzy).
+
+### Statements for the pull request (replacing the earlier entry's)
+- **Design:** on a rolling costmap the layer reports the cells each move of the window uncovers as thin strips at the window's edges (west, east, south, north), one per cycle, with a gap cycle between different strips, because Nav2's inflation layer merges each cycle's bounds with the last and two different strips together span the window. After a gap the strip waiting longest goes next. The whole window is still reported on the first cycle, after a reset, on a jump of more than a tile on either axis, on a tide step over `tide_invalidate_threshold`, on a chart-set change, and once when diagonal travel turns back on both axes in one cycle (and on the local costmap during violent station keeping, see the cost).
+- **Delay bound:** every uncovered cell is painted within 3 cycles (wrong at most in the cycle it is uncovered and the 2 after). On travel along one axis in the same cycle, or the next when that travel turns back.
+- **Later than today:** a charted hazard can appear **up to 3 cycles later** than with today's code, only for cells of a tile newly entering the window when today reports that whole tile at once and the strips make it wait: travel with movement on both axes, or a move larger than one step (up to a tile). Never on travel along one axis (cells uncovered by a reversal are in tiles already generated, which today never repaints). Where: within 3 cycles of travel of the leading edge, on BEN at least 2485 m from the boat on the global costmap and 172 m on the local at 5 m/s; after a jump of up to a tile, within a tile of the edge (at least 2400 m and 125 m); a larger jump is now reported whole at once. On a costmap without `track_unknown_space` (BEN's local) a delayed cell reads free, not unknown, and `current_` is not lowered. Nothing marked today stays unmarked longer (harness: no such cell older than age 2).
+- **Cost (desktop, not a vessel computer):** global costmap 18-19.5 ms mean / 22-24 ms worst per cycle with Rolling's inflation and 25-28 / 32-37 ms with Jazzy's, on east, 45°, lawnmower at 2 and 5 m/s; station keeping 15.3 / 19.9 and 22.4 / 33.7, with no whole-window cycle in any of these; against today's 8.5-31.6 mean and 309-378 ms worst on diagonal travel (8.2 / 10.6 station keeping). Local costmap 2.6-5.6 / 2.9-7.2 ms.
+- **What the tests pin:** every cell after every cycle on axis-aligned travel, a jump past the window and back, a jump of 10 m, a reset and a late grid; within one cycle after a reversal and on east-west zig-zags; within 3 cycles on slow diagonals, a diagonal reversal and diagonal zig-zags; no whole-window bounds on steady diagonal travel, axis reversals, a stop-then-reverse diagonal and station keeping; exactly one whole-window report on a sharp diagonal reversal; window origins equal under both distros' size formulas each cycle; earlier layers' bounds not narrowed; the uncharted fixed window. **Not pinned:** inflation cost values (only lethal and unknown under inflation), timing, the `reset()` and `matchSize()` lines and the half-cell margin (defensive), the `!enabled_` line (unreachable), a resize while running, resolutions other than 1 m (the harness covers 0.1 m), BEN's tile size.
+- **Not established:** a vessel computer's timings; how often BEN's real position noise or a tide estimate step triggers a whole-window report; Jazzy's `LayeredCostmap`/`Costmap2D` under this design until Jazzy CI runs (Jazzy's `InflationLayer` is the copied one); anything on a vessel or with a planner.
+- **For the owner (unchanged, his to confirm):** the tile rule, a tile wholly outside last cycle's window left to the strips, is what trades those up-to-3-cycles-later cells for no whole-window repaint on diagonal travel. Not changed here.
+
+### Checks
+No hook suite: this is a project pass with no `conventions=` hook rule; every commit ran the repository's pre-commit hooks. Scratch work in the session scratchpad (`fix57/`), removed at the end; no ROS daemon started; `DISPLAY` unset; domains 171-178 and 187-189.
