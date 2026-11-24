@@ -440,3 +440,13 @@ Reviewers: Claude adversarial (fresh subagent, read-only) completed: no must-fix
 - **Hygiene.**
   - `285a116` and `229c4c4` touch no `.agent/` file, and their messages end "Backport to jazzy.".
   - `ce8fd8d`, `a5b2294`, `285a116` and `229c4c4` cherry-pick in order onto `origin/jazzy` (`89b552d`) with no conflict. The result's `s57_layer` is identical to the branch's.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 12:40 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (pre-push review round 2 approved with no must-fix; three outside reviewers ran)
+**After**: publish
+**Decision**: publish
+
+Read: the Local Review (Pre-Push) round 2 at `229c4c4`, approved, one suggestion about wording. The pull request does not repeat the implementation entry's "ordinary rounding" explanation of why an oracle on different tiles disagreed: the review established that it is the pre-existing write one past a row in `generateTile` (`worldToMapEnforceBounds` returns the size when a chart cell's far edge lies exactly on a tile's east or north edge), at any resolution, and that two of the committed tests make such out-of-range calls inside 4-cell tiles without practical risk. That defect is not changed here; it is on the list for rolker/s57_tools#54 and the host puts the review's new evidence to the owner. The pull request names the port head the merge was verified against (`cd4aa27`).
