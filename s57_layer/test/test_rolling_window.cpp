@@ -843,13 +843,15 @@ TEST_F(MovingWindowTest, NorthEveryCellEveryCycle)
 // East 8 m, then west past the start, so the window uncovers cells on the
 // side it came from: every cell within one cycle (the column uncovered in
 // the cycle the travel reverses waits one cycle, see chooseStrip), and every
-// cell after every cycle stopped.
+// cell after every cycle stopped. The first step back is 2 m, so the window
+// moves back in the very next cycle (from x.5, a step of 1 m back truncates
+// to no move, a free gap, and every cell would be right every cycle).
 TEST_F(MovingWindowTest, ReversalPastTheStartEveryCellWithinOneCycle)
 {
   forEachInflation([this](Inflation inflation) {
       EXPECT_TRUE(
         drive(
-          inflation, withStop(join(line(20.5, 20.5, 1.0, 0.0, 9), line(27.5, 20.5, -1.0, 0.0, 16))),
+          inflation, withStop(join(line(20.5, 20.5, 1.0, 0.0, 9), line(26.5, 20.5, -1.0, 0.0, 16))),
           1, landChart()));
     });
 }
