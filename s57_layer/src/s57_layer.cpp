@@ -7,7 +7,7 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "grid_map_core/iterators/SubmapIterator.hpp"
 #include "grid_map_ros/grid_map_ros.hpp"
-#include "tf2/utils.h"
+#include "tf2/utils.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
 #include "s57_msgs/srv/get_datasets.hpp"
