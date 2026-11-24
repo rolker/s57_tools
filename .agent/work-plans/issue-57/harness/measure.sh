@@ -4,7 +4,8 @@
 # Usage: measure.sh <s57_tools checkout> [<navigation2 checkout>]
 #
 # Builds harness.cpp with two copies of the layer compiled in:
-#   final  <checkout>/s57_layer/src as it is in the working tree (the fix);
+#   final  <checkout>/s57_layer/src as it is in the working tree (the fix),
+#          or FINAL_SRC, a directory holding a variant's s57_layer.cpp/.h;
 #   today  s57_layer/src at TODAY_REF (default afa7403, origin/rolling just
 #          before #57; the layer source was the same on jazzy then), read with
 #          git from the checkout and renamed to namespace s57_today.
@@ -25,7 +26,8 @@
 # domain (the harness creates nodes); JOBS (default 4) is the build's job
 # count and the number of correctness processes; OUT (default a new
 # temporary directory) is where it builds; CORRECT=1 runs the correctness
-# scenarios; TIME=0 skips the timings.
+# scenarios (PER_SCENARIO=1: a line per scenario as well); TIME=0 skips the
+# timings.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$1"
@@ -37,7 +39,8 @@ unset DISPLAY
 out="${OUT:-$(mktemp -d)}"
 mkdir -p "$out/src" "$out/today"
 cp "$here/harness.cpp" "$here/CMakeLists.txt" "$out/"
-cp "$repo/s57_layer/src/s57_layer.cpp" "$repo/s57_layer/src/s57_layer.h" "$out/src/"
+final_src="${FINAL_SRC:-$repo/s57_layer/src}"
+cp "$final_src/s57_layer.cpp" "$final_src/s57_layer.h" "$out/src/"
 for f in s57_layer.cpp s57_layer.h; do
   git -C "$repo" show "$today_ref:s57_layer/src/$f" > "$out/today/$f"
 done
@@ -79,7 +82,7 @@ fi
 cmake -Wno-dev -S "$out" -B "$out/build" -DCMAKE_BUILD_TYPE=Release > "$out/cmake.log" 2>&1
 cmake --build "$out/build" -j "$jobs" > "$out/build.log" 2>&1
 h="$out/build/harness"
-echo "built in $out; final: $repo working tree; today: $today_ref; CPU: $(lscpu | sed -n 's/^Model name: *//p'); nproc $(nproc)"
+echo "built in $out; final: ${FINAL_SRC:-$repo working tree}; today: $today_ref; CPU: $(lscpu | sed -n 's/^Model name: *//p'); nproc $(nproc)"
 if [ "${CORRECT:-0}" = 1 ]; then
   nsetups=3
   [ -n "$nav2" ] && nsetups=5
@@ -93,12 +96,14 @@ if [ "${CORRECT:-0}" = 1 ]; then
   echo "correctness: $(( $(date +%s) - start )) s"
 fi
 [ "${TIME:-1}" = 0 ] && exit 0
-# 100 global cycles at 1 Hz, 300 local at 5 Hz
+# 150 global cycles at 1 Hz, 300 local at 5 Hz
 for size in local global; do
-  if [ "$size" = global ]; then n=100; else n=300; fi
+  if [ "$size" = global ]; then n=150; else n=300; fi
   for kind in $kinds; do
-    for hdg in 0 45; do
+    for hdg in 0 45 lawnmower station; do
       for v in 2 5; do
+        # station keeping does not depend on the speed
+        [ "$hdg" = station ] && [ "$v" = 5 ] && continue
         for code in today final; do
           "$h" time "$size" "$kind" "$hdg" "$v" "$n" "$code" 2>/dev/null | grep mean
         done

@@ -12,9 +12,12 @@
 //   harness correct [<inflation set-up 0-4> ...]
 //       The adversarial scenarios: each cell of today's and the final
 //       layer's window is compared after every cycle with a fresh window
-//       (the final code, moved to the same origin in its first cycle).
-//   harness time <local|global> <none|native|jazzycopy> <heading deg> <m/s> <cycles> <today|final>
-//       Mean, p50 and worst updateMap time on BEN's costmap sizes.
+//       (the final code, moved to the same origin in its first cycle), and
+//       whole-window repaints are counted. PER_SCENARIO=1 adds one line per
+//       scenario.
+//   harness time <local|global> <none|native|jazzycopy> <heading deg|lawnmower|station> <m/s> <cycles> <today|final>
+//       Mean, p50 and worst updateMap time on BEN's costmap sizes, and the
+//       number of cycles that repainted the whole window.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -109,8 +112,9 @@ public:
   double spanWidth() const
   {
     double w = 0;
-    if (pending_x_.valid) {w = std::max(w, pending_x_.hi - pending_x_.lo);}
-    if (pending_y_.valid) {w = std::max(w, pending_y_.hi - pending_y_.lo);}
+    for (const auto & span : pending_) {
+      if (span.valid) {w = std::max(w, span.hi - span.lo);}
+    }
     return w;
   }
 };
@@ -213,6 +217,31 @@ public:
   double area = 0;
 };
 
+// Placed last: records whether the cycle's bounds, after every other
+// layer, were non-empty (getBounds keeps the last non-empty cycle's).
+class TailLayer : public nav2_costmap_2d::Layer
+{
+public:
+  void onInitialize() override {current_ = true;}
+  void reset() override {}
+  bool isClearable() override {return false;}
+  void updateBounds(double, double, double, double * a, double * b, double * c, double * d) override
+  {
+    any = *a < *c && *b < *d;
+  }
+  void updateCosts(nav2_costmap_2d::Costmap2D &, int, int, int, int) override {}
+  bool any = false;
+};
+
+// Whether the last updateMap repainted the whole window.
+bool repaintedWhole(nav2_costmap_2d::LayeredCostmap & lc, const TailLayer & tail)
+{
+  unsigned x0, xn, y0, yn;
+  lc.getBounds(&x0, &xn, &y0, &yn);
+  auto * m = lc.getCostmap();
+  return tail.any && x0 == 0 && y0 == 0 && xn == m->getSizeInCellsX() && yn == m->getSizeInCellsY();
+}
+
 struct Stack
 {
   std::shared_ptr<HNode> node;
@@ -220,6 +249,7 @@ struct Stack
   LayerOps ops;
   std::shared_ptr<nav2_costmap_2d::Layer> infl;
   std::shared_ptr<SpyLayer> spy;
+  std::shared_ptr<TailLayer> tail;
 };
 
 static int g_node_counter = 0;
@@ -271,6 +301,9 @@ void makeStack(
     s.lc->addPlugin(s.infl);
     s.infl->initialize(s.lc.get(), "inflation_layer", tf, s.node, nullptr);
   }
+  s.tail = std::make_shared<TailLayer>();
+  s.lc->addPlugin(s.tail);
+  s.tail->initialize(s.lc.get(), "tail", tf, s.node, nullptr);
   if (!footprint.empty()) {s.lc->setFootprint(footprint);}
 }
 
@@ -325,12 +358,14 @@ struct Totals
   long unmarked_inscribed_real = 0;
   double max_span = 0;
   long origin_mismatch = 0;
+  long whole = 0;               // whole-window repaints after the first 2 cycles
   std::string first;
 };
 
 struct RunResult
 {
-  int max_age = -1; int max_streak = 0; long hazard_cells = 0; long value_cells = 0;
+  int max_age = -1; int max_streak = 0; long hazard_cells = 0; long value_cells = 0; long whole = 0;
+  long whole_alone = 0;  // per-scenario summary: whole-window cycles with no other layer
   long value_unexplained = 0; std::string first;
 };
 
@@ -397,7 +432,11 @@ void runScenario(
       }
     }
     auto [rx, ry] = sc.path[step];
-    for (int c = 0; c < 2; c++) {s[c].lc->updateMap(rx, ry, 0.0);}
+    for (int c = 0; c < 2; c++) {
+      s[c].lc->updateMap(rx, ry, 0.0);
+      // whole-window repaints after the first 2 cycles (the first paints it all)
+      if (step >= 2 && repaintedWhole(*s[c].lc, *s[c].tail)) {res[c].whole++;}
+    }
     tot.max_span = std::max(tot.max_span, s[FINAL].ops.spanWidth());
     auto * m0 = s[FINAL].lc->getCostmap();
     const double ox = m0->getOriginX(), oy = m0->getOriginY();
@@ -568,6 +607,61 @@ std::vector<Scenario> scenarios()
   {auto * s = add("track unknown, fixed window", line(5.5, 5.5, 0.7, 0.4, 12)); s->track_unknown = true; s->rolling = false;}
   {auto * s = add("track unknown, random walk", walk(41, 20.3, 20.7, 2.0, 100)); s->track_unknown = true;}
   {auto * s = add("uncharted not allowed, random walk", walk(42, 20.3, 20.7, 2.0, 80)); s->no_charts = true; s->allow_uncharted = false;}
+  // Added in the first fix round of the pre-push review:
+  // station keeping, the position within +-1 m (uniform) of a fixed point
+  for (unsigned seed = 1; seed <= 4; seed++) {
+    std::mt19937 g(seed + 100);
+    std::uniform_real_distribution<double> u(-1.0, 1.0);
+    Path p;
+    for (int k = 0; k < 120; k++) {p.push_back({30.3 + u(g), 30.7 + u(g)});}
+    add("station keeping seed " + std::to_string(seed), p);
+  }
+  // lawnmower: legs east and west joined by half circles, on two headings
+  for (double hdg : {0.0, 30.0}) {
+    const double c = std::cos(hdg * M_PI / 180), sn = std::sin(hdg * M_PI / 180);
+    const double leg = 24.0, rad = 3.0, v = 1.3;
+    Path local;  // in the survey's own frame
+    double x = 0, y = 0;
+    for (int l = 0; l < 4; l++) {
+      const double dir = l % 2 ? -1.0 : 1.0;
+      for (double d = 0; d < leg; d += v) {local.push_back({x + dir * d, y});}
+      x += dir * leg;
+      for (double a = 0; a < M_PI; a += v / rad) {
+        local.push_back({x + dir * rad * std::sin(a), y + rad - rad * std::cos(a)});
+      }
+      y += 2 * rad;
+    }
+    Path p;
+    for (auto & q : local) {p.push_back({20.3 + q.first * c - q.second * sn, 20.7 + q.first * sn + q.second * c});}
+    add("lawnmower heading " + std::to_string(static_cast<int>(hdg)), p);
+  }
+  // fast zig-zags: reversing every cycle, on x and on x+y, with drift
+  for (double d : {1.0, 2.0, 3.0}) {
+    Path zx{{20.5, 20.5}}, zxy{{20.5, 20.5}};
+    for (int k = 1; k < 30; k++) {
+      double s1 = (k % 2) ? d : -d;
+      zx.push_back({zx.back().first + s1 + 0.3, zx.back().second});
+      zxy.push_back({zxy.back().first + s1 + 0.3, zxy.back().second - 0.7 * s1 + 0.2});
+    }
+    add("fast zig-zag x, " + std::to_string(static_cast<int>(d)) + " m", zx);
+    add("fast zig-zag x+y, " + std::to_string(static_cast<int>(d)) + " m", zxy);
+  }
+  // stop, then reverse, after k cycles of diagonal travel
+  for (int k = 0; k < 4; k++) {
+    Path p = stay(line(20.5, 20.5, 1.3, 0.9, k + 4), 2);
+    Path back = line(p.back().first, p.back().second, -1.3, -0.9, 14);
+    add("stop then reverse, phase " + std::to_string(k), cat(p, Path(back.begin() + 1, back.end())));
+  }
+  // jumps shorter than the window, on one axis and on both, at each phase
+  for (int k = 0; k < 4; k++) {
+    for (auto j : std::vector<std::pair<double, double>>{{6.2, 0.0}, {0.0, -7.3}, {6.2, 5.1}, {-9.1, 8.7}, {4.6, 0.4}}) {
+      Path p = line(20.5, 20.5, 1.3, 0.9, k + 4);
+      Path after = line(p.back().first + j.first, p.back().second + j.second, 1.3, 0.9, 8);
+      char n[96];
+      std::snprintf(n, sizeof n, "jump (%.1f, %.1f), phase %d", j.first, j.second, k);
+      add(n, stay(cat(p, after), 3));
+    }
+  }
   // 0.1 m cells: a resolution whose cell edges are not binary-exact
   {auto * s = add("0.1 m, diagonal", line(2.05, 2.05, 0.13, 0.07, 80)); s->res = 0.1;}
   {auto * s = add("0.1 m, random walk", walk(43, 2.03, 2.07, 0.25, 100)); s->res = 0.1;}
@@ -590,12 +684,27 @@ int correctness(int argc, char ** argv)
   for (int p : pick) {
     const IC & ic = ics.at(p);
     Totals t[2];
+    // per scenario, over the 4 other-layer set-ups: oldest wrong age, longest
+    // streak (max), whole-window cycles (sum, and with no other layer
+    // alone); today then final
+    std::vector<std::string> order;
+    for (auto & sc : scs) {order.push_back(sc.name);}
+    std::map<std::string, std::pair<RunResult, RunResult>> per;
     for (int other = 0; other < 4; other++) {
       for (auto & sc : scs) {
         RunResult res[2];
         Totals tot;
         runScenario(sc, ic.k, ic.r * sc.res, other, res, tot);
+        per[sc.name].first.max_age = std::max(per[sc.name].first.max_age, res[TODAY].max_age);
+        per[sc.name].first.max_streak = std::max(per[sc.name].first.max_streak, res[TODAY].max_streak);
+        per[sc.name].first.whole += res[TODAY].whole;
+        if (other == 0) {per[sc.name].first.whole_alone = res[TODAY].whole;}
+        if (other == 0) {per[sc.name].second.whole_alone = res[FINAL].whole;}
+        per[sc.name].second.max_age = std::max(per[sc.name].second.max_age, res[FINAL].max_age);
+        per[sc.name].second.max_streak = std::max(per[sc.name].second.max_streak, res[FINAL].max_streak);
+        per[sc.name].second.whole += res[FINAL].whole;
         for (int c = 0; c < 2; c++) {
+          t[c].whole += res[c].whole;
           t[c].runs++;
           t[c].steps += tot.steps;
           if (res[c].hazard_cells) {t[c].hazard_wrong_runs++;}
@@ -620,14 +729,22 @@ int correctness(int argc, char ** argv)
       }
     }
     for (int c = 0; c < 2; c++) {
-      std::printf("%-12s %-5s runs=%ld cycles=%ld runs_wrong=%ld runs_wrong_after_age2=%ld oldest_wrong_age=%d longest_wrong_streak=%d value_diffs=%ld value_diffs_unexplained=%ld\n",
+      std::printf("%-12s %-5s runs=%ld cycles=%ld runs_wrong=%ld runs_wrong_after_age2=%ld oldest_wrong_age=%d longest_wrong_streak=%d value_diffs=%ld value_diffs_unexplained=%ld whole_window_cycles=%ld\n",
         ic.n, codeName(Code(c)), t[c].runs, t[c].steps, t[c].hazard_wrong_runs, t[c].late_runs, t[c].max_age,
-        t[c].max_streak, t[c].value_cells, t[c].value_unexplained);
+        t[c].max_streak, t[c].value_cells, t[c].value_unexplained, t[c].whole);
     }
     std::printf("%-12s before/after: lethal today, not lethal in final: %ld cell-cycles (lethal in the fresh window: %ld; in the window 3 cycles or more: %ld); >= inscribed today, below in final: %ld (>= inscribed in the fresh window: %ld); widest pending span %.1f cells; origin mismatches %ld\n",
       ic.n, t[FINAL].unmarked_lethal, t[FINAL].unmarked_lethal_real, t[FINAL].unmarked_lethal_old, t[FINAL].unmarked_inscribed,
       t[FINAL].unmarked_inscribed_real, t[FINAL].max_span, t[FINAL].origin_mismatch);
     if (!t[FINAL].first.empty()) {std::printf("  first late mismatch (final): %s\n", t[FINAL].first.c_str());}
+    if (std::getenv("PER_SCENARIO")) {
+      for (auto & n : order) {
+        auto & pr = per[n];
+        std::printf("  per %-12s | %-40s | today age %3d streak %3d whole %4ld alone %3ld | final age %3d streak %3d whole %4ld alone %3ld\n",
+          ic.n, n.c_str(), pr.first.max_age, pr.first.max_streak, pr.first.whole, pr.first.whole_alone,
+          pr.second.max_age, pr.second.max_streak, pr.second.whole, pr.second.whole_alone);
+      }
+    }
     std::fflush(stdout);
   }
   return 0;
@@ -637,7 +754,7 @@ int correctness(int argc, char ** argv)
 int timing(int argc, char ** argv)
 {
   if (argc < 8) {std::printf("bad args\n"); return 1;}
-  std::string size = argv[2], inf = argv[3];
+  std::string size = argv[2], inf = argv[3], kind = argv[4];
   double heading = std::atof(argv[4]) * M_PI / 180.0, speed = std::atof(argv[5]);
   int cycles = std::atoi(argv[6]);
   Code code = std::string(argv[7]) == "today" ? TODAY : FINAL;
@@ -660,20 +777,47 @@ int timing(int argc, char ** argv)
   makeStack(s, &tf, code, true, global, n, res, 100, ik, 150.0, 0.05, ik ? fp : std::vector<geometry_msgs::msg::Point>{}, true, false, {{"coast", chart, true}}, 0, true);
   double x = 0.3, y = 0.3;
   for (int k = 0; k < 4; k++) {s.lc->updateMap(x, y, 0.0);}
+  // the path: a heading in degrees; "lawnmower" (legs east and west joined
+  // by half circles: 200 m legs and 20 m radius on the global costmap, 40 m
+  // and 10 m on the local, so its run reaches a turn); "station" (within
+  // +-1 m, uniform,
+  // of the start, each cycle)
+  std::vector<std::pair<double, double>> path;
+  if (kind == "lawnmower") {
+    const double leg = global ? 200.0 : 40.0, rad = global ? 20.0 : 10.0;
+    double px = x, py = y;
+    for (int l = 0; static_cast<int>(path.size()) < cycles; l++) {
+      const double dir = l % 2 ? -1.0 : 1.0;
+      for (double d = step; d <= leg; d += step) {path.push_back({px + dir * d, py});}
+      px += dir * leg;
+      for (double a = step / rad; a < M_PI; a += step / rad) {
+        path.push_back({px + dir * rad * std::sin(a), py + rad - rad * std::cos(a)});
+      }
+      py += 2 * rad;
+    }
+  } else if (kind == "station") {
+    std::mt19937 g(7);
+    std::uniform_real_distribution<double> u(-1.0, 1.0);
+    for (int k = 0; k < cycles; k++) {path.push_back({x + u(g), y + u(g)});}
+  } else {
+    for (int k = 1; k <= cycles; k++) {path.push_back({x + k * step * std::cos(heading), y + k * step * std::sin(heading)});}
+  }
   std::vector<double> t;
   double area = 0;
+  int whole = 0;
   for (int k = 0; k < cycles; k++) {
-    x += step * std::cos(heading); y += step * std::sin(heading);
+    x = path[k].first; y = path[k].second;
     auto a = std::chrono::steady_clock::now();
     s.lc->updateMap(x, y, 0.0);
     auto b = std::chrono::steady_clock::now();
     t.push_back(std::chrono::duration<double, std::milli>(b - a).count());
     area += s.spy->area;
+    whole += repaintedWhole(*s.lc, *s.tail);
   }
   double sum = 0, worst = 0; for (double v : t) {sum += v; worst = std::max(worst, v);}
   std::vector<double> sorted = t; std::sort(sorted.begin(), sorted.end());
-  std::printf("%s %s hdg=%s v=%s %s cycles=%d mean=%.2f ms p50=%.2f worst=%.2f ms mean_reported_cells=%.0f\n",
-    size.c_str(), inf.c_str(), argv[4], argv[5], codeName(code), cycles, sum / t.size(), sorted[sorted.size() / 2], worst, area / cycles);
+  std::printf("%s %s path=%s v=%s %s cycles=%d mean=%.2f ms p50=%.2f worst=%.2f ms mean_reported_cells=%.0f whole_window_cycles=%d\n",
+    size.c_str(), inf.c_str(), argv[4], argv[5], codeName(code), cycles, sum / t.size(), sorted[sorted.size() / 2], worst, area / cycles, whole);
   return 0;
 }
 
