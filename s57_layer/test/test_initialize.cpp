@@ -8,10 +8,15 @@
 // uncharted handling of updateCosts, the tide offset of updateBounds, and
 // the get_datasets client's name as the ROS graph lists it. A wrong name
 // there means the layer never receives a chart.
+//
+// The last test serves get_datasets and a latched chart grid in-process, as
+// s57_grids does, and follows a chart from the layer's request to the
+// costmap.
 
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <limits>
@@ -23,9 +28,13 @@
 
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "grid_map_core/GridMap.hpp"
+#include "grid_map_core/iterators/GridMapIterator.hpp"
+#include "grid_map_msgs/msg/grid_map.hpp"
+#include "grid_map_ros/GridMapRosConverter.hpp"
 #include "nav2_costmap_2d/cost_values.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "s57_msgs/srv/get_datasets.hpp"
 #include "tf2_ros/buffer.hpp"
 
 #include "s57_layer.h"
@@ -385,4 +394,170 @@ TEST_F(InitializeTest, DefaultsEnableTheLayer)
   grid.at("elevation", grid_map::Index(0, 0)) = -20.0;
   grid.at("unsurveyed", grid_map::Index(0, 0)) = 0.0;
   EXPECT_EQ(100, layer.cost(grid));
+}
+
+namespace
+{
+
+constexpr char kChartLabel[] = "TEST0001.000";
+constexpr char kChartTopic[] = "TEST0001_000";
+
+/// A chart grid at 1 m covering [-4.75, 105.25] x [-4.75, 105.25] in "map",
+/// with every channel the layer reads. In the 20 m by 20 m costmap the
+/// north-east quadrant is land (elevation 1.0, as s57_grids writes LNDARE);
+/// the rest is water 10 m deep. Two choices keep this test about the
+/// request path, not about generateTile's compositing, which it leaves as is:
+/// - the grid reaches past the layer's first tile ([0, 100], 100 cells of
+///   1 m) on every side, because generateTile takes a chart's cells through
+///   grid_map's SubmapGeometry, which fails when the tile's centre is outside
+///   the grid or a clipped corner falls on a grid edge at 0;
+/// - no grid cell edge falls exactly on a tile edge (the quarter-cell
+///   offset), where Costmap2D::worldToMapEnforceBounds returns one past the
+///   last cell and generateTile writes into the next row.
+grid_map::GridMap makeChartGrid()
+{
+  grid_map::GridMap grid({"elevation", "overhead", "restricted",
+      "unsurveyed", "caution", "hazard"});
+  grid.setFrameId("map");
+  grid.setGeometry(grid_map::Length(110.0, 110.0), 1.0, grid_map::Position(50.25, 50.25));
+  for (const auto & name : grid.getLayers()) {
+    grid[name].setConstant(std::numeric_limits<float>::quiet_NaN());
+  }
+  for (grid_map::GridMapIterator it(grid); !it.isPastEnd(); ++it) {
+    grid_map::Position position;
+    grid.getPosition(*it, position);
+    grid.at("elevation", *it) = (position.x() > 10.0 && position.y() > 10.0) ? 1.0 : -10.0;
+  }
+  return grid;
+}
+
+/// Stands in for s57_grids: serves get_datasets, answering with one chart
+/// whose bounds are the request's, and publishes that chart's grid latched
+/// on datasets/<topic>, both under the given namespace.
+class FakeS57Grids
+{
+public:
+  explicit FakeS57Grids(const std::string & ns)
+  : node_(std::make_shared<rclcpp::Node>("fake_s57_grids_" + pid(), ns))
+  {
+    service_ = node_->create_service<s57_msgs::srv::GetDatasets>(
+      "get_datasets",
+      [this](const std::shared_ptr<s57_msgs::srv::GetDatasets::Request> request,
+      std::shared_ptr<s57_msgs::srv::GetDatasets::Response> response)
+      {
+        ++requests_;
+        s57_msgs::msg::DatasetInfo chart;
+        chart.label = kChartLabel;
+        chart.topic = kChartTopic;
+        chart.bounds = request->bounds;
+        chart.scale = 10000.0;
+        chart.resolution = 1.0;
+        response->datasets.push_back(chart);
+      });
+
+    rclcpp::QoS latched_qos(1);
+    latched_qos.transient_local();
+    latched_qos.keep_last(1);
+    publisher_ = node_->create_publisher<grid_map_msgs::msg::GridMap>(
+      std::string("datasets/") + kChartTopic, latched_qos);
+    publisher_->publish(*grid_map::GridMapRosConverter::toMessage(makeChartGrid()));
+  }
+
+  rclcpp::Node::SharedPtr node_;
+  rclcpp::Service<s57_msgs::srv::GetDatasets>::SharedPtr service_;
+  rclcpp::Publisher<grid_map_msgs::msg::GridMap>::SharedPtr publisher_;
+  std::atomic<int> requests_{0};
+};
+
+}  // namespace
+
+// initialize()'s client reaches get_datasets, the reply's chart is
+// subscribed to on the layer's own node, and the grid reaches the costmap:
+// land lethal, water free. The costmap is static with its origin at the
+// grid's south-west corner (rolker/s57_tools#56 is not exercised here).
+TEST_F(InitializeTest, ChartReachesTheCostmap)
+{
+  const std::string ns = "/s57_layer_test_" + pid();
+  FakeS57Grids s57_grids(ns);
+
+  // An east-north-up "map" at latitude 0, longitude 0: map x, y and z are
+  // ECEF y, z and x, so worldToLatLon and llToWorld work.
+  geometry_msgs::msg::TransformStamped earth_to_map;
+  earth_to_map.header.frame_id = "earth";
+  earth_to_map.child_frame_id = "map";
+  earth_to_map.transform.translation.x = 6378137.0;
+  earth_to_map.transform.rotation.w = 0.5;
+  earth_to_map.transform.rotation.x = 0.5;
+  earth_to_map.transform.rotation.y = 0.5;
+  earth_to_map.transform.rotation.z = 0.5;
+  tf_->setTransform(earth_to_map, "test_initialize", true);
+
+  layered_costmap_.resizeMap(20, 20, 1.0, 0.0, 0.0);
+  auto * master = layered_costmap_.getCostmap();
+
+  auto node = makeNode({rclcpp::Parameter(full("s57_grids_namespace"), ns)});
+  InitTestLayer layer;
+  ASSERT_NO_THROW(initialize(layer, node));
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(s57_grids.node_);
+  executor.add_node(node->get_node_base_interface());
+
+  // One costmap cycle, then the executor's pending work.
+  auto cycle = [&] {
+      updateBounds(layer);
+      layer.updateCosts(*master, 0, 0, 20, 20);
+      executor.spin_some(20ms);
+    };
+  auto cycleUntil = [&](const std::function<bool()> & pred) {
+      return waitFor([&] {cycle(); return pred();});
+    };
+
+  ASSERT_TRUE(cycleUntil([&] {return s57_grids.requests_ > 0;}))
+    << "no request reached " << ns << "/get_datasets";
+
+  const std::string topic = ns + "/datasets/" + kChartTopic;
+  auto ownGridSubscriptions = [&] {
+      int count = 0;
+      for (const auto & info : node->get_subscriptions_info_by_topic(topic)) {
+        if (info.node_name() == node->get_name() &&
+          info.node_namespace() == node->get_namespace() &&
+          info.topic_type() == "grid_map_msgs/msg/GridMap")
+        {
+          ++count;
+        }
+      }
+      return count;
+    };
+  ASSERT_TRUE(cycleUntil([&] {return ownGridSubscriptions() > 0;}))
+    << "no GridMap subscription on " << topic << " from the layer's node";
+  EXPECT_EQ(1, ownGridSubscriptions());
+
+  // The interior of the land quadrant (cells 11 to 19; the cells at the
+  // quadrant's edge are shared with water by generateTile's compositing).
+  auto landInteriorLethal = [&] {
+      for (unsigned int j = 11; j < 20; ++j) {
+        for (unsigned int i = 11; i < 20; ++i) {
+          if (master->getCost(i, j) != nav2_costmap_2d::LETHAL_OBSTACLE) {
+            return false;
+          }
+        }
+      }
+      return true;
+    };
+  ASSERT_TRUE(cycleUntil(landInteriorLethal)) << "the chart's land never reached the costmap";
+
+  // Water, away from the land quadrant's edge, is free.
+  int water = 0;
+  for (unsigned int j = 0; j < 20; ++j) {
+    for (unsigned int i = 0; i < 20; ++i) {
+      if (i <= 8 || j <= 8) {
+        EXPECT_EQ(nav2_costmap_2d::FREE_SPACE, master->getCost(i, j)) << i << ", " << j;
+        ++water;
+      }
+    }
+  }
+  EXPECT_EQ(400 - 121, water);
+  EXPECT_EQ(1, s57_grids.requests_.load()) << "a static window needs one request";
+  EXPECT_TRUE(layer.isCurrent());
 }
