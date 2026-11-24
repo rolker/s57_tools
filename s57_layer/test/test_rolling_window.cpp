@@ -894,6 +894,34 @@ TEST_F(MovingWindowTest, JumpPastTheWindowAndBackEveryCellEveryCycle)
     });
 }
 
+// A jump shorter than the window, as when localisation jumps: 10 m (more
+// than a 4 m tile), so the uncovered cells reach the robot's own cell.
+// Every cell after every cycle, the jump's cycle included: a move of more
+// than a tile on either axis reports the whole window (recordUncovered).
+// Without that, the strips of a jump would wait their turn like any other.
+// After travel east the jump goes north-east; after travel north it goes
+// east only, a jump on one axis, whose strip would wait a cycle behind the
+// y strip reported the cycle before.
+TEST_F(MovingWindowTest, JumpShorterThanTheWindowEveryCellEveryCycle)
+{
+  forEachInflation([this](Inflation inflation) {
+      {
+        SCOPED_TRACE("east, then a jump north-east");
+        auto path = line(20.5, 20.5, 1.0, 0.0, 4);
+        path.push_back({33.5, 30.5});
+        EXPECT_TRUE(drive(inflation, withStop(path), 0, landChart()));
+        TearDown();
+      }
+      {
+        SCOPED_TRACE("north, then a jump east");
+        auto path = line(20.5, 20.5, 0.0, 1.0, 4);
+        path.push_back({30.5, 23.5});
+        EXPECT_TRUE(drive(inflation, withStop(path), 0, landChart()));
+        TearDown();
+      }
+    });
+}
+
 // The layers reset mid-run, as Costmap2DROS::resetLayers does, while
 // travelling east: every cell after every cycle.
 TEST_F(MovingWindowTest, ResetWhileMovingEveryCellEveryCycle)

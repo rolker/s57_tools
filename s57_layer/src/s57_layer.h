@@ -233,8 +233,8 @@ private:
 
   // Phase 1 of a rolling cycle: clip the pending spans to window, age them,
   // and add the columns and rows this cycle's move uncovered. Returns false
-  // when strips cannot describe the move (whole_pending_, or no overlap
-  // with last_window_): the whole window must be reported.
+  // when the whole window must be reported instead: whole_pending_, no
+  // overlap with last_window_, or a jump of more than a tile.
   bool recordUncovered(const Rect & window, double half_cell);
   // Phase 3: what to report this cycle when recordUncovered returned true.
   Strip chooseStrip() const;
