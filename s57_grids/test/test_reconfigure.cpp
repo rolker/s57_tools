@@ -82,16 +82,20 @@ protected:
   static void TearDownTestSuite() {rclcpp::shutdown();}
 
   // A lifecycle transition has no timeout of its own: a hung one fails the
-  // test here, with its name, well before CTest's timeout kills the process.
+  // test here, with its name, before CTest's 60 s timeout kills the process.
+  // The bound is longer than the longest test's own waits (four of 10 s), so
+  // a slow run that fails reports its own assertion, not a hang.
+  static constexpr auto kWatchdog = 45s;
   void SetUp() override
   {
     const std::string test =
       ::testing::UnitTest::GetInstance()->current_test_info()->name();
     watchdog_ = std::thread([this, test] {
         std::unique_lock<std::mutex> lock(watchdog_mutex_);
-        if (!watchdog_cv_.wait_for(lock, 30s, [this] {return test_done_;})) {
-          std::fprintf(stderr, "[  FAILED  ] ReconfigureTest.%s did not finish within 30 s: "
-            "a lifecycle transition or a wait is hung\n", test.c_str());
+        if (!watchdog_cv_.wait_for(lock, kWatchdog, [this] {return test_done_;})) {
+          std::fprintf(stderr, "[  FAILED  ] ReconfigureTest.%s did not finish within %lld s: "
+            "a lifecycle transition or a wait is hung\n", test.c_str(),
+            static_cast<long long>(kWatchdog.count()));
           std::fflush(stderr);
           std::_Exit(1);
         }
