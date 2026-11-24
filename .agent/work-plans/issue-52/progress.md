@@ -724,10 +724,10 @@ Read: the Local Review (Pre-Push) at `8ab87bf`, approved, four suggestions. Publ
 CI at `454ae59`, run 45443691212: `build-and-test (jazzy)` and `build-and-test (rolling)` SUCCESS. Jazzy: `Summary: 232 tests, 0 errors, 0 failures, 31 skipped`; `s57_layer` 8/8 CTest entries (`test_initialize` `[  PASSED  ] 9 tests.`); `s57_grids` 7/7 (`test_reconfigure` `[  PASSED  ] 3 tests.`, launch test passed); strict `rosdep install --ignore-src -y --from-paths $paths` (no skip keys) ended `#All required rosdeps installed successfully`. Rolling: `PACKAGES: s57_msgs marine_charts s57_to_geotiff enc_updater`, its closure guard passed, `Summary: 159 tests, 0 errors, 0 failures, 18 skipped`; neither `s57_grids` nor `s57_layer` is built there. Run 45442344940 at `354e860`: Jazzy `test_initialize` `[  PASSED  ] 8 tests.` (4/8 Passed) against Nav2's own `Layer::declareParameter`, `226 tests, 0 errors, 0 failures, 30 skipped`. No pull-request review, inline comment or conversation comment exists; the pre-push review's verdict was approved, no must-fix.
 
 ### Findings
-- [ ] (suggestion, Local Review (Pre-Push) @ `28924ab`, decided: fix before merge) Two comments in commit `8ab87bf` say more than the code does: a job that finished before the cleanup holds a grid and is dropped too (rebuilt on the next request), and "or when a cleanup aborted the job" can no longer happen because cleanup clears pending jobs — `s57_grids/src/grid_publisher.cpp:163-164`, `:253-256`
-- [ ] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: goes into a comment on #54 at merge, not a code change) State kept across a cleanup: `requested_grids_` survives, a different `enc_root` with a queued label dereferences a null dataset; stale latched grids after a frame or resolution change; an aborted chart is regenerated only when the layer's window next moves — `s57_grids/src/grid_publisher.cpp:150-171`
-- [ ] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: goes into a comment on #54 at merge, not a code change) `TEST_ENC_ROOT` reads the sibling package's source fixture; fails in a standalone or bloom test build — `s57_grids/CMakeLists.txt:113`
-- [ ] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: carried by #59 (seam gap, includes the map-axis variant) and the #54 list (edge read and conditional write)) pre-existing `generateTile` defects, no change in this pull request — `s57_layer/src/s57_layer.cpp:425`, `:438-455`
+- [x] (suggestion, Local Review (Pre-Push) @ `28924ab`, decided: fix before merge) Two comments in commit `8ab87bf` say more than the code does: a job that finished before the cleanup holds a grid and is dropped too (rebuilt on the next request), and "or when a cleanup aborted the job" can no longer happen because cleanup clears pending jobs — `s57_grids/src/grid_publisher.cpp:163-164`, `:253-256`
+- [x] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: goes into a comment on #54 at merge, not a code change) State kept across a cleanup: `requested_grids_` survives, a different `enc_root` with a queued label dereferences a null dataset; stale latched grids after a frame or resolution change; an aborted chart is regenerated only when the layer's window next moves — `s57_grids/src/grid_publisher.cpp:150-171` (deferred: routed, not fixed: goes into the comment on rolker/s57_tools#54 at merge)
+- [x] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: goes into a comment on #54 at merge, not a code change) `TEST_ENC_ROOT` reads the sibling package's source fixture; fails in a standalone or bloom test build — `s57_grids/CMakeLists.txt:113` (deferred: routed, not fixed: goes into the comment on rolker/s57_tools#54 at merge)
+- [x] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: carried by #59 (seam gap, includes the map-axis variant) and the #54 list (edge read and conditional write)) pre-existing `generateTile` defects, no change in this pull request — `s57_layer/src/s57_layer.cpp:425`, `:438-455` (deferred: routed, not fixed: carried by rolker/s57_tools#59 and the #54 list)
 
 ### False positives
 - none (no external review comments to dismiss)
@@ -746,3 +746,18 @@ CI at `454ae59`, run 45443691212: `build-and-test (jazzy)` and `build-and-test (
 **Decision**: address
 
 Read: the Integrated Review for pull request 58 at `454ae59`: no reviews on the pull request, CI green on both jobs. The fix pass corrects the two comments in `s57_grids/src/grid_publisher.cpp` (`:163-164`, `:253-256`) and nothing else. The entry's three other boxes are routed, not fix-pass work, and the fix pass ticks them as routed: state kept across a cleanup and the `TEST_ENC_ROOT` source path go into the comment on rolker/s57_tools#54 at merge; the `generateTile` defects are rolker/s57_tools#59 (the chart-seam gap, opened on the owner's yes, with the map-axis variant in its text) and the #54 list (the read past a row).
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 12:07 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+
+**PR**: #58 at `d331930`
+**Addressed**: Integrated Review at `454ae59` (2026-11-24 12:06 -05:00)
+**Commits**: d331930
+
+### Actions
+- [x] Two comments corrected, comments only, no code line changed; `s57_grids` rebuilt (`--parallel-workers 4`) — `s57_grids/src/grid_publisher.cpp:163-165`, `:254-256`
+- [x] State kept across a cleanup — `grid_publisher.cpp:150-171` (routed, not fixed: goes into the comment on #54 at merge)
+- [x] `TEST_ENC_ROOT` source fixture path — `s57_grids/CMakeLists.txt:113` (routed, not fixed: comment on #54 at merge)
+- [x] pre-existing `generateTile` defects — `s57_layer/src/s57_layer.cpp:425`, `:438-455` (routed, not fixed: #59 and the #54 list)
