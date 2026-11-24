@@ -294,3 +294,13 @@ CI run 45415089806 at `9a251c0`, both jobs success, nothing re-run:
 
 ### False positives
 - (Local Review (Pre-Push) @ `5f8d9c4`, Codex and Gemini) "`core.autocrlf=true` checkout can rewrite the agreement's mixed line endings and break the sha256" — checked in a scratch clone at `9a251c0`: with `core.autocrlf=true`, and with `* text=auto eol=crlf`, both fixtures check out with the recorded sha256 (`git ls-files --eol`: `CATALOG.031` is `-text`, the agreement `mixed`; git's auto conversion leaves a blob holding any CRLF untouched). Only an explicit `text eol=crlf` attribute changed the agreement (sha256 `2ad2620c…`). A repository `.gitattributes` `marine_charts/test/data/enc_root/* -text` would guard against that one case (it outranks a global attributes file); optional, not needed for the stated failure.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 09:39 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (two valid findings are open and each has a small, named fix; merging past open findings is the owner's answer only)
+**After**: findings
+**Decision**: address
+
+Read: the Integrated Review of pull request 53 at `9a251c0`: two valid findings, one false positive, CI all-pass (run 45415089806: Jazzy builds 12 packages and tests all six of this repository, 216 tests, 0 errors, 0 failures, with a strict rosdep install and without sourcing the overlay; the catalogue test passes on GDAL 3.8.4; `enc_updater` 117 passed; Rolling builds 11 packages, 159 tests, 0 failures; cppcheck runs on neither). Addressed: (1) the fixture README quotes NOAA's agreement instead of paraphrasing it: redistribution "without restriction ... except as noted herein"; redistributed ENCs are not official; copying for further distribution "is discouraged unless" the agreement is displayed and accepted by anyone accessing the ENCs and a reference to NOAA's site is included; the liability sentence for products incorporating ENCs in a form other than as provided; and it says that the two files are unaltered but the exchange set is partial (the catalogue without its cells), and that a repository can display the agreement but cannot enforce acceptance. One docs commit for backport. (2) the Rolling job's guard also checks the closure's declared rosdep keys for `nav2_`, and the header says what the guard does; one CI commit for backport. The `.gitattributes` suggestion is a false positive as stated (the triage tested a checkout with `core.autocrlf=true`: both fixtures keep their checksums) and is not acted on. The implementation entry's "first cppcheck run" is wrong; the pull request text already says cppcheck runs on neither job.
