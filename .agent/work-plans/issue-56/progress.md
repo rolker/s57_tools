@@ -292,3 +292,88 @@ The scratch copy is this branch merged with the port's head `28924ab` (`git merg
 ### Not established / for the owner (not findings on this PR)
 - **Pre-existing, in `generateTile`.** A chart contributes nothing to a tile whose centre lies outside the chart's extent. `grid_map::SubmapGeometry` fails when the requested centre is off the map. The tile's cells covered by that chart stay unpainted unless another chart covers them. This was seen in scratch with a chart ending inside a tile. It is not affected by this change, and how often it matters with real chart sets is not established.
 - **Scratch harness crashes.** The release-build harness crashed occasionally (1 of 40 single-case runs, and in long multi-layer runs), with every variant including unchanged code. The ASan build was clean. The committed `test_rolling_window` passed 100 of 100 runs in release. This is not attributed to the change.
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 12:24 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+
+**Branch**: feature/issue-56 at `66b0ab8`
+**Addressed**: Local Review (Pre-Push) at `23aa7d5` (2026-11-24 12:02 -05:00)
+**Commits**: `285a116`, `229c4c4` (code, no `.agent/` change, each ending "Backport to jazzy."); `66b0ab8` (boxes ticked)
+
+### Actions
+- [x] (must-fix) Five tests asserted Rolling-only window origins: robot positions moved so both distros give the same origin, origin assertions kept, comment in the test names both size formulas and Nav2 #6028 — `s57_layer/test/test_rolling_window.cpp` (`285a116`)
+- [x] (suggestion) y and negative-origin coverage for the rounded offset: new case `NegativeNonBinaryOffsetRoundsToNearestCellOnBothAxes`, single-cycle, origin asserted — `s57_layer/test/test_rolling_window.cpp` (`229c4c4`)
+- [x] (suggestion) Pull request statements corrected — below
+
+No line of `s57_layer.cpp` or `s57_layer.h` changed. The four code commits cherry-pick onto `origin/jazzy` in order with no conflict (`git merge-tree` chain), and the result's `s57_layer` is identical to this branch's.
+
+### Window origins under both formulas (arithmetic, Python replay)
+
+`LayeredCostmap::updateMap` (rolling): `new = robot - getSizeInMetersX()/2`; `Costmap2D::updateOrigin`: `cell = static_cast<int>((new - origin)/res)` (truncation toward zero, so -5.25 and -5.5 both give -5), `origin = origin + cell*res`. Starting origin 0, 10 x 10 at 1 m: Rolling asks robot - 5 (`size*res`), Jazzy robot - 4.75 (`(size-1+0.5)*res`).
+
+| Case | Robot | Jazzy asks / origin | Rolling asks / origin |
+|---|---|---|---|
+| both axes | (-0.5, -0.5) | -5.25 / (-5, -5) | -5.5 / (-5, -5) |
+| x only | (-0.5, 19.5) | (-5.25, 14.75) / (-5, 14) | (-5.5, 14.5) / (-5, 14) |
+| y only | (19.5, -0.5) | (14.75, -5.25) / (14, -5) | (14.5, -5.5) / (14, -5) |
+| exact tile multiple | (-3.5, -3.5) | -8.25 / (-8, -8) | -8.5 / (-8, -8) |
+| far negative, fractional | (-1000.25, -2000.75) | (-1005.0, -2005.5) / (-1005, -2005) | (-1005.25, -2005.75) / (-1005, -2005) |
+| positive control | (20, 20) | 15.25 / (15, 15) | 15.0 / (15, 15) |
+| uncharted | (-0.5, -0.5) | -5.25 / (-5, -5) | -5.5 / (-5, -5) |
+| 0.1 m, x (10 x 10) | (0.85, 0.5) | see below / (0.30000000000000004, 0) | see below / (0.30000000000000004, 0) |
+| 0.1 m, negative x and y (new) | (0.14, 0.14) | -0.335 (q -3.35) / -0.30000000000000004 | -0.36 (q -3.5999999999999996) / -0.30000000000000004 |
+| its oracle, 20 x 20 at 0.1 m | (-0.06, -0.06) | -1.0350000000000001 (q -10.35) / -1.0 | -1.06 (q -10.6) / -1.0 |
+
+0.1 m case, exact doubles. Jazzy: `getSizeInMetersX` = 9.5*0.1 = 0.9500000000000001, asks x 0.85 - 0.47500000000000003 = 0.37499999999999994, /0.1 = 3.749999999999999, cell 3; y asks 0.024999999999999967, /0.1 = 0.24999999999999967, cell 0. Rolling: size 1.0, asks x 0.35 (0.85 - 0.5, exact), /0.1 = 3.4999999999999996, cell 3; y 0.0, cell 0. Both: origin 0 + 3*0.1 = 0.30000000000000004, offset /0.1 = 3.0000000000000004, tile 1's `-4 + 3.0000000000000004` = -0.9999999999999996 truncates to 0 (`lround` gives -1). New case: origin 0 + -3*0.1 = -0.30000000000000004, offset -3.0000000000000004, tile -1's `4 - 3.0000000000000004` = 0.9999999999999996 truncates to 0 (`lround` 1); tiles 0 and 1 give -3 and -7 either way. Oracle: -1.0 / 0.1 = -10.0 exactly.
+
+**Jazzy emulated, two ways.** (1) Arithmetic replay in Python of `updateMap`'s origin and `updateOrigin`'s truncation for both formulas (the table). (2) A scratch-only `jazzy_size.cpp` defining `Costmap2D::getSizeInMetersX/Y` with Jazzy's bodies, linked into scratch copies of the test executable (not into any install); `nm -D` shows the executable exports both, so the dynamic linker binds the calls from `libnav2_costmap_2d_core`'s `updateMap` and from `libs57_layer`'s `updateBounds` to them. Proof it takes effect: the previous test file (`a5b2294`) under it fails exactly as the review said: "window origin is (-4, -4), not (-5, -5)", "(-4, 15), not (-5, 15)", "(15, -4), not (15, -5)", "(-7, -7), not (-8, -8)", and the uncharted case's `ASSERT_EQ` on -5; 5 failed of 8. The same file without the shim passes 8 of 8. The new file passes 9 of 9 with and without the shim, at `285a116` (8 of 8) and at `229c4c4`.
+
+### Nav2 behaviour the test depends on, `origin/jazzy` (c7046550) against the underlay's Rolling (9113449e)
+
+- `Costmap2D::getSizeInMetersX/Y`: **differs** (`(size-1+0.5)*res` against `size*res`); handled by the positions above. Also used by `S57Layer::updateBounds` for the window's far edge (origin + 9.5 m on Jazzy, + 10 m on Rolling); either way the end tile is the one holding cell 9 and the clamped bounds map to `xn = 10` in `updateMap`, so the whole window is updated (the shim run confirms).
+- `Costmap2D::updateOrigin`: same (body identical, truncating `static_cast<int>`, so toward zero for negatives).
+- `Costmap2D::resizeMap`, `mapToWorld`, `worldToMap`, `worldToMapEnforceBounds`, `resetMap`: same.
+- `LayeredCostmap::resizeMap`: same (`matchSize` on each plugin). `addPlugin`, `setFootprint`: same in behaviour (Rolling uses `atomic<shared_ptr>::store` where available).
+- `LayeredCostmap::updateMap`: same order (`updateOrigin` on both maps, out-of-bounds warning, early return with no plugins, `updateBounds` per plugin, bounds to cells with `+1` and clamps, `resetMap(x0, y0, xn, yn)` of the combined map, `updateCosts` per plugin). Differences: Jazzy returns early when `xn < x0 || yn < y0` where Rolling skips the reset and paint but still marks disabled plugins current; Jazzy has no disabled-plugin `setCurrent`. Neither applies (non-empty bounds, every layer enabled).
+- `InflationLayer::onFootprintChanged`: same in effect (`need_reinflation_ = true`; Jazzy takes the inscribed radius from the costmap, Rolling recomputes it; Jazzy logs an error where Rolling warns when the radius is below it). `updateBounds`: identical (whole map when `need_reinflation_`). `updateCosts`: on Jazzy, with no lethal cell (and `inflate_around_unknown` false) nothing is enqueued, so an all-unknown window stays unknown; as on Rolling. `onInitialize`: Jazzy declares parameters through `declareParameter` and registers a parameter callback; same defaults.
+- `Layer::initialize`: same behaviour (stores parent, name, tf, node, then `onInitialize`); takes `tf2_ros::Buffer *` and `nav2_util::LifecycleNode::WeakPtr`, which the test's `__has_include` switch provides.
+- `CostmapLayer::clearArea` differs (Jazzy's exclusive bounds) but neither the test nor `S57Layer` calls it.
+
+### y and negative-origin coverage
+
+`229c4c4` adds `NegativeNonBinaryOffsetRoundsToNearestCellOnBothAxes`: 10 x 10 at 0.1 m, robot (0.14, 0.14), origin -0.30000000000000004 on both axes (asserted), coast `x < -0.1 || y < -0.1`, one cycle. The comparison moved to a helper, `matchesOracle`, shared with the 0.1 m x case. The oracle is now a 20 x 20 rolling window with the **same layer origin** (so the same tiles), moved once to an origin a whole number of cells from it in floating point (0 for the x case, as before; -1.0 here); the helper asserts that origin and that the oracle shows both land and water under the window. Why the same tiles: a first attempt with a non-rolling oracle at layer origin -1.0 disagreed with the layer even with both fixes, because `generateTile`'s first-writer rule lets a chart cell whose edge lies on a layer cell edge write the neighbouring cell too, and at 0.1 m whether it does depends on floating-point rounding of the tile's own origin (pre-existing, not changed here; at 0.5 and 1.0 m the edges are exact). With a coast at -0.2 that also left no land in the window at all, which the new land-and-water check now catches.
+
+Teeth (scratch, Rolling build and the Jazzy shim build give identical results):
+
+| Variant of `s57_layer.cpp` | new negative case | 0.1 m x case | 1 m cases |
+|---|---|---|---|
+| both fixes | pass | pass | 7 pass |
+| `lround` only (no `floor`) | 19 of 100 differ, first (0, 0) at (-0.25, -0.25) cost 0 where the oracle has 254 | pass | 6 fail, control passes |
+| `floor` only (no `lround`) | 17 of 100, first (1, 1) at (-0.15, -0.15) cost 254 where the oracle has 0 | 10 of 100 | 7 pass |
+| only the y `lround` reverted | 9 of 100, first (1, 1) cost 254 where 0 | pass | 7 pass |
+| only the x `lround` reverted | 9 of 100 | 10 of 100 | 7 pass |
+| neither | 19 of 100 | 10 of 100 | 6 fail |
+
+### Verification
+
+Port head read from the shared object store, no fetch: `feature/issue-52` = `origin/feature/issue-52` = `454ae59` (records only since `28924ab`). `git merge-tree --write-tree HEAD 454ae59` (HEAD `66b0ab8`... built at code head `229c4c4`, same `s57_layer`) gives tree `faebdd5`, no conflict; archived to a scratch workspace and built (`s57_grids`, `s57_layer`, `--parallel-workers 4`, default build type) against `/opt/ros/rolling`, the underlay install and the core install. A second scratch workspace (Release, with the scratch-only shim targets) ran the variants.
+
+- `colcon test --packages-select s57_layer --parallel-workers 1 --ctest-args -j1`: "Summary: 61 tests, 0 errors, 0 failures, 8 skipped" (cppcheck per-file skips); gtest: allow_uncharted 3, depth_costs 12, initialize 9, plugin_loading 1, rolling_window 9, tide_offset 7, 0 failures.
+- Each of the 9 `test_rolling_window` cases 30 times as separate processes (`--gtest_filter`), in three binaries: merged tree default build, Release build, Release build with the Jazzy shim: 810 runs, 810 pass, no crash, no non-zero exit. The reviewer's occasional release-build harness crash was not seen in the committed test binary.
+- `ldd`: `test_allow_uncharted`, `test_tide_offset`, `test_depth_costs`, `test_initialize`, `test_rolling_window` each resolve `libs57_layer.so => <scratch>/ws2/install/s57_layer/lib/libs57_layer.so`; `test_rolling_window` loads `liblayers.so` and `libnav2_costmap_2d_core.so` from `rolling/underlay/install/nav2_costmap_2d/lib`. No `libs57_layer.so` exists under `/opt/ros` or `~/project11/rolling`.
+
+### Statements for the pull request (corrected)
+
+- **Jazzy:** nothing was run on Jazzy; Jazzy CI on this pull request is the first Jazzy compile and run. The Nav2 calls the test makes match `origin/jazzy` by signature, but the window arithmetic differs: Jazzy's `Costmap2D::getSizeInMetersX/Y` is `(size - 1 + 0.5) * resolution`, Rolling's `size * resolution` (Nav2 #6028), so a rolling window centres a quarter cell differently. The test places each robot so both formulas give the same window origin, asserts that origin, and was run on Rolling with Jazzy's two functions substituted in the test executable (all pass; the previous positions fail there exactly as predicted). The other Nav2 behaviour it depends on was compared by reading (list above).
+- **For a vessel:** cells in the west and south edge strip of a rolling window, previously left at the costmap default (free on BEN's local costmap, unknown on its global one), now take their charted cost: lethal with inflation where the chart shows land or hazards, and the charted water cost where it shows water, so on the global costmap the strip changes from unknown to charted everywhere the chart covers it. Nothing that was marked becomes unmarked by the `floor` change. A path or goal on charted land in that strip now fails to plan, which is correct. BEN leaves `allow_uncharted` at its default (true), so the uncharted case does not apply there.
+- **`lround`:** changes nothing at BEN's 0.5 m and 1.0 m resolutions (binary-exact offsets). At resolutions that are not exact in binary it moves a tile's content back by the one cell it was shifted, which both marks cells that were wrongly free and returns cells that were wrongly lethal one cell off a coast to their charted cost (none at 0.5 or 1.0 m).
+- **BEN's numbers under Jazzy:** BEN runs Jazzy, so its windows centre at robot - 174.875 m (local, 700 cells at 0.5 m) and robot - 2499.75 m (global, 5000 cells at 1 m) instead of 175 and 2500, then snap to whole cells. The strip is still between 0 and one tile less a cell wide (50 m local, 100 m global) and starts about 175 m / 2500 m from the vessel; its width at a given position shifts by at most one cell. Not material to the earlier statement.
+- **Not established:** that the odometry frame on the boat is `map`; whether the map is re-anchored in operation; anything on a vessel or with a planner; Jazzy compile and run (CI).
+- **Combining with the port:** merges with `454ae59` with no conflict; the merged tree builds and passes all `s57_layer` tests on Rolling.
+
+### Not done here
+
+- `generateTile`'s first-writer rule at non-binary resolutions (a chart cell can claim a neighbouring layer cell depending on floating-point rounding of the tile origin), seen while building the oracle: pre-existing, not changed, for the owner alongside the review's other `generateTile` note.
+- Checks: the `s57_layer` suite above; no workspace script changed, so no script suite applies. No push, no GitHub post. Scratch workspaces removed.
