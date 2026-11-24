@@ -96,3 +96,13 @@ The issue's table matches the source for causes 1, 2, 4, 7, 13, 14 (14: no chang
 - [ ] In the plan's `s57_layer` section, use the local `declareParameter` helper and the free `rclcpp::create_subscription` and `rclcpp::create_client`, state `geodesy` as `<depend version_gte="1.0.7">` with `find_package(geodesy 1.0.7 REQUIRED)`, and pin the Jazzy job's `geodesy` clone at `f70b81a` (the present `-b ros2` clone is unpinned).
 - [ ] In the plan, check by hand what a build cannot show: `ament_xmllint` on every `package.xml` (cause 9), `rosdep install` without `-r` (cause 11: `s57_layer`'s undeclared `grid_map_ros`/`tf2_ros`), and the `GDALAllRegister()` call sites for concurrency (cause 12).
 - [ ] Mention in the plan that `marine_charts` has no behavioural test: either add a small one over a bundled test cell for the ISO 8211 reader (since GDAL 3.12 changed the macros that file set uses) or record in the follow-up issue that the Rolling check is the `s57_grids` launch test and a real chart run.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 08:43 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: owner
+**After**: issue-actions
+**Decision**: proceed
+
+The issue review recommended two parts; the owner, shown the cut on 2026-11-24, answered "Two parts, Nav2-free first (Recommended)". **Part 1**: `s57_msgs`, `marine_charts`, `s57_to_geotiff`, `enc_updater`, the `rolling` branch and CI on both distros; the Jazzy job grows to build and test all six packages, as the issue's "Done when" says (today it covers four; the other two need a clone of rolker/unh_marine_autonomy, and `rosdep install` loses its `-r`). **Part 2**: `s57_grids` and `s57_layer`, checked on Rolling by hand (no CI job builds Nav2 source), where the navigation-path risk sits. Each part is its own pull request into `rolling` saying `Part of #52`, with its own hand backport. The plan covers both parts and details part 1; part 2 is planned again at the plan checkpoint after part 1 merges. For the planner, from the review: causes the issue's table missed (cause 3, `CPL_CVSID` in six `marine_charts` files; cause 8, `geodesy`; causes 9, 11 and 12 to check by hand; a new cause in `s57_layer`, `nav2::LifecycleNode::create_client` returning a wrapper, candidate 17 on #415); `marine_charts` has no behavioural test, so the plan says what shows that its ISO 8211 reader still reads charts under GDAL 3.12 after the cause 3 fix (the six files are a vendored copy of GDAL's reader: say what the smallest safe fix is and how it is checked); part 2 needs the parameter-override and `initialize()` tests the other two costmap layers got.
