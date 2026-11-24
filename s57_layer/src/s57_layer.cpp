@@ -156,6 +156,11 @@ void S57Layer::reset()
   current_ = false;
   // Costmap2DROS::resetLayers resets the whole window before this, so the
   // next cycle reports all of it, including any tile not generated yet.
+  // Defensive: the loop below flags every tile already generated, and every
+  // tile in the window has been by the time a reset can come, so the flags
+  // alone repaint the window and no test fails without this line
+  // (ResetWhileMovingEveryCellEveryCycle passes). It covers a tile that
+  // update_timeout left ungenerated.
   whole_pending_ = true;
   for(auto& t: tiles_)
     t.second.needs_update = true;
@@ -170,6 +175,12 @@ void S57Layer::matchSize()
   resolution_ = parent->getResolution();
   tiles_.clear();
   current_ = false;
+  // The window's size or resolution may have changed, so last_window_ no
+  // longer describes it. Defensive as far as the tests go: their only
+  // resizeMap comes before the first cycle, when whole_pending_ is true
+  // already, and the cleared tiles are regenerated and reported anyway. A
+  // resize while running (Costmap2DROS's width, height or resolution
+  // parameters) reaches it; no test drives one.
   whole_pending_ = true;
 }
 
@@ -389,6 +400,8 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
       // A strip's edges are cell edges. Nav2's conversion (the minimum
       // truncated, the maximum truncated plus one) covers them whichever way
       // rounding goes; the half-cell margin keeps that from depending on it.
+      // Defensive: no test fails without the margin, nor any harness run,
+      // at 1 m or 0.1 m cells, because that conversion already covers them.
       const Span & span = pending_[strip];
       if(strip == Strip::x_low || strip == Strip::x_high)
         own.include(span.lo - half_cell, window.min_y, span.hi + half_cell, window.max_y);
