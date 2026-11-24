@@ -11,11 +11,20 @@
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
 #include "nav2_costmap_2d/cost_values.hpp"
-#include "nav2_util/lifecycle_node.hpp"
 #include "tf2_ros/buffer.h"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 
 #include "s57_layer.h"
+
+// Nav2's lifecycle node moved from nav2_util (Jazzy) to nav2_ros_common
+// (Rolling); Layer::initialize takes a weak pointer to whichever one exists.
+#if __has_include("nav2_ros_common/lifecycle_node.hpp")
+#include "nav2_ros_common/lifecycle_node.hpp"
+using TestLifecycleNode = nav2::LifecycleNode;
+#else
+#include "nav2_util/lifecycle_node.hpp"
+using TestLifecycleNode = nav2_util::LifecycleNode;
+#endif
 
 // Test subclass exposing protected get_cost_from_grid and tide_offset_
 // for direct unit testing of the elevation-cost-mapping logic without
@@ -82,7 +91,7 @@ static void publishTideTransforms(
 // transform changes, the layer should invalidate cached tiles.
 TEST_F(TideOffsetTest, TideChangeInvalidatesTiles)
 {
-  auto node = std::make_shared<nav2_util::LifecycleNode>("test_tide_offset");
+  auto node = std::make_shared<TestLifecycleNode>("test_tide_offset");
 
   node->declare_parameter("chart_layer.chart_datum_frame", std::string("chart_datum"));
   node->declare_parameter("chart_layer.sea_surface_frame", std::string("map_tide"));
@@ -127,7 +136,7 @@ TEST_F(TideOffsetTest, TideChangeInvalidatesTiles)
 // and tide_offset_ stays at zero.
 TEST_F(TideOffsetTest, NoChartDatumFrameSkipsTideLookup)
 {
-  auto node = std::make_shared<nav2_util::LifecycleNode>("test_no_tide");
+  auto node = std::make_shared<TestLifecycleNode>("test_no_tide");
   auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
 
   nav2_costmap_2d::LayeredCostmap layered_costmap("map", false, false);
@@ -149,7 +158,7 @@ TEST_F(TideOffsetTest, NoChartDatumFrameSkipsTideLookup)
 // Small tide changes (below threshold) should not invalidate tiles.
 TEST_F(TideOffsetTest, SmallTideChangeIgnored)
 {
-  auto node = std::make_shared<nav2_util::LifecycleNode>("test_small_tide");
+  auto node = std::make_shared<TestLifecycleNode>("test_small_tide");
 
   node->declare_parameter("chart_layer.chart_datum_frame", std::string("chart_datum"));
   node->declare_parameter("chart_layer.sea_surface_frame", std::string("map_tide"));
@@ -188,7 +197,7 @@ TEST_F(TideOffsetTest, SmallTideChangeIgnored)
 // every few seconds.
 TEST_F(TideOffsetTest, CustomThresholdAcceptsLargerChanges)
 {
-  auto node = std::make_shared<nav2_util::LifecycleNode>("test_custom_threshold");
+  auto node = std::make_shared<TestLifecycleNode>("test_custom_threshold");
 
   node->declare_parameter("chart_layer.chart_datum_frame", std::string("chart_datum"));
   node->declare_parameter("chart_layer.sea_surface_frame", std::string("map_tide"));
@@ -233,7 +242,7 @@ TEST_F(TideOffsetTest, CustomThresholdAcceptsLargerChanges)
 // onInitialize and the default restored.
 TEST_F(TideOffsetTest, InvalidThresholdFallsBackToDefault)
 {
-  auto node = std::make_shared<nav2_util::LifecycleNode>("test_invalid_threshold");
+  auto node = std::make_shared<TestLifecycleNode>("test_invalid_threshold");
 
   node->declare_parameter("chart_layer.chart_datum_frame", std::string("chart_datum"));
   node->declare_parameter("chart_layer.sea_surface_frame", std::string("map_tide"));
