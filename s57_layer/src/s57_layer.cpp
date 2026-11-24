@@ -132,7 +132,12 @@ void S57Layer::onInitialize()
   declareParameter("get_datasets_service", rclcpp::ParameterValue(service_name));
   node->get_parameter(name_+".get_datasets_service", service_name);
   RCLCPP_INFO_STREAM(logger_, "Using get datasets service: " << service_name);
-  get_datasets_client_ = node->create_client<s57_msgs::srv::GetDatasets>(service_name);
+  // rclcpp's free function, not the node's member: Nav2 on Rolling wraps the
+  // member to return nav2::ServiceClient. The free function gives the same
+  // rclcpp::Client, QoS and callback group as Jazzy's member.
+  get_datasets_client_ = rclcpp::create_client<s57_msgs::srv::GetDatasets>(
+    node->get_node_base_interface(), node->get_node_graph_interface(),
+    node->get_node_services_interface(), service_name);
 
 
   global_frame_id_ = layered_costmap_->getGlobalFrameID();
