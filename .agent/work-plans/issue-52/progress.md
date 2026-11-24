@@ -709,3 +709,30 @@ Part 2 (`s57_grids`, `s57_layer`). Specialists: governance, plan drift, a Claude
 **Decision**: publish
 
 Read: the Local Review (Pre-Push) at `8ab87bf`, approved, four suggestions. Published in two steps, as the plan checkpoint set: the branch is first pushed up to `354e860` and the pull request opened there, so the Jazzy job runs the parameter-overrides test against Nav2's own `Layer::declareParameter`; the rest follows once that run is in. Suggestion 1 (two comments in commit 12 that say more than the code does) is not deferred: it is fixed in the fix pass after the pull request's review, with whatever that review finds. Suggestions 2 and 3 go into the comment on rolker/s57_tools#54 at merge. Suggestion 4, and the review's confirmation of two more pre-existing `generateTile` defects (chart data dropped where a tile's centre is outside the chart's grid; a read and conditional write one past a row when a grid cell edge falls exactly on a tile edge), go to the owner as issue text; neither is changed here.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-11-24 12:06 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+**Reviews-read**: none
+
+**PR**: #58 at `454ae59`
+**Sources**: 2 (Local Review (Pre-Push) @ `28924ab` covering the head via bookkeeping, CI rollup); 0 pull-request reviews, 0 inline comments, 0 conversation comments
+**Cross-source confirmations**: 0
+**CI**: all-pass
+
+CI at `454ae59`, run 45443691212: `build-and-test (jazzy)` and `build-and-test (rolling)` SUCCESS. Jazzy: `Summary: 232 tests, 0 errors, 0 failures, 31 skipped`; `s57_layer` 8/8 CTest entries (`test_initialize` `[  PASSED  ] 9 tests.`); `s57_grids` 7/7 (`test_reconfigure` `[  PASSED  ] 3 tests.`, launch test passed); strict `rosdep install --ignore-src -y --from-paths $paths` (no skip keys) ended `#All required rosdeps installed successfully`. Rolling: `PACKAGES: s57_msgs marine_charts s57_to_geotiff enc_updater`, its closure guard passed, `Summary: 159 tests, 0 errors, 0 failures, 18 skipped`; neither `s57_grids` nor `s57_layer` is built there. Run 45442344940 at `354e860`: Jazzy `test_initialize` `[  PASSED  ] 8 tests.` (4/8 Passed) against Nav2's own `Layer::declareParameter`, `226 tests, 0 errors, 0 failures, 30 skipped`. No pull-request review, inline comment or conversation comment exists; the pre-push review's verdict was approved, no must-fix.
+
+### Findings
+- [ ] (suggestion, Local Review (Pre-Push) @ `28924ab`, decided: fix before merge) Two comments in commit `8ab87bf` say more than the code does: a job that finished before the cleanup holds a grid and is dropped too (rebuilt on the next request), and "or when a cleanup aborted the job" can no longer happen because cleanup clears pending jobs — `s57_grids/src/grid_publisher.cpp:163-164`, `:253-256`
+- [ ] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: goes into a comment on #54 at merge, not a code change) State kept across a cleanup: `requested_grids_` survives, a different `enc_root` with a queued label dereferences a null dataset; stale latched grids after a frame or resolution change; an aborted chart is regenerated only when the layer's window next moves — `s57_grids/src/grid_publisher.cpp:150-171`
+- [ ] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: goes into a comment on #54 at merge, not a code change) `TEST_ENC_ROOT` reads the sibling package's source fixture; fails in a standalone or bloom test build — `s57_grids/CMakeLists.txt:113`
+- [ ] (suggestion, Local Review (Pre-Push) @ `28924ab`, settled by the owner: carried by #59 (seam gap, includes the map-axis variant) and the #54 list (edge read and conditional write)) pre-existing `generateTile` defects, no change in this pull request — `s57_layer/src/s57_layer.cpp:425`, `:438-455`
+
+### False positives
+- none (no external review comments to dismiss)
+
+### Pull request body
+- "Results of both runs are added below." — still a placeholder; the host adds the two runs (`354e860` run 45442344940, `454ae59` run 45443691212) above.
+- "Review. ... One suggestion ... is corrected in this pull request before merge." — true only once the fix pass lands; the other three suggestions are routed to #54 and #59, which the body already lists.
+- No statement found that the records contradict: twelve code commits, no Rolling CI job for these two packages, Jazzy CI the only Jazzy evidence, and the Rolling guard all match the runs.
