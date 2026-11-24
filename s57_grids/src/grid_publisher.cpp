@@ -22,6 +22,10 @@ GridPublisher::GridPublisher(const std::string &node_name)
 rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn
 GridPublisher::on_configure(const rclcpp_lifecycle::State &state)
 {
+  // on_cleanup sets the flag to abort grid jobs in flight; a new
+  // configuration starts with grid jobs enabled again.
+  abort_flag_ = false;
+
   std::string enc_root;
   if(!has_parameter("enc_root"))
   {
@@ -156,6 +160,9 @@ GridPublisher::on_cleanup(const rclcpp_lifecycle::State &state)
   for(auto& p: pending_dataset_grids_)
     if(p.second.valid())
       p.second.wait();
+  // The jobs just waited on were aborted and hold no grid; drop them so the
+  // next configuration does not publish their results.
+  pending_dataset_grids_.clear();
 
   tf_listener_.reset();
   tf_buffer_.reset();
@@ -241,6 +248,22 @@ void GridPublisher::checkForNewGrids()
       if(pg.second.wait_for(std::chrono::milliseconds(10)) == std::future_status::ready)
       {
         auto grid = pg.second.get();
+        if(!grid)
+        {
+          // getGrid returns no grid when the chart cannot be opened (a cell
+          // file missing or unreadable) or placed in the map frame, or when
+          // a cleanup aborted the job. Both uses below dereference it, so
+          // skip the chart instead: no publisher is made, and the next
+          // get_datasets request that lists it tries again.
+          RCLCPP_ERROR_STREAM(get_logger(),
+            "No grid for chart " << pg.first
+            << " (it could not be opened or placed in the map frame); not publishing it.");
+          std::lock_guard<std::mutex> lock(requested_grids_mutex);
+          requested_grids_to_publish_.erase(pg.first);
+          grid_request_start_times_.erase(pg.first);
+          done_grids.push_back(pg.first);
+          continue;
+        }
         {
           std::lock_guard<std::mutex> lock(requested_grids_mutex);
           if(requested_grids_to_publish_.count(pg.first) > 0)

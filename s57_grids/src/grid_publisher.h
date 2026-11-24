@@ -82,8 +82,16 @@ private:
   std::map<std::string, std::shared_ptr<grid_map::GridMap> > dataset_grids_;
   std::mutex dataset_grids_mutex_;
 
+protected:
+  // The members under "protected:" are protected, not private, only so
+  // test/test_reconfigure.cpp can check what a cleanup and a new
+  // configuration leave behind. They stay in declaration order, which is
+  // their destruction order.
+
   // Futures waiting for datasets being generated in separate threads
   std::map<std::string, std::future<std::shared_ptr<grid_map::GridMap> > > pending_dataset_grids_;
+
+private:
 
   // Steady-clock time each chart was first added to requested_grids_ —
   // used to log per-chart processing latency when the grid is published.
@@ -107,7 +115,10 @@ private:
   std::unordered_set<std::string> requested_grids_to_publish_;
   std::mutex requested_grids_mutex;
 
+protected:
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+
+private:
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   std::string map_frame_ = "map";
 
@@ -119,6 +130,8 @@ private:
   double precompute_radius_ = 5000.0;
   bool did_precompute_ = false;
 
+protected:
+  // Set by on_cleanup to abort grid jobs in flight; cleared by on_configure.
   std::atomic<bool> abort_flag_ = false;
 };
 
