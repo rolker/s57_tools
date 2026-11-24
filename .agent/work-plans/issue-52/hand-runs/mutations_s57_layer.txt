@@ -1,0 +1,85 @@
+## baseline
+  test_initialize: exit 0; passed ['9']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007b679b69b000)
+  test_depth_costs: exit 0; passed ['12']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x0000776a41607000)
+  test_tide_offset: exit 0; passed ['7']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007bd2c5114000)
+  test_allow_uncharted: exit 0; passed ['3']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x0000769ff41fd000)
+  test_plugin_loading: exit 0; passed ['1']; failed []
+## helper hard-codes "chart_layer."
+  test_initialize: exit 1; passed ['1']; failed ['InitializeTest.ChartReachesTheCostmap', 'InitializeTest.ClientUsesTheOverriddenNamespace', 'InitializeTest.ClientUsesTheOverriddenServiceName', 'InitializeTest.DeclaresEveryParameterUnderTheLayersName', 'InitializeTest.DefaultsEnableTheLayer', 'InitializeTest.ReadsAllowUnchartedOverride', 'InitializeTest.ReadsLethalDecisionOverrides', 'InitializeTest.ReadsTideOverrides']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007c6755a44000)
+  test_depth_costs: exit 0; passed ['12']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007c6720a42000)
+  test_tide_offset: exit 0; passed ['7']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x0000706d12daa000)
+  test_allow_uncharted: exit 0; passed ['3']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x0000704e3b93c000)
+  test_plugin_loading: exit 0; passed ['1']; failed []
+## read of enabled misnamed
+  test_initialize: exit 1; passed ['4']; failed ['InitializeTest.ChartReachesTheCostmap', 'InitializeTest.DefaultsEnableTheLayer', 'InitializeTest.ReadsAllowUnchartedOverride', 'InitializeTest.ReadsLethalDecisionOverrides', 'InitializeTest.ReadsTideOverrides']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007c21863bf000)
+## read of minimum_depth misnamed
+  test_initialize: exit 1; passed ['8']; failed ['InitializeTest.ReadsLethalDecisionOverrides']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007db297f85000)
+## read of maximum_caution_depth misnamed
+  test_initialize: exit 1; passed ['8']; failed ['InitializeTest.ReadsLethalDecisionOverrides']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007f374dd0f000)
+## read of overhead_clearance misnamed
+  test_initialize: exit 1; passed ['8']; failed ['InitializeTest.ReadsLethalDecisionOverrides']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007d14501b0000)
+## read of unsurveyed_cost misnamed
+  test_initialize: exit 1; passed ['8']; failed ['InitializeTest.ReadsLethalDecisionOverrides']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x000078169169d000)
+## read of depth_costs misnamed
+  test_initialize: exit 1; passed ['8']; failed ['InitializeTest.ReadsLethalDecisionOverrides']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x0000786969d2d000)
+## read of update_timeout misnamed
+  test_initialize: exit 0; passed ['9']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007b1bd29e4000)
+## read of tile_size misnamed
+  test_initialize: exit 0; passed ['9']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x0000710e8af6a000)
+## read of buffer_fraction misnamed
+  test_initialize: exit 0; passed ['9']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x000078204e6b6000)
+## read of allow_uncharted misnamed
+  test_initialize: exit 1; passed ['8']; failed ['InitializeTest.ReadsAllowUnchartedOverride']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x0000771674d79000)
+## read of chart_datum_frame misnamed
+  test_initialize: exit 1; passed ['8']; failed ['InitializeTest.ReadsTideOverrides']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x0000723730001000)
+## read of sea_surface_frame misnamed
+  test_initialize: exit 1; passed ['8']; failed ['InitializeTest.ReadsTideOverrides']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x000070e04a7f1000)
+## read of tide_invalidate_threshold misnamed
+  test_initialize: exit 1; passed ['8']; failed ['InitializeTest.ReadsTideOverrides']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x0000724c779b5000)
+## read of s57_grids_namespace misnamed
+  test_initialize: exit 1; passed ['7']; failed ['InitializeTest.ChartReachesTheCostmap', 'InitializeTest.ClientUsesTheOverriddenNamespace']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x000074978943f000)
+## read of get_datasets_service misnamed
+  test_initialize: exit 1; passed ['8']; failed ['InitializeTest.ClientUsesTheOverriddenServiceName']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007215994da000)
+## service misnamed (+= "_x")
+  test_initialize: exit 1; passed ['6']; failed ['InitializeTest.ChartReachesTheCostmap', 'InitializeTest.ClientUsesTheOverriddenNamespace', 'InitializeTest.ClientUsesTheOverriddenServiceName']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007efb5f1f8000)
+  test_depth_costs: exit 0; passed ['12']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x0000759d6f4fe000)
+  test_tide_offset: exit 0; passed ['7']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x000074d1b64a1000)
+  test_allow_uncharted: exit 0; passed ['3']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x000070ee2ea88000)
+  test_plugin_loading: exit 0; passed ['1']; failed []
+## grid topic without the namespace prefix
+  test_initialize: exit 1; passed ['8']; failed ['InitializeTest.ChartReachesTheCostmap']
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007a629673f000)
+  test_depth_costs: exit 0; passed ['12']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x00007c14ff1ea000)
+  test_tide_offset: exit 0; passed ['7']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x000077ec89013000)
+  test_allow_uncharted: exit 0; passed ['3']; failed []
+    libs57_layer.so => <scratch>/mutws/build/s57_layer/libs57_layer.so (0x000076a57ffe7000)
+  test_plugin_loading: exit 0; passed ['1']; failed []

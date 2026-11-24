@@ -1,0 +1,30 @@
+rolling_1000: mode rolling, robot (1000.0, 1000.0), configured origin (0.0, 0.0)
+  window origin (500.0, 500.0), 1000 x 1000 cells at 1.0 m; grids received: ['US5PSMCC.000']
+  all cells: lethal 730209, free 224786, no information 0, other 45005
+  sampled cells (every 10th each way): 10000
+    oracle deep    costmap free   main : 2234
+    oracle deep    costmap lethal main : 50
+    oracle deep    costmap ramp   main : 26
+    oracle lethal  costmap free   main : 1
+    oracle lethal  costmap lethal main : 7181
+    oracle lethal  costmap ramp   main : 9
+    oracle other   costmap free   main : 13
+    oracle other   costmap lethal main : 78
+    oracle other   costmap ramp   main : 408
+  disagreements in main: 60 (41 within 7.5 m of a chart boundary, 19 not)
+    at (905.5, 775.5): oracle deep, costmap lethal
+    at (915.5, 775.5): oracle deep, costmap lethal
+    at (885.5, 785.5): oracle deep, costmap lethal
+    at (895.5, 785.5): oracle deep, costmap lethal
+    at (875.5, 795.5): oracle deep, costmap lethal
+    at (885.5, 795.5): oracle deep, costmap lethal
+    at (865.5, 815.5): oracle deep, costmap lethal
+    at (855.5, 835.5): oracle deep, costmap lethal
+    at (845.5, 845.5): oracle deep, costmap lethal
+    at (835.5, 865.5): oracle deep, costmap lethal
+    at (825.5, 885.5): oracle deep, costmap lethal
+    at (815.5, 895.5): oracle deep, costmap lethal
+    at (805.5, 905.5): oracle deep, costmap lethal
+    at (805.5, 915.5): oracle deep, costmap lethal
+    at (795.5, 925.5): oracle deep, costmap lethal
+  disagreements in strip: 0 (0 within 7.5 m of a chart boundary, 0 not)
