@@ -131,3 +131,146 @@ Read: the Issue Review, status complete. The defect is re-established on this br
 **Plan**: `.agent/work-plans/issue-57/plan.md` at `021ebe4`
 
 Three designs were implemented on a scratch copy of the layer and run through the full scenario set: (a) whole window every cycle, (c) whole window when the origin moved, (d) uncovered strips with a gap cycle, so Nav2's inflation merge never joins an x-strip and a y-strip. All are correct; (d) paints each uncovered cell within 3 cycles. On the global costmap on this desktop, (d) costs 22-32 ms per cycle against 311-418 ms for (a)/(c), and its worst cycle is below today's diagonal worst (316-414 ms). Recommends (d), rules out (c); the owner chooses. Plus a one-line commit for the uncharted case, and the clamp is replaced in the fix (not a cell defect). `current_` changes only if (a) is chosen. The harness and a Jazzy measuring script are committed beside the plan.
+
+## Plan Review
+**Status**: complete
+**When**: 2026-11-24 14:36 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: needs-work
+
+**Issue**: #57 — s57_layer does not repaint cells uncovered when a rolling costmap window moves
+**Plan**: `.agent/work-plans/issue-57/plan.md` at `021ebe4`
+**Branch**: `feature/issue-57`
+**Serves**: "None written down for the project. In practice it serves the costmaps of the Jazzy vessels showing charted land where it is charted." (checked: the project has no goals or design document; no stated rule broken)
+
+The planner's cost table and its correctness table can be trusted: I rebuilt the committed harness and reproduced both. (d) held under 1480 adversarial runs. The needs-work is about the planned tests. Under the planned assertion several of the cases pass on today's code, and the plan says they fail.
+
+### Evaluation
+
+| Dimension | Verdict | Notes |
+|---|---|---|
+| Scope | Good | One PR: commit A (uncharted one-liner), C (the design), B only with (a). #59 and #63 stay out. |
+| Issue alignment | Good | Covers every item of the checkpoint brief: (a), (c) and (d) measured on both inflation layers, `current_`, the clamp, the uncharted case, chart offset off the tile edges, x.5 positions, the comments and the README. |
+| File targeting | Good | `s57_layer.cpp`, `s57_layer.h`, `test_rolling_window.cpp`, `README.md`. Nothing else consumes the bounds. |
+| Consequences | Good | Comments, README, and the `current_` follow-up for the host. One gap: the harness is not reproducible after commit C (finding 3). |
+| Principle alignment | Needs work | "Test what breaks": the planned assertion lets today's code pass several of the named cases (finding 1). The other principles are met. |
+| ADR compliance | Good | ADR-0013 entries. Rolling first with a `cherry-pick -x` backport, one fix per commit, no `.agent/` file in a code commit. |
+| ROS conventions | Good | Bounds are widened with `min`/`max` per Nav2's layer contract. No topic, QoS or parameter change. |
+
+### Independent checks (run on this desktop, Intel Core Ultra 7 265, Release, Rolling's source-built Nav2; scratch only)
+
+**1. The numbers.** I built the committed harness (`measure.sh`'s build steps) and ran a subset: today, (d) and (a), global costmap, 100 cycles, under both inflation layers, plus the local costmap at 45°. My figures are on the right of each pair (mean / worst ms per `updateMap`):
+
+| Global 5000², 1 Hz | Planner | Mine |
+|---|---|---|
+| today R, E 2 m/s | 11.2 / 24.4 | 13.0 / 27.9 |
+| today R, 45° 2 / 5 m/s | 17.1 / 316; 29.4 / 321 | 18.8 / 324; 29.3 / 317 |
+| today J, E 2 m/s | 11.7 / 36.0 | 11.3 / 35.5 |
+| today J, 45° 2 / 5 m/s | 18.7 / 414; 31.8 / 381 | 19.5 / 438; 35.6 / 436 |
+| (d) R, E 2; 45° 2; 45° 5 | 22.7/24.5; 22.0/27.0; 22.4/28.4 | 25.7/27.8; 23.0/28.6; 21.6/29.7 |
+| (d) J, E 2; 45° 2; 45° 5 | 30.5/37.1; 30.9/37.6; 27.9/35.4 | 30.7/37.5; 31.1/37.7; 31.1/40.3 |
+| (a) R, E 2; 45° 2 | 315/320; 315/319 | 319/322; 315/324 |
+| (a) J, E 2; 45° 2 | 402/434; 357/415 | 379/469; 401/431 |
+| local 700², 45° 2 m/s, R: today / (d) / (a) | 0.11/4.1; 2.6/3.0; 3.5/4.0 | 0.11/4.2; 2.63/3.03; 3.57/3.96 |
+
+These agree within about 10%. Some runs overlapped my correctness runs on this 20-core machine.
+- **What the harness drives.** Each cycle runs Nav2's real `LayeredCostmap::updateMap` and `Costmap2D::updateOrigin` (Rolling's), and the layer is a patched copy compiled in. `ldd` shows the underlay's `liblayers.so` and no `libs57_layer`. Jazzy's `InflationLayer` is copied from `origin/jazzy` at build time. Jazzy's `LayeredCostmap` and `Costmap2D` are not exercised, and neither are `Costmap2DROS`, publishing or lock contention.
+- **Single-threaded inflation is right for Jazzy.** Jazzy's `nav2_costmap_2d/CMakeLists.txt` has no OpenMP at all, and its inflation is the serial queue. Rolling's has `option(ENABLE_OPENMP ... OFF)`, so it is off by default too.
+- **The chart.** 10 m cells offset 0.37 m, with 40 m islands on a 300 m lattice and a NE coast. Jazzy's cost scales with lethal-cell density, as the plan notes.
+- **BEN's merged bounds are not already whole-window.** Both of BEN's Nav2 costmaps list only `["chart_layer", "inflation_layer"]`. That holds in `ben_project11/config/nav2_params.yaml` on `rolling`, on `origin/jazzy` (identical) and on gitcloud's `field/ben_project11` `jazzy` (same plugin lists). There is no `bathymetry_layer`, AIS or obstacle layer. The `costmap*.yaml` files with voxel and radar layers are ROS 1 `costmap_2d` launch leftovers that the Nav2 bringup does not use. No other platform config loads `S57Layer`.
+  - `InflationLayer::updateBounds` (identical on both distros) reports the whole map only when `need_reinflation_` is set: a footprint change, a parameter change, `reset()` or `matchSize()`. Otherwise it reports pad(this ∪ last cycle, r).
+  - So today's typical global cycle really is 11-13 ms. Whole-window cycles happen only on diagonal tile-column plus tile-row entries: about 2 in 100 cycles at 45° and 2 m/s, about 6 in 100 at 5 m/s (from the mean and worst above). They also come with tide steps over 1 cm and chart-set changes.
+  - (a)'s ~0.3-0.4 s is therefore a real addition to almost every cycle. The recommendation is not reversed.
+- **Context for the owner.** Jazzy's `SmacPlannerHybrid::createPlan` holds the costmap mutex while it plans (`smac_planner_hybrid.cpp:355`). So does the publisher, and BEN's global costmap publishes the full 25 M-cell map at 1 Hz (`always_send_full_costmap: True`). (a)'s extra 0.3-0.45 s per second is lock time the planner waits behind.
+
+**2. (d) attacked.** I extended the harness with an adversarial mode:
+- **Checks.** Each cell is compared after every cycle with a freshly built window. I track how long each world cell stays wrong (streak) and the age of any lethal or unknown mismatch.
+- **Scenarios (59).**
+  - Random walks of 150 cycles with steps up to ±3 m and ±1.2 m on both axes.
+  - Constant non-integer velocities (0.7, 1.3), (2.3, −1.7) and (0.37, 0.11) for up to 200 cycles.
+  - Zig-zags on x and on x+y, starting at each of the 4 phases of the x/gap/y/gap cycle.
+  - Reversals at each phase, and stops at 5 phases.
+  - One-tile steps.
+  - Jumps of more than a window (diagonal) and of half a window, then back.
+  - A path crossing the origin from (−25.5, −18.5), and a random walk around 0.
+  - Window sizes of 21 and 22 cells with 4-cell tiles.
+  - The tide step, the chart-set change and `reset()` at each of cycles 3-7.
+  - A late grid for a tile at the edge, under the robot, and ahead of the window, each arriving at several phases.
+  - `track_unknown_space` on a fixed window and on a random walk, and `allow_uncharted: false` on a random walk.
+- **Setups.** Each scenario ran with no inflation, with Rolling's inflation at r 2 and 6, and with Jazzy's at r 2 and 9. That was repeated with no other layer, with a layer reporting a 3 m box around the robot before or after `chart_layer`, and with a layer reporting a thin rectangle at the leading edge after it: 1180 runs. 300 more ran over an all-land chart.
+- **Result.** No cell was wrong for more than 3 consecutive cycles in any run, and no lethal or unknown mismatch was older than age 2. That is "painted within 3 cycles", as stated. The pending intervals stayed bounded: at most 12 m, which is 3 cycles of 4 m steps. Today's code fails 457 of the 1180.
+- **The first-generation tile rule holds.** By reading, every cell outside last cycle's window lies in an x- or y-interval that is served on the current window's full extent. A tile that the `update_timeout` budget leaves unvisited is never cleared, and it overlaps the window by the next cycle. No path left a new tile's cells in neither a strip nor a tile report.
+- **Jazzy's half-cell-short window.** Jazzy's `getSizeInMetersX = (size − 0.5)·res`: by reading, the strip's half-cell pad and Nav2's `xn + 1` still cover the edge column. The overlap test errs on the safe side. Not run on Jazzy's `Costmap2D`.
+- **One anomaly, not (d)'s.** With Jazzy's inflation (r 4 and r 9; Rolling's never), one cell at the trailing corner held cost 63 against the fresh window's 69 for 2 cycles, with no young cell nearby. Jazzy's queue inflation does not give the same costs over a sub-rectangle as over the whole window. This matters for the planned value-comparison test (finding 2).
+
+**3-5.** See findings 4-6 and the Summary.
+
+### Findings
+
+1. **[Principle alignment: Test what breaks] Major.** Under the planned assertion ("a cell in the window for 3 or more cycles is lethal"), several planned cases pass on today's code. The plan says every moving case fails without the fix, with and without inflation.
+   - **What I ran.** An all-land chart with 4-cell tiles, robots at x.5, today's code, in windows of 20 and 10 cells.
+   - **Diagonal (1,1)** passes in every setup. Today repaints on each tile entry, every 4 cycles at 1 cell per cycle, so no cell is wrong for more than 3 cycles.
+   - **`reset()` mid-run and jump+back** pass in every setup: the path ends within 3 cycles of the jump back.
+   - **East and north with inflation r 2 or r 6** pass: the inflation layer's padding of the edge-tile report covers 1 m of travel per cycle. The exception is J r2 from 23.5 in the 10-cell window.
+   - **What fails today.** The no-inflation east and north cases (wrong cells up to 14 cycles old) and the reversal in every setup.
+   - **Hiding inside the allowance.** A blanket 3-cycle allowance would also hide a regression that serves axis-aligned strips 1-2 cycles late, though (d) has 0 delay there.
+   - **Resolution.**
+     - Assert every cell lethal after every move on axis-aligned travel.
+     - On diagonals, use a slow step such as (0.6, 0.35) so that today's tile-entry period exceeds 3 cycles. Run several cycles after the jump back.
+     - Show each case failing on `rolling` under the exact assertion before it is called a regression test. Label the inflation variants as guards of the merge and gap logic if they cannot fail today.
+     - Consider one cheap assertion that guards (d)'s cost property, which nothing else will catch if it is lost: on steady diagonal travel, `LayeredCostmap::getBounds` is never the whole window.
+2. **[Principle alignment: Test what breaks] Minor.** The planned "coast-chart case compares cell values with a fresh window" will be flaky or fail on the Jazzy CI job if it runs under Jazzy's `InflationLayer`: a partial re-inflation differs from a full one by a few cost units (above). Compare values exactly only with no inflation layer. With inflation, compare lethal and unknown cells.
+3. **[Consequences] Minor.** `layer_variants.patch` applies only to `s57_layer.cpp` as it stands at `021ebe4` (identical on `jazzy` today). After commit C, the plan's deadpool command ("from this branch's checkout") fails at `patch`.
+   - **Resolution.** Pin the source in the command, for example a `git worktree` at `021ebe4` or `jazzy` before the backport, and say so in `measure.sh`'s usage.
+   - **What is committed.** `harness.cpp` (21 KB), `layer_variants.patch` (11 KB, this repository's own code, BSD), `measure.sh` and `CMakeLists.txt`. No Nav2 file is committed: `measure.sh` extracts Jazzy's Apache-2.0 `inflation_layer.{hpp,cpp}` from a local navigation2 checkout at measure time into `$OUT`. Carrying it in the pull request is fine.
+4. **[Scope: code size of (d)] Suggestion.** The state can be smaller with no change in behaviour.
+   - Serving already takes the hull of the low and high intervals, so one interval per axis suffices. The only loss is a wider strip after a reversal within 3 cycles, which already goes whole-window.
+   - `have_window_` can be folded into `whole_pending_`.
+   - That gives about 9 members instead of 13. Worth doing if (d) is chosen, since each member is review surface on hazard-marking code.
+5. **[Issue alignment: `current_`] Note, confirmed.** I reproduced the plan's `current_` table exactly.
+   - **The stall is real on both distros.** Jazzy's `PlannerServer::waitForCostmap` and its controller loop, and Rolling's `waitUntilCurrent`, throw `PlannerTimedOut`/`ControllerTimedOut` after `costmap_update_timeout` (BEN: 5 s planner, 1 s controller). So (a) or (c) without commit B would fail every plan while any tile in the 5 km window waits for its grid.
+   - **(d) keeps today's semantics.** Those semantics are weak too: today does not hold not-current while the tile under the robot waits (0 of 12 with no inflation).
+   - **The fixed-window stickiness is real and pre-existing.** It would stall the planner permanently on a fixed-window costmap. BEN's costmaps are both rolling, so no deployed vessel is affected. Raising a follow-up issue is right.
+6. **[Approach: commit A and the clamp] Good.** The empty-chart early return is the only uncharted branch that does not set `needs_update`; the other (`grids.empty() && all_charts_available`) already does. With `complete = true` it fires once per tile, so it causes no repeated reports. The fixed-window test fails today. The clamp check reproduces: 0 cells differ, and `chart_layer` is first on both of BEN's costmaps.
+
+### Summary
+
+The design work is sound and its numbers are reproducible. (d) is correct with a bounded 3-cycle delay under everything I threw at it. It is the only option that does not add 0.3-0.45 s of locked costmap time to almost every global cycle on BEN, whose merged bounds are not already whole-window.
+
+The plan needs its test section corrected before implementation: several named cases do not fail on today's code under the planned assertion (finding 1). The design choice remains the owner's.
+
+**Options for the owner (global costmap, this desktop):**
+
+| Option | Correctness | Delay | Mean / worst ms (Rolling; Jazzy inflation) | Code |
+|---|---|---|---|---|
+| (d) strips + gap | all scenarios | ≤ 3 cycles (3 s global, 0.6 s local; 0 axis-aligned) | 22-26 / 28-30; 31 / 38-40 | ~75 lines, 9-13 members, 4-phase rule |
+| (a) whole window + commit B | all scenarios | 0 | 315-319 / 322-324; 379-401 / 431-469 | ~10 lines + `current_` core rule (~15) |
+| (f) whole window every N cycles + B (measured, N=10; N=5) | all, within N cycles | ≤ N cycles (10 s) | 78 / 318; 102 / 466 (N=5: 137 / 321; 174 / 480) | ~8 lines, 1 member, + B |
+
+Notes on the other alternatives:
+- (f) costs 2 whole-window cycles per report because of the inflation layer's last-bounds merge. It keeps today's spikes and needs commit B, so (d) dominates it except on code size.
+- (g), the strips' bounding box, is (a)'s cost on any non-axis heading.
+- (e), both strips when small, otherwise whole, reduces to (g) or (a) under way on a diagonal.
+
+**My choice: (d).**
+- The delay is irrelevant where it applies (cells 2.4-2.5 km away on the global costmap; nothing on BEN reads the local one's costs).
+- Its mean cost is at or below today's on diagonal travel at 5 m/s, and its worst cycle is a tenth of today's.
+- (a)'s cost is unmeasured on the vessel computer, and it lands under a mutex the planner needs.
+- Take (d) with finding 4's smaller state and finding 1's tests.
+- Choose (a) + B instead only if the owner rates the review burden of (d)'s state machine above that risk. In that case, measure (a) on deadpool or a vessel computer before the Jazzy backport deploys.
+
+**What changes for a vessel**, as the plan states it: the global costmap's leading-edge band and the far side after a reversal show charted land within 3 s instead of up to 50 s or never.
+
+**Not established:**
+- Vessel CPU.
+- How often the tide steps over 1 cm. Each step regenerates every tile and reports the whole window today.
+- Jazzy's `LayeredCostmap` and `Costmap2D` under (d), which only the Jazzy CI tests will exercise.
+- `IsPathValid` on unknown cells.
+
+### Recommended Actions
+
+- [ ] Rewrite the planned test assertions so that each named case fails on today's code. Assert every cell lethal on axis-aligned travel, use a slow diagonal and longer post-jump runs, and show each failing on `rolling`. Optionally assert that `getBounds` is never the whole window on steady diagonal travel.
+- [ ] Restrict exact cost-value comparison to runs without an inflation layer (Jazzy's queue inflation differs between partial and full updates).
+- [ ] Pin `measure.sh`'s source to a pre-fix commit in the plan's deadpool command and in its usage text.
+- [ ] If (d) is chosen: one pending interval per axis, and `have_window_` folded into `whole_pending_`.
+- [ ] Owner: choose (d), (a)+B or (f)+B from the table above. Decide whether the Jazzy backport waits for a deadpool or vessel measurement.
