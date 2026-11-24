@@ -479,3 +479,13 @@ No open findings. The pull request has no reviews, inline comments or conversati
 
 ### False positives
 None.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 12:49 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: owner
+**After**: merge
+**Decision**: merge
+
+The owner, 2026-11-24, asked whether to merge pull request 60 with the decision summary in the dialog: "Merge, then prepare the backport (Recommended)". The four code commits (`ce8fd8d`, `a5b2294`, `285a116`, `229c4c4`) are then backported to `jazzy` by hand and that pull request is brought to him with its CI result before it is merged.
