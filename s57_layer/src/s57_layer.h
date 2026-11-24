@@ -1,7 +1,9 @@
 #ifndef S57_LAYER_H
 #define S57_LAYER_H
 
+#include <algorithm>
 #include <future>
+#include <limits>
 #include <unordered_set>
 
 #include "geometry_msgs/msg/point_stamped.hpp"
@@ -143,6 +145,31 @@ private:
   // (~0.5 m/hr near peak ⇒ 1 cm step every ~72 s). Sim runs with
   // accelerated tide should override to a larger value.
   double tide_invalidate_threshold_ = 0.01;
+
+  // A rectangle in world coordinates; empty until something is included.
+  struct Rect
+  {
+    double min_x = std::numeric_limits<double>::max();
+    double min_y = std::numeric_limits<double>::max();
+    double max_x = std::numeric_limits<double>::lowest();
+    double max_y = std::numeric_limits<double>::lowest();
+
+    bool empty() const {return min_x >= max_x || min_y >= max_y;}
+    void include(double x0, double y0, double x1, double y1)
+    {
+      min_x = std::min(min_x, x0);
+      min_y = std::min(min_y, y0);
+      max_x = std::max(max_x, x1);
+      max_y = std::max(max_y, y1);
+    }
+    void clip(double x0, double y0, double x1, double y1)
+    {
+      min_x = std::max(min_x, x0);
+      min_y = std::max(min_y, y0);
+      max_x = std::min(max_x, x1);
+      max_y = std::min(max_y, y1);
+    }
+  };
 
   typedef std::pair<int, int> TileID;
 
