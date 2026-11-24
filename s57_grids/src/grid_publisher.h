@@ -14,7 +14,6 @@
 #include "s57_msgs/srv/get_datasets.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
-#include "tf2_ros/version.h"
 
 namespace s57_grids
 {

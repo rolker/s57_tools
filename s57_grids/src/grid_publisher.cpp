@@ -8,11 +8,51 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <memory>
 #include <thread>
+#include <type_traits>
 #include <unordered_set>
 
 namespace s57_grids
 {
+
+namespace
+{
+
+/// True when ListenerT has the node-interfaces constructor (tf2_ros 0.45.0
+/// and later, Rolling): that constructor's parameter type is the
+/// RequiredInterfaces alias, which no earlier tf2_ros declares.
+template<class ListenerT, class = void>
+struct TakesNodeInterfaces : std::false_type {};
+
+template<class ListenerT>
+struct TakesNodeInterfaces<ListenerT, std::void_t<typename ListenerT::RequiredInterfaces>>
+  : std::true_type {};
+
+/// A TransformListener that subscribes on `node`, with no spin thread of its
+/// own. The constructor is chosen by what the listener type declares, not by
+/// tf2_ros' version: tf2_ros/version.h exists only from 0.36.22 on Jazzy and
+/// 0.46.3 on Rolling. Rolling's listener takes the node's interfaces, built
+/// from a node reference; Jazzy's (and 0.44.0's) template dereferences a node
+/// pointer, so a reference does not compile there. A node pointer must never
+/// reach Rolling's listener: from 0.46.2 it converts to the `bool spin_thread`
+/// of the simplified constructor, which then makes a hidden node with its own
+/// thread (rolker/unh_marine_autonomy#415, cause 14). ListenerT is a template
+/// parameter so that both branches are dependent and the one not taken is
+/// never instantiated. The same helper is in cube_bathymetry and mru_transform.
+template<class ListenerT = tf2_ros::TransformListener, class NodeT>
+std::shared_ptr<ListenerT> makeTransformListener(tf2::BufferCore & buffer, NodeT & node)
+{
+  static_assert(!std::is_pointer_v<NodeT>, "pass the node by reference");
+  constexpr bool spin_thread = false;
+  if constexpr (TakesNodeInterfaces<ListenerT>::value) {
+    return std::make_shared<ListenerT>(buffer, node, spin_thread);
+  } else {
+    return std::make_shared<ListenerT>(buffer, &node, spin_thread);
+  }
+}
+
+}  // namespace
 
 GridPublisher::GridPublisher(const std::string &node_name)
   : rclcpp_lifecycle::LifecycleNode(node_name)
@@ -121,14 +161,10 @@ GridPublisher::on_configure(const rclcpp_lifecycle::State &state)
   // when that comes before the thread has started spinning: its cancel() is
   // lost and the join never returns (rclcpp issue 3172, fixed for Rolling in
   // rclcpp 3174 and not backported). Every lookup here is non-blocking (no
-  // timeout), so it needs no thread of its own. Rolling's listener takes the
-  // node's interfaces; Jazzy's takes a pointer to the node.
+  // timeout), so it needs no thread of its own. makeTransformListener picks
+  // the constructor each distro's tf2_ros has.
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
-#if TF2_ROS_VERSION_GTE(0, 44, 0)
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, *this, false);
-#else
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
-#endif
+  tf_listener_ = makeTransformListener(*tf_buffer_, *this);
 
   // Clamp to >= 1 ms — a zero-duration wall timer is undefined behaviour
   // and would also pin a CPU.
