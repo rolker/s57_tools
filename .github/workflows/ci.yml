@@ -10,9 +10,10 @@
 # s57_to_geotiff and enc_updater. s57_grids needs grid_map_ros, which pulls in
 # nav2_msgs, and s57_layer needs nav2_costmap_2d; Nav2 is not released for
 # Rolling, and no CI job here builds Nav2 from source, so those two are
-# checked on Rolling by hand. A guard step fails the job if the four
-# packages' closure ever takes in a Nav2 package, grid_map_ros or
-# bathymetry_layer.
+# checked on Rolling by hand. A guard step fails the job if Nav2 source,
+# grid_map_ros or bathymetry_layer enters the build (is a package on disk in
+# the four packages' --packages-up-to closure), or if any package in that
+# closure declares a nav2_* rosdep key.
 #
 # The workspace is this checkout plus source dependencies that are not rosdep
 # keys:
@@ -254,6 +255,25 @@ jobs:
           echo "$names"
           if echo "$names" | grep -E '^(nav2_.*|grid_map_ros|bathymetry_layer)$'; then
             echo "the closure takes in the packages above, which this job must not build" >&2
+            exit 1
+          fi
+          # Declared keys: rosdep reads only the manifests, no setup.bash
+          # (ROS_DISTRO comes from the image, as for the rosdep install step).
+          # shellcheck disable=SC2086
+          paths="$(colcon list --base-paths src --paths-only --packages-up-to $PACKAGES)"
+          # shellcheck disable=SC2086
+          keys="$(rosdep keys --ignore-src --from-paths $paths)"
+          nav2="$(echo "$keys" | grep -E '^nav2_' || true)"
+          if [ -n "$nav2" ]; then
+            # shellcheck disable=SC2086
+            colcon list --base-paths src --packages-up-to $PACKAGES |
+              while read -r name path _; do
+                for key in $(rosdep keys --from-paths "$path" | grep -E '^nav2_' || true); do
+                  echo "$key, declared by $name ($path)"
+                done
+              done
+            echo "the closure declares the Nav2 rosdep keys above, which this job must not take in:" >&2
+            echo "$nav2" >&2
             exit 1
           fi
 
