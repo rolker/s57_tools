@@ -1099,6 +1099,30 @@ TEST_F(WholeWindowTest, SharpDiagonalReversalRepaintsTheWholeWindowOnce)
     });
 }
 
+// The jump rule at its edge (recordUncovered): a move of exactly one tile
+// (4 m) in one cycle is left to the strips and reports no whole window; a
+// move of a tile and a cell (5 m) reports the whole window in that cycle
+// (and, with an inflation layer, its merge repaints it in the next as
+// well). Along x after travel east and along y after travel north. A
+// threshold doubled or halved fails one of the two.
+TEST_F(WholeWindowTest, JumpOfMoreThanATileRepaintsTheWholeWindowAndOfATileDoesNot)
+{
+  for (double jump : {4.0, 5.0}) {
+    for (bool x : {true, false}) {
+      SCOPED_TRACE(
+        std::string(x ? "east" : "north") + ", then a jump of " + std::to_string(jump) + " m");
+      auto path = line(20.5, 20.5, x ? 1.0 : 0.0, x ? 0.0 : 1.0, 6);
+      path.push_back({x ? 25.5 + jump : 20.5, x ? 20.5 : 25.5 + jump});
+      forEachInflation([this, &path, jump](Inflation inflation) {
+          std::string whole;
+          ASSERT_TRUE(wholeWindowCycles(inflation, withStop(path), whole));
+          EXPECT_EQ(
+            whole, jump < 4.5 ? "" : (inflation == Inflation::none ? " 6" : " 6 7"));
+        });
+    }
+  }
+}
+
 // Station keeping: the position jitters around (30.5, 30.5) by whole
 // metres, a fixed pseudo-random sequence on each axis, at x.5 so that the
 // window origin is the same under both size formulas. spread is the
