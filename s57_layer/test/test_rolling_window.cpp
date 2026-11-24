@@ -16,6 +16,7 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1096,23 +1097,71 @@ TEST_F(WholeWindowTest, SharpDiagonalReversalRepaintsTheWholeWindowOnce)
     });
 }
 
-// Station keeping: the position jitters by up to 1 m on each axis around a
-// fixed point, a fixed pseudo-random sequence, at x.5 so that the window
-// origin is the same under both size formulas.
-TEST_F(WholeWindowTest, StationKeepingNeverRepaintsTheWholeWindow)
+// Station keeping: the position jitters around (30.5, 30.5) by whole
+// metres, a fixed pseudo-random sequence on each axis, at x.5 so that the
+// window origin is the same under both size formulas. spread is the
+// largest offset in cells.
+std::vector<Step> stationKeeping(int spread, int cycles)
 {
   std::vector<Step> path;
   unsigned int state = 12345u;
-  auto jitter = [&state]() {
+  auto jitter = [&state, spread]() {
       state = state * 1103515245u + 12345u;
-      return static_cast<double>((state >> 16) % 3) - 1.0;
+      return static_cast<double>((state >> 16) % (2 * spread + 1)) - spread;
     };
-  for (int k = 0; k < 80; k++) {
+  for (int k = 0; k < cycles; k++) {
     const double dx = jitter();
     const double dy = jitter();
     path.push_back({30.5 + dx, 30.5 + dy});
   }
+  return path;
+}
+
+// The window origins a path takes on one axis from cycle 2 on (the cycles
+// wholeWindowCycles counts), by Rolling's size formula (wholeWindowCycles
+// asserts Jazzy's gives the same).
+std::set<double> originsFromCycle2(const std::vector<Step> & path, bool x)
+{
+  std::set<double> origins;
+  double origin = 0.0;
+  for (std::size_t k = 0; k < path.size(); k++) {
+    origin = nextOrigin(origin, x ? path[k].x : path[k].y, kCells);
+    if (k >= 2) {
+      origins.insert(origin);
+    }
+  }
+  return origins;
+}
+
+// Jitter of up to one cell per update on each axis keeps the window on two
+// origins per axis, and the strips never report the whole window (#57).
+// This pins that side of the rule; the next case pins the other.
+TEST_F(WholeWindowTest, StationKeepingWithinOneCellNeverRepaintsTheWholeWindow)
+{
+  const auto path = stationKeeping(1, 80);
+  EXPECT_EQ(originsFromCycle2(path, true).size(), 2u);
+  EXPECT_EQ(originsFromCycle2(path, false).size(), 2u);
   expectNoWholeWindow(path);
+}
+
+// Jitter of up to two cells per update moves the window over four origins
+// per axis, so cells can wait on a third and fourth side, and the whole
+// window is reported whenever a second side's cells have waited 2 updates
+// (chooseStrip). This pins the cycles that rule gives for this sequence
+// (an integer model of recordUncovered and chooseStrip predicts the same
+// four, 7, 26, 46 and 72); with an inflation layer its merge repaints the
+// whole window in the next cycle as well. A change that makes station
+// keeping with this much jitter cheaper or dearer fails here.
+TEST_F(WholeWindowTest, StationKeepingWithinTwoCellsRepaintsTheWholeWindowAtThePredictedCycles)
+{
+  const auto path = stationKeeping(2, 80);
+  EXPECT_EQ(originsFromCycle2(path, true).size(), 4u);
+  EXPECT_EQ(originsFromCycle2(path, false).size(), 4u);
+  forEachInflation([this, &path](Inflation inflation) {
+      std::string whole;
+      ASSERT_TRUE(wholeWindowCycles(inflation, path, whole));
+      EXPECT_EQ(whole, inflation == Inflation::none ? " 7 26 46 72" : " 7 8 26 27 46 47 72 73");
+    });
 }
 
 // Control: a window that does not move, with the robot moving inside it.
