@@ -466,12 +466,12 @@ void S57Layer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int min_i, i
 
   for(int ti = start_tile.first; ti <= end_tile.first; ti++)
   {
-    int tile_offset_x = -ti*tile_size_ + (master_grid.getOriginX()-x_origin_)/resolution_;
+    int tile_offset_x = -ti*tile_size_ + static_cast<int>(std::lround((master_grid.getOriginX()-x_origin_)/resolution_));
     int start_i = std::max(min_i, -tile_offset_x);
     int i_count = std::min(max_i, tile_size_-tile_offset_x)-start_i;
     for(int tj = start_tile.second; tj <= end_tile.second; tj++)
     {
-      int tile_offset_y = -tj*tile_size_ + (master_grid.getOriginY()-y_origin_)/resolution_;
+      int tile_offset_y = -tj*tile_size_ + static_cast<int>(std::lround((master_grid.getOriginY()-y_origin_)/resolution_));
 
       TileID tile = std::make_pair(ti,tj);
       auto current_tile = tiles_[tile].costmap;
