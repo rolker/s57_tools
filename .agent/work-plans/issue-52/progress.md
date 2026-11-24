@@ -798,3 +798,13 @@ CI. Run 45445136398 (head `74d2467`): `build-and-test (rolling)` passed; `build-
 
 ### False positives
 - none (no external review comments to dismiss)
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 12:16 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (a must-fix from CI: an intermittent hang is diagnosed, not re-run)
+**After**: findings
+**Decision**: address
+
+Read: the Integrated Review for pull request 58. The Jazzy job failed on `74d2467`: `test_reconfigure` hung in its first case (configure, cleanup, configure) after the first configure's catalogue line and was killed at 60 s; it passed on the previous head, which differs only in comments. The fix pass establishes where it hangs and whether the cause is in the test or in `s57_grids` (the triage's leading hypothesis, unverified: `tf2_ros::TransformListener`'s own spin thread, started at configure and joined at cleanup, where a cancel that lands before the thread spins is lost), fixes the cause, and shows a long repeat loop without a hang. If the cause is in the node and a vessel can reach it, the fix is made in the node, in its own commit, backported with the rest.
