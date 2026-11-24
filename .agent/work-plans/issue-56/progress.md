@@ -240,3 +240,55 @@ Scratch copy in the session scratchpad: `s57_layer` and `s57_grids` from the por
 
 - Defect A (cells exposed by a window move not repainted until a tile is invalidated) and defect B (no charts, `allow_uncharted: false`: newly entered tiles not marked) are not fixed or worked round. The uncharted test depends on B only in that it needs the inflation layer's whole-window bounds (said in its comment); the `lround` test would pass vacuously in a two-cycle form because of A (said in its comment). The other tests start from empty tiles in one cycle and are unaffected.
 - No push, no GitHub post. Scratch copy removed.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-11-24 12:02 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: changes-requested
+
+**Branch**: feature/issue-56 at `23aa7d5` (code head `a5b2294`)
+**Base**: origin/rolling
+**Depth**: Standard (reason: about 350 changed lines of C++ in a costmap layer deployed on vehicles; a new test whose only automated run is Jazzy CI)
+**Must-fix**: 1 | **Suggestions**: 2
+**Round**: 1 | **Ship**: continue (round 1: 1 must-fix; first round always re-reviews after fixes)
+
+Reviewers: Claude adversarial (fresh subagent) completed; Gemini and Codex (cross_model_review.sh, branch origin/rolling) completed; their prompt and findings files were removed from the tree.
+
+### Findings
+- [ ] (must-fix) Five of the eight new tests fail on Jazzy. They assert window origins that only Rolling's Nav2 produces. Jazzy's `Costmap2D::getSizeInMetersX` returns `(size_x_ - 1 + 0.5) * resolution_` (navigation2 `origin/jazzy` `costmap_2d.cpp:526`). Rolling's returns `size_x_ * resolution_`, after Nav2 #6028 (`86416664`, first released in 1.5.0, not on `origin/jazzy`). So on Jazzy, `updateMap` puts the 10 x 10 window at robot - 4.75, and `updateOrigin` truncates that toward zero. The origins Jazzy gives are: robot (0,0) gives (-4,-4), not (-5,-5); (0,20) gives (-4,15); (20,0) gives (15,-4); and (-3,-3) gives (-7,-7), which is no longer on a tile multiple. That makes BelowOriginOnBothAxes, BelowOriginOnXOnly, BelowOriginOnYOnly, BelowOriginOnAnExactTileMultiple and UnchartedBelowOriginMarkedUnknown fail. FarBelowOrigin, the control and the 0.1 m case still give the asserted origins. Fix: choose robot positions that give the same origin under both formulas (for example a robot at -0.5 gives -5 on both, -3.5 gives -8, and 19.5 gives 14), or compute the expected origin. Keep the origin assertions. The implementation entry's "Jazzy compile, by reading" missed this function. — `s57_layer/test/test_rolling_window.cpp:189,194,199,207,249-250`
+- [ ] (suggestion) The 0.1 m case varies the chart only along x, with the window's y origin at 0. So the `lround` on `tile_offset_y` and a negative non-binary origin are never exercised by the committed test. The reviewer's scratch sweep showed both are right, but no committed test does. Mirror the coast in y, or add a negative-origin variant. — `s57_layer/test/test_rolling_window.cpp:262-318`
+- [ ] (suggestion) The pull request statements need two changes:
+  - "Jazzy: the Nav2 calls were checked against `origin/jazzy` by reading" should not imply the window arithmetic matches. It does not (see the must-fix).
+  - The vessel statement should add that the global costmap's strip also changes from unknown to its charted cost where the chart shows water, not only where it shows land. Under the 0.1 m resolution case, the `lround` commit also moves cells that were wrongly lethal, one cell off a coast, back to their charted cost (none at 0.5 or 1.0 m).
+  — `.agent/work-plans/issue-56/progress.md` (Implementation, "Statements for the pull request")
+
+### Verified (Rolling scratch copy)
+
+The scratch copy is this branch merged with the port's head `28924ab` (`git merge-tree`, tree `043df53`, no conflict), built against `/opt/ros/rolling` and the underlay and core installs. `ldd` showed `libs57_layer.so` resolving to the scratch install.
+
+**Source changes.**
+- Only lines 159-160 and 469/474 of `s57_layer.cpp` differ. With both fixes reverted, the file is byte-identical to the port's.
+- The tests fail without their fix. Reverting `floor` fails the 6 floor cases with the messages in the Implementation entry. Reverting `lround` fails only the 0.1 m case ("10 of 100 cells differ…").
+
+**Reviewer's sweep.** One `updateMap` per case over 48 windows with tile size 100: 300 x 300 cells at 0.5, 1.0 and 0.1 m, and 700 x 700 at 0.5 m.
+- **Windows.** One in each quadrant, straddling each axis and both, at fractional positions, on an exact tile multiple, and at up to 1e6 m.
+- **Charts.**
+  - An all-land chart, with every cell checked.
+  - A 13 m by 17 m checkerboard. Each cell is compared with the chart's own value at the chart cell that the layer's first-writer rule assigns it. That reference is independent of the tile code.
+  - An unmoved non-rolling oracle.
+- **Results.**
+
+  | Fixes | Not lethal on all-land | Wrong against the reference | Notes |
+  |---|---|---|---|
+  | Both | 0 of 5,520,000 | 0 | |
+  | `floor` only | 300 | 430 | All in one 0.1 m case |
+  | `lround` only | 1,298,735 | 647,048 | |
+  | Neither | 1,298,735 | 647,308 | Only the 3 positive-quadrant windows were fully painted |
+
+- **Nothing unmarked by `floor`.** Comparing outputs per cell, `floor` unmarks no cell that was lethal before. `lround` unmarks 130 cells, all in one 0.1 m case. Those were lethal one cell off the coast, and the reference shows the new value is correct.
+- An ASan build of the whole sweep with both fixes reported no memory error.
+
+### Not established / for the owner (not findings on this PR)
+- **Pre-existing, in `generateTile`.** A chart contributes nothing to a tile whose centre lies outside the chart's extent. `grid_map::SubmapGeometry` fails when the requested centre is off the map. The tile's cells covered by that chart stay unpainted unless another chart covers them. This was seen in scratch with a chart ending inside a tile. It is not affected by this change, and how often it matters with real chart sets is not established.
+- **Scratch harness crashes.** The release-build harness crashed occasionally (1 of 40 single-case runs, and in long multi-layer runs), with every variant including unchanged code. The ASan build was clean. The committed `test_rolling_window` passed 100 of 100 runs in release. This is not attributed to the change.
