@@ -634,3 +634,68 @@ PONTON and OBSTRN are rasterised lethal by `s57_grids` (`marine_charts/src/s57_d
 ### Unverified
 
 Everything on Jazzy (build, tests, the abort reproduction, the hand run, the seam gap): by reading only. A before/after costmap is not possible on Rolling (the pre-port tree does not compile); the deadpool comparison remains on offer. The seam gap with overlapping coarser charts present (here there is none). The `llToMap`-failure null path. The crash-level test with a real cleanup cycle.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-11-24 11:51 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: approved
+
+**Branch**: feature/issue-52 at `28924ab` (code head `8ab87bf`)
+**Base**: origin/rolling
+**Depth**: Deep (reason: 31 files, about 2,500 lines; s57_layer is on the hazard-marking path and is backported to the deployed Jazzy code)
+**Must-fix**: 0 | **Suggestions**: 4
+**Round**: 1 | **Ship**: recommended (no must-fix findings; the suggestions can be applied or tracked)
+
+Part 2 (`s57_grids`, `s57_layer`). Specialists: governance, plan drift, a Claude adversarial subagent, and Gemini and Codex (both completed). Static analysis was not run separately: the implementer's pre-commit run is recorded.
+
+### What I ran or read
+- **No marking line changed.** I read the whole of `git diff origin/rolling...HEAD -- s57_layer/src`. `s57_layer.h` is unchanged. `s57_layer.cpp` has four hunks: the include, the helper lambda, the client and the subscription. `get_cost_from_grid`, `generateTile`, `updateCosts`, `updateBounds`, `worldToTile` and `matchSize` are untouched.
+- **The helper matches Jazzy.** Nav2 `origin/jazzy` (`c704655`), `layer.cpp:76-87` and `node_utils.hpp:95-104`: `Layer::declareParameter` declares `name_+"."+param` with the default descriptor when it is not already declared. Its only other effect, `local_params_.insert`, is never read on Jazzy. The `ParameterValue(...)` expressions are unchanged, so `unsurveyed_cost` is still an integer, from the `unsigned char` promoted to `int`. Rolling `nav2::LifecycleNode` does not wrap `declare_parameter` or `has_parameter`.
+- **The free functions match Jazzy.**
+  - Client: Jazzy's `LifecycleNode::create_client` (`lifecycle_node_impl.hpp:137-145`) calls the same free function with the same node interfaces, `ServicesQoS` and a null group.
+  - Subscription: Jazzy's `create_subscription` member calls `rclcpp::create_subscription(*this, ...)` with default options, and `create_subscription.hpp:176` takes `NodeT &`.
+  - On Rolling, Nav2's wrapper only adds parameter QoS overrides and passes the callback group through. Bypassing it changes no activation, executor or callback group.
+- **`s57_grids` threading.**
+  - `main.cpp` uses a single-threaded executor, so the lifecycle transitions, the timer and the services never run concurrently.
+  - `on_cleanup` waits on every job before `clear()`, and the reset in `on_configure` can only run after that. No worker can still be reading the flag, so the reset is race-free.
+  - A healthy chart takes the unchanged branch.
+  - A chart skipped for having no grid is retried only when the layer next sends a request, which happens when its window moves past the buffer (`s57_layer.cpp:238-313`). Until then, that chart's tiles stay incomplete and NO_INFORMATION. That fails safe. Before the fix, the node aborted.
+- **Mutations of my own**, built in a scratch workspace from `git archive`. `ldd` showed the scratch `libs57_layer.so`, with its directory first on `LD_LIBRARY_PATH`:
+  - grid subscription with volatile QoS `rclcpp::QoS(1)`: `ChartReachesTheCostmap` fails after 10 s;
+  - null-grid branch without `done_grids.push_back`: `ChartThatCannotBeOpenedDoesNotAbortTheNode` fails at `:175`.
+- **Repeats under load**: `ctest --repeat until-fail:20` for `test_initialize` and for `test_reconfigure` (isolated runner, `ROS_DOMAIN_ID` 193 checked empty), alongside a `make -j4` loop with load average 6 to 9: 20 of 20 each.
+  - An earlier attempt that started the load from the same shell failed in the runner with `ModuleNotFoundError: ament_cmake_test` before any test ran. Re-run from a separate shell, it passed. I attribute it to how I ran it, not to the tests.
+- **Jazzy, by reading.**
+  - `tf2/utils.hpp`, `tf2_ros/buffer.hpp` and `static_transform_broadcaster.hpp` exist on geometry2 `jazzy`.
+  - `ament_add_ros_isolated_gtest` and its `domain_coordinator` runner exist on ament_cmake_ros `jazzy`.
+  - `get_subscriptions_info_by_topic` and `get_node_*_interface` exist on Jazzy's `LifecycleNode`.
+  - grid_map `origin/jazzy` `GridMapMath.cpp` and `SubmapGeometry` are identical to `0ece1b5`.
+  - `354e860` declares `ament_cmake_ros`, and its test uses only APIs present on Jazzy.
+  - `ci.yml`: the Jazzy job runs on pull requests into `rolling` and builds and tests both packages with strict rosdep. The Rolling job's `PACKAGES` and its guard leave both out.
+- **Commits.** None of the 12 code commits touches `.agent/`. Each has one subject, one cause, and the trailer "Part of #52. Backport to jazzy.".
+
+### Pre-existing `generateTile` defects (scratch ASan executable compiling `s57_layer.cpp` itself; not findings of this diff)
+- **Seam.** Reproduced in a static costmap at origin 1000. A land chart covering the west 36.25 m or 49.25 m of a tile: 0 of 3,430 and 0 of 4,704 land cells are lethal. A chart with its seam at 50.25 m or 64.25 m, so that it covers the tile's centre, paints every land cell. The gap is up to just under half a tile on whichever side does not hold the centre: 50 m on the global costmap, 25 m on the local one.
+  - **A second mechanism near map x = 0 or y = 0.** At origin 0, a tile corner at coordinate 0 that is clipped to a grid edge loses grid_map's epsilon (`GridMapMath.cpp:262-267`). The chart is then dropped even though it covers the tile's centre. With the seam inside tile [0, 100], both charts were dropped and the whole tile was empty.
+- **Edge.** Reproduced with a grid cell edge exactly on a tile edge.
+  - East edge: 99 lethal cells written into column 0 of the next row.
+  - North edge: the read one row past the 10,000-byte array always happens (ASan). The write happens only where that byte reads 255. Real chart grids are placed from lat/lon, so the alignment needs bit-exact coincidence.
+- The committed `ChartReachesTheCostmap` avoids all three on purpose (110 m grid, quarter-cell offset, no clipped corner at 0) and says so. It asserts nothing false.
+
+### Cross-model
+- **Gemini, rejected:**
+  - `.hpp` headers missing on Jazzy: they exist.
+  - The `/rosout` race: no other ERROR is logged on that logger along that path.
+  - Defaults of the 4-argument `create_client` on Jazzy: they exist.
+- **Pre-existing, outside the diff:** Gemini's null node and future exceptions; Codex 1, the TF throw at a request, already listed for #54; Gemini 9 and Codex 4, CMake export.
+- **Codex 2 and 3** are pre-existing. Their consequences go under suggestion 2.
+
+### Findings
+- [ ] (suggestion) Two comments in commit 12 say more than the code does. A job that finished before the cleanup does hold a grid, and it is dropped too; it is rebuilt on the next request. The null branch's "or when a cleanup aborted the job" can no longer happen, because cleanup clears the pending jobs. — `s57_grids/src/grid_publisher.cpp:163-164`, `:253-256`
+- [ ] (suggestion) Add the consequences of state kept across a cleanup to the #54 comment:
+  - `requested_grids_` survives the cleanup, so a reconfigure with a different `enc_root` while a label is queued dereferences a null dataset (`grid_publisher.cpp:230-231`);
+  - after a `map_frame` or resolution change, latched grids are served stale;
+  - after a cleanup and configure cycle, a chart that was aborted is regenerated only when the layer's window next moves. — `s57_grids/src/grid_publisher.cpp:150-171`
+- [ ] (suggestion) `TEST_ENC_ROOT` reads the sibling package's source fixture. That works in this repository and in CI, but not in a standalone or bloom test build. Note it for #54. — `s57_grids/CMakeLists.txt:113`
+- [ ] (suggestion, the owner's) The new issue for the seam gap should include the map-axis variant. The edge defect is an out-of-bounds read every time and a conditional write. Both are pre-existing. — `s57_layer/src/s57_layer.cpp:425`, `:438-455`
