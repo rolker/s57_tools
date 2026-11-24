@@ -32,6 +32,17 @@ void S57Layer::onInitialize()
   auto node = node_.lock();
   current_ = false;
 
+  // Declare "<layer name>.<param>" on the owning node unless it already is.
+  // Plain rclcpp: Nav2 on Rolling removed Layer::declareParameter, and this
+  // does what Jazzy's version did, so the same code builds on both.
+  auto declareParameter =
+    [&node, this](const std::string & param, const rclcpp::ParameterValue & value) {
+      const std::string full_name = getFullName(param);
+      if (!node->has_parameter(full_name)) {
+        node->declare_parameter(full_name, value);
+      }
+    };
+
   declareParameter("enabled", rclcpp::ParameterValue(true));
   node->get_parameter(name_+".enabled", enabled_);
   // above doesn't seem to work
