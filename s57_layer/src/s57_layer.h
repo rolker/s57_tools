@@ -61,6 +61,11 @@ protected:
   // test-fixture reason as tide_offset_.
   bool depth_costs_ = true;
 
+  // Protected so a test fixture can give the layer a chart (see test/test_rolling_window.cpp).
+  std::vector<s57_msgs::msg::DatasetInfo> current_charts_;
+  std::map<std::string, std::pair<geometry_msgs::msg::Point, geometry_msgs::msg::Point> > chart_bounds_;
+  std::map<std::string, std::shared_ptr<grid_map::GridMap> > grids_;
+
 private:
   using GetDatasetsClient =
     rclcpp::Client<s57_msgs::srv::GetDatasets>;
@@ -99,12 +104,7 @@ private:
   // minimum height required (meters)
   double overhead_clearance_ = 10.0;
 
-  std::vector<s57_msgs::msg::DatasetInfo> current_charts_;
-  std::map<std::string, std::pair<geometry_msgs::msg::Point, geometry_msgs::msg::Point> > chart_bounds_;
-
   std::map<std::string, rclcpp::Subscription<grid_map_msgs::msg::GridMap>::SharedPtr> grid_subscriptions_;
-
-  std::map<std::string, std::shared_ptr<grid_map::GridMap> > grids_;
 
 
   double x_origin_ = 0.0;
