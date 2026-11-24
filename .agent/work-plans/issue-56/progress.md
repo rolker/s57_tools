@@ -162,3 +162,13 @@ The plan is correct and ready: the `floor` fix is complete for the defect class,
 - [ ] Host: report defect A to the owner as its own issue, with the re-entry case and the unestablished tide-repaint frequency (finding 2)
 - [ ] Host: correct defect B's description for the owner: not applicable on BEN; only for tiles entering later with `allow_uncharted: false` and `track_unknown_space: false` (finding 3)
 - [ ] Optionally register the new test after `test_plugin_loading` (finding 6)
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 11:24 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (the plan review's verdict is ready; its findings on this plan are low or informational and are applied as below; the two further defects it confirmed are outside this issue and go to the owner separately)
+**After**: plan
+**Decision**: proceed
+
+Read: the Plan Review at `dde57e4`, verdict ready. Both commits go in as planned: `std::floor` in `worldToTile` with the rolling-window test, and `lround` on the master-to-layer cell offset with its 0.1 m test. One push, not test-first. Findings applied: (1) the uncharted case is driven through Nav2's own cycle, a `LayeredCostmap` with an `InflationLayer` and `setFootprint` and one `updateMap`, as a costmap node does on its first cycle; if that proves impractical the direct call stays and its comment says which production cycle it stands for. (4) The `lround` test stays single-cycle and its comment says why: painted in a later cycle, the moved cells are not repainted at all (the separate repaint defect), so a two-cycle version passes without the fix. (5) The pull request's vessel statement drops "become unknown where `allow_uncharted` is false" for BEN, which leaves that setting at its default of true. (6) The new test is registered after `test_plugin_loading` in `s57_layer/CMakeLists.txt`, away from where the port inserts its own. **Not in this issue:** the review confirmed that cells exposed by a rolling window's move are not repainted until a tile is invalidated (the planner's defect A; on re-entered ground the local costmap can show free space on charted land), and that with no charts and `allow_uncharted: false` newly entered tiles are not marked (defect B, which does not apply to BEN). Neither is touched here; the tests each start from empty tiles in one cycle and are not affected. The host takes A to the owner as its own issue.
