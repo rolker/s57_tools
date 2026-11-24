@@ -407,3 +407,104 @@ Part 1 (the four Nav2-free packages and CI on both distros) is merged; its backp
 **Plan**: `.agent/work-plans/issue-52/plan.md` at `007cfce`
 
 Part 1 recorded as delivered (pull requests 53 and 55). Part 2 to implement now. On a scratch copy, seven changes make `s57_layer` build on Rolling and pass its 23 gtests: causes 1 and 8 (geodesy and grid_map_ros variables, 1.0.7 floor), 2, 6 (the local helper, a third copy), new cause 17 (free `rclcpp::create_client`), 7 and 13. `s57_grids` builds and passes unchanged; causes 9, 12, 14 and 16 were checked and no change is needed; cause 11 adds keys to both manifests. There are two new tests (overrides, and client-to-costmap), because a hard-coded prefix and a misnamed service both pass the existing 23. A Rolling costmap hand run against GDAL's own reading of the chart was piloted. The plan puts two defects that exist without the port to the host: the `abort_flag_` crash in `s57_grids`, reproduced (recommend fixing it in this port), and tile mis-addressing in `s57_layer`'s `worldToTile`, which leaves charted land free in a rolling window near its origin (recommend its own issue now). No workflow change. The draft cause 17 comment for #415 is in the plan.
+
+## Plan Review
+**Status**: complete
+**When**: 2026-11-24 10:58 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: ready
+
+**Issue**: #52 — Port s57_tools to ROS 2 Rolling
+**Plan**: `.agent/work-plans/issue-52/plan.md` at `007cfce`
+**Branch**: `feature/issue-52`
+**Serves**: none written down (s57_tools has no goals or design document); for the workspace, the Project11 Rolling port, rolker/unh_marine_autonomy#415. Checked: the plan's line says the same.
+
+Reviewed: Part 2 (`s57_grids`, `s57_layer`). Part 1 is a delivered record and was not re-reviewed.
+
+What I ran (session scratch copy of `007cfce`, my own colcon workspace, Rolling, DDS domain 187 checked empty, `DISPLAY` unset; removed afterwards):
+- Changes a to g applied by hand: `--packages-up-to s57_layer` builds (4 packages). `colcon test` on `s57_grids s57_layer`: the 23 existing gtests pass (12, 7, 3, 1) and `s57_grids` 6/6 ctest. Without my own scratch test this is the plan's 57 results with 11 skipped.
+- `diff` of the ported `s57_layer.cpp` against the branch: only line 10, the helper lambda, line 124 and the subscription at 655 change. No line of `get_cost_from_grid`, `generateTile`, `updateCosts` or `worldToTile` is touched.
+- A scratch gtest (`#define private public`; a hand-filled all-land grid; `ldd` shows the scratch `libs57_layer.so` is the one loaded) for the tile defect, listed under finding 1. I also ran a `charts.unsurveyed_cost = 77` override: it is declared as an integer and the member reads 77 on Rolling.
+- Rolling CI guard re-run locally with cause 11's keys added to both manifests: the four-package closure is unchanged, its keys have no `nav2_`, and `grid_map_ros` and `grid_map_msgs` are outside it. `rosdep resolve` for every added key: all resolve on noble/jazzy. On resolute/rolling all resolve except `grid_map_core`, `grid_map_msgs` and `grid_map_ros`.
+- `gh api` reads of upstream: rclcpp `jazzy` `create_client.hpp` and `lifecycle_node_impl.hpp` (the member calls the free function with the same QoS default and the same callback group), nav2 `jazzy` `layer.cpp` (`declareParameter` declares `name_ + "." + param` when it is not already declared), and grid_map `jazzy` `grid_map_ros/CMakeLists.txt` (it exports only include directories and libraries, no target, as 2.5.0 does).
+
+### Evaluation
+
+| Dimension | Verdict | Notes |
+|---|---|---|
+| Scope | Good | Two packages, 11 commits plus one optional, one fix per commit. The two pre-existing defects are put to the host, not folded in. |
+| Issue alignment | Good | Every cause the issue review listed for these two packages is handled: 1, 8, 2, 6, 7, 13, 11 and new 17. Causes 9, 12 and 14 were checked and need no change. The two tests the issue review asked for (overrides, and `initialize()` with the client and subscription) are planned and mutation-checked. |
+| File targeting | Good | Matches what my scratch port touched. Only the abort fix touches `s57_grids` sources. |
+| Consequences | Needs work | The tile defect's risk statement names the wrong origin (finding 1). The abort fix leaves another null path (finding 2). |
+| Principle alignment | Good | Test what breaks: two mutations that pass the 23 tests today become caught. Verify before claiming: the Jazzy and Rolling limits are stated. Minor: `ament_cmake_ros` is declared in a later commit than the one that first uses it (finding 3). |
+| ADR compliance | Good | ADR-0013: entries and records are kept out of the code commits. |
+| ROS conventions | Good | Cause 17's free `rclcpp::create_client` gives the same QoS (`ServicesQoS`) and the same callback group (default, `nullptr`) as Jazzy's member, and it compiles on both distros. The CMake-variable linking of `grid_map_ros` and `geodesy` is forced: neither exports a target, on Jazzy or Rolling. It matches `s57_grids/CMakeLists.txt:30-34` and bathymetry_layer. |
+
+### Findings
+
+1. **[Consequences]** (major, wording that goes to the owner) The tile defect is confirmed. The plan's account of when it happens is wrong, and its age is understated.
+   - **What `x_origin_` is.** `x_origin_` and `y_origin_` are set only in `matchSize()` (`s57_layer.cpp:145-150`). That runs from `onInitialize` and from `LayeredCostmap::resizeMap`. `Costmap2DROS::on_configure` resizes the map to the `origin_x`/`origin_y` parameters (default 0) before the plugins are initialised (`costmap_2d_ros.cpp:149-152`), and a rolling window's `updateOrigin` never calls `matchSize`. So the reference point is the costmap's configured origin, by default the global frame's origin. It is not "where its costmap window started".
+   - **When it triggers.** A rolling window is affected whenever its lower-left corner is west or south of that point: the robot within half a window east or north of the frame's origin, or anywhere west or south of it. On ben, `map` is anchored at the first position fix unless a map origin is configured (mru_transform README), so the defect is present from the first cycle.
+   - **Static costmaps.** Never affected, because the origin captured is the window's own origin (scratch test 5).
+   - **Age.** The truncation came with tiles in `181c034` (2021-09-21). `9938802` (2026-02-19) only renamed the members. The plan's line numbers (`:174-175`) are the post-port ones; on the branch the lines are `:159-160`.
+   - Correct the plan's "What it means for the vehicle" text before the owner relies on it.
+2. **[Consequences]** (minor) The abort fix makes this one cleanup path safe. It does not touch the dereference itself.
+   - `checkForNewGrids` still dereferences an unchecked `grid` at `grid_publisher.cpp:259` and `:284`.
+   - `getGrid` also returns null when `open()` fails (`s57_dataset.cpp:151-153`), for example a cell file replaced or removed after the catalogue scan, and when `llToMap` fails. Either aborts the node the same way.
+   - The planned state test pins the `abort_flag_ = false` reset: deleting it fails the test. It cannot pin `pending_dataset_grids_.clear()`, because without a chart cell no job is pending at cleanup. Nor does it pin the crash, as the plan says.
+   - Either add `if(!grid)` handling at the two dereferences in the same commit (the owner's call: a third change), or list the other null paths explicitly in the #54 comment.
+3. **[Principle alignment]** (minor) Commit 5 introduces `ament_add_ros_isolated_gtest`, but `ament_cmake_ros` is declared only in commit 10. With strict rosdep, declare it in commit 5 so the commit stands alone. This also keeps the two-step push from depending on what `ros:jazzy-ros-core` happens to ship.
+4. **[Principle alignment]** (minor) Both new tests need bounded polling, not fixed sleeps:
+   - test 1's `get_client_names_and_types_by_node`, because graph discovery is asynchronous even in one process;
+   - test 2's `service_is_ready`, the reply, the latched grid and the costmap.
+   Test 2's window should be a static `LayeredCostmap` whose origin is at or below the grid, otherwise the tile defect can fail it. Say both in the plan.
+5. **[Scope]** (note) The two-step push can be done on the Part 2 pull request into `rolling` rather than on the backport. The `ci.yml` Jazzy job runs on pull requests into `rolling` and builds `s57_layer`, and the Rolling job does not build it. That yields the same evidence (test 1 against Nav2's own `declareParameter`) one pull request earlier.
+
+### Summary
+
+The port is sound and verified as far as this machine allows. With changes a to g, both packages build on Rolling and the 23 existing tests pass. The marking functions are untouched. Cause 17's fix keeps Jazzy's client semantics, and the planned tests close the two gaps that compile-only evidence leaves. Ready for implementation once the tile-defect risk text (finding 1) is corrected for the owner. Findings 2 to 5 can be taken up during implementation.
+
+### Recommended Actions
+
+- [ ] Rewrite the plan's tile-defect consequence (finding 1): reference point, trigger, static case, age `181c034`.
+- [ ] Abort fix: decide about the `if(!grid)` guard, or name the other null paths for #54 (finding 2).
+- [ ] Move `ament_cmake_ros` into commit 5 (finding 3).
+- [ ] Specify the polling and the window placement for tests 1 and 2 (finding 4).
+- [ ] Consider doing the two-step push on the `rolling` pull request (finding 5).
+
+### Tile addressing (for the host and the owner)
+
+- **(a) Which positions, and what follows.** `worldToTile` truncates toward zero, so for `(x - x_origin_)/(resolution_*tile_size_)` in (-1, 0) it returns 0 instead of -1, and every negative tile index is one too high.
+  - A tile's bounds come from its id (`x_origin_ + id*T` at `:314`, `:341`), and `updateCosts` copies by an offset computed from that id (`:469-474`). The data that is copied lands in the right place: no two regions share a tile, and nothing is stale data from somewhere else.
+  - What goes wrong is the loop range. `updateCosts` starts at `worldToTile(mapToWorld(min_i))`, a cell centre, so whenever the window's minimum is below the origin the westmost (or southmost) partial tile is never iterated or generated. Its cells receive nothing from the layer.
+  - Those cells are left at the master grid's reset value: FREE_SPACE with `track_unknown_space: false`, NO_INFORMATION with `true`. With `allow_uncharted: false` they are also not marked NO_INFORMATION. The strip is up to one tile wide (`tile_size_` cells, default 100), at the window's west and/or south edge.
+  - It is always "free or unknown where it should be lethal". It is never "lethal where it should be free".
+- **(b) When.** Only rolling windows are affected: the window's lower-left corner west or south of the costmap's configured `origin_x`/`origin_y`, by default the global frame's origin. On ben's `map_tide` (anchored at the first fix unless configured), that is:
+  - local costmap (350 m, 0.5 m): the strip is up to 50 m wide and begins 175 m from the vessel;
+  - global costmap (5000 m, 1 m, `track_unknown_space: true`): up to 100 m of unknown begins 2500 m away.
+  Because the strip is always at the window's edge, the cells under and near the vessel stay correct while half the window exceeds one tile. The exposure is plans made through the strip (global path, coverage), which are then corrected only as the strip slides inward. Inflation from the missing land is missing too.
+- **(c) Reproduced.** Scratch gtest, 10x10 cells at 1 m:
+  - rolling window, robot at (0, 0), tile 100: 25 of 100 cells lethal, should be 100 (the west 5 columns and south 5 rows free);
+  - the same window uncharted with `allow_uncharted: false`: 25 of 100 cells NO_INFORMATION;
+  - rolling window at (-20, -20) with tile 4: 81 of 100;
+  - rolling window at (+20, +20): 100 of 100;
+  - static window with origin -5: 100 of 100.
+  With `std::floor` in a scratch copy, all five give 100. That copy was discarded.
+- **(d) Why the 23 tests missed it.** Every test that calls `updateCosts` uses a non-rolling 10x10 `LayeredCostmap` at origin 0 (`test_allow_uncharted.cpp:52`, `test_depth_costs.cpp:358`, `test_tide_offset.cpp:96` etc.), so the window minimum always equals `x_origin_`. No test moves the origin.
+- **(e) Age.** Since `181c034` (2021-09-21). It is identical on `jazzy` (`git diff origin/jazzy` on the file is empty).
+- **Order.** The facts support a separate issue and pull request (B). They do not support gating it on Part 2.
+  - The fix lines and the port's lines are disjoint, so either order cherry-picks cleanly, and the port's "no marking line changed" claim holds either way.
+  - The `ci.yml` Jazzy job runs on pull requests into `rolling` and builds `s57_layer`, so a fix pull request can be checked on Jazzy by CI before Part 2. On Rolling it can only be checked by hand after Part 2.
+  - The defect is live on the deployed Jazzy code today. Landing it first or in parallel shortens the exposure and lets Part 2's hand run show full agreement.
+  - The scratch test above is the shape of its regression test.
+
+### `abort_flag_` (for the host and the owner)
+
+- **Mechanism, confirmed by reading.** The flag is set at `grid_publisher.cpp:148` and never reset (`grid_publisher.h:122`). `getGrid` then returns null at `s57_dataset.cpp:177`, and `checkForNewGrids` dereferences it at `:259` (and at `:284` when `publish_costmaps` is on) if the label was requested. `:487` is guarded. I did not re-run the crash.
+- **Who can trigger it.** Only an operator: `ros2 lifecycle set`, or ros2launch_gui's Cleanup entry (`launch_description_widget.py:39`). No lifecycle manager lists `s57_grids` in ben (`navigation_launch.py:46-56`). `s57_grids_launch.py` transitions once and respawns the node unconfigured.
+- **The costmap afterwards.**
+  - Grids already received keep marking.
+  - Tiles of a chart listed in the last reply but never delivered get NO_INFORMATION, whatever `allow_uncharted` says (`all_charts_available` false).
+  - Areas the window reaches later are treated as uncharted: with `allow_uncharted: true` they are left free on the local costmap and unknown on the global one.
+  - The layer logs an unthrottled WARN, "The get datasets service is not ready", every cycle. It does not log an ERROR.
+- **The proposed test.** It pins the reset (mutation-checked), not the `clear()` and not the crash (finding 2).
