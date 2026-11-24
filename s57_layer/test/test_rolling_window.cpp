@@ -487,7 +487,8 @@ TEST_F(RollingWindowTest, NegativeNonBinaryOffsetRoundsToNearestCellOnBothAxes)
 //
 // When a rolling window moves, Nav2 resets the cells it uncovers to the
 // default value, and the layer reports them as strips (s57_layer.h): on
-// travel along one axis in the same cycle, otherwise within 3 cycles. Each
+// travel along one axis in the same cycle (one cycle late when the travel
+// reverses), otherwise within 3 cycles. Each
 // case drives LayeredCostmap::updateMap along a path and compares every cell
 // after every cycle with an oracle: a fresh costmap with the same layers and
 // charts, moved to the same window in its first cycle, which paints all of
@@ -839,14 +840,45 @@ TEST_F(MovingWindowTest, NorthEveryCellEveryCycle)
 }
 
 // East 8 m, then west past the start, so the window uncovers cells on the
-// side it came from: every cell after every cycle.
-TEST_F(MovingWindowTest, ReversalPastTheStartEveryCellEveryCycle)
+// side it came from: every cell within one cycle (the column uncovered in
+// the cycle the travel reverses waits one cycle, see chooseStrip), and every
+// cell after every cycle stopped.
+TEST_F(MovingWindowTest, ReversalPastTheStartEveryCellWithinOneCycle)
 {
   forEachInflation([this](Inflation inflation) {
       EXPECT_TRUE(
         drive(
           inflation, withStop(join(line(20.5, 20.5, 1.0, 0.0, 9), line(27.5, 20.5, -1.0, 0.0, 16))),
-          0, landChart()));
+          1, landChart()));
+    });
+}
+
+// Fast zig-zags, reversing every cycle or every other cycle, east-west and
+// then on both axes. Each reversal is followed by a gap cycle, and the cells
+// that scrolled out and back in across it must be painted: this guards
+// remembering the window in every cycle, gap cycles included (remembered
+// only when a strip is reported, the window comes back to cells that were
+// reset while it was away and nothing reports them). East-west, every cell
+// within one cycle; on both axes, within 3 cycles.
+TEST_F(MovingWindowTest, FastZigZagsEveryCellWithinTheBound)
+{
+  // Steps of +-2 m from (20.5, 20.5), the sign flipping every period cycles.
+  auto zigzag = [](int period, double ky, int cycles) {
+      std::vector<Step> path{{20.5, 20.5}};
+      for (int k = 1; k < cycles; k++) {
+        const double d = ((k - 1) / period) % 2 ? -2.0 : 2.0;
+        path.push_back({path.back().x + d, path.back().y + ky * d});
+      }
+      return withStop(path);
+    };
+  forEachInflation([this, &zigzag](Inflation inflation) {
+      for (int period : {1, 2}) {
+        SCOPED_TRACE("reversing every " + std::to_string(period) + " cycles");
+        EXPECT_TRUE(drive(inflation, zigzag(period, 0.0, 16), 1, landChart()));
+        TearDown();
+        EXPECT_TRUE(drive(inflation, zigzag(period, 0.5, 16), 3, landChart()));
+        TearDown();
+      }
     });
 }
 
@@ -926,42 +958,133 @@ TEST_F(MovingWindowTest, SlowDiagonalTrackingUnknownMatchesAFreshWindow)
     });
 }
 
-// The cost of the strips: on steady diagonal travel the bounds the costmap
-// repaints are never the whole window. This guards the gap between an x
-// and a y strip (chooseStrip): reporting the two axes in consecutive
-// cycles, or together, makes the inflation layer's merge of this and last
-// cycle's bounds the whole window. The first 2 cycles, when the whole
-// window is painted, are left out. getBounds keeps the last cycle's bounds
-// through a cycle whose bounds are empty (on Jazzy and Rolling alike), so a
-// layer after the others records whether there were any.
-TEST_F(MovingWindowTest, DiagonalTravelNeverRepaintsTheWholeWindow)
+// The cost of the strips: the bounds the costmap repaints are never the
+// whole window, on steady diagonal travel, on a reversal or while station
+// keeping. The inflation layer merges this cycle's bounds with last cycle's
+// (chooseStrip), so these guard the gap the layer leaves between an x and a
+// y strip, and between strips on opposite sides of the window on one axis,
+// and that a span is clipped to the window before a move's cells are added
+// to it (recordUncovered). The first 2 cycles, when the whole window is
+// painted, are left out. getBounds keeps the last cycle's bounds through a
+// cycle whose bounds are empty (on Jazzy and Rolling alike), so a layer
+// after the others records whether there were any. Returns the cycles that
+// repainted the whole window, or a failure if the path's window origin is
+// not the same under Jazzy's and Rolling's size formulas at every step.
+class WholeWindowTest : public MovingWindowTest
+{
+protected:
+  ::testing::AssertionResult wholeWindowCycles(
+    Inflation inflation, const std::vector<Step> & path, std::string & whole)
+  {
+    makeNode(inflation);
+    window_ = build(inflation, true, false, landChart());
+    auto last = std::make_shared<BoundsLayer>(0.0);
+    window_.costmap->addPlugin(last);
+    last->initialize(window_.costmap.get(), "last", tf_buffer_.get(), node_, nullptr);
+    auto * master = window_.costmap->getCostmap();
+    double rolling_x = 0.0, rolling_y = 0.0, jazzy_x = 0.0, jazzy_y = 0.0;
+    whole.clear();
+    for (std::size_t k = 0; k < path.size(); k++) {
+      window_.costmap->updateMap(path[k].x, path[k].y, 0.0);
+      rolling_x = nextOrigin(rolling_x, path[k].x, kCells);
+      rolling_y = nextOrigin(rolling_y, path[k].y, kCells);
+      jazzy_x = nextOrigin(jazzy_x, path[k].x, kCells - 0.5);
+      jazzy_y = nextOrigin(jazzy_y, path[k].y, kCells - 0.5);
+      if (rolling_x != jazzy_x || rolling_y != jazzy_y || master->getOriginX() != rolling_x ||
+        master->getOriginY() != rolling_y)
+      {
+        return ::testing::AssertionFailure() << "cycle " << k << ", robot at (" << path[k].x <<
+               ", " << path[k].y << "): window origin (" << master->getOriginX() << ", " <<
+               master->getOriginY() << "), Rolling's formula gives (" << rolling_x << ", " <<
+               rolling_y << "), Jazzy's (" << jazzy_x << ", " << jazzy_y << ")";
+      }
+      const bool any = last->given[0] < last->given[2] && last->given[1] < last->given[3];
+      unsigned int x0, xn, y0, yn;
+      window_.costmap->getBounds(&x0, &xn, &y0, &yn);
+      if (k >= 2 && any && x0 == 0 && y0 == 0 && xn == kCells && yn == kCells) {
+        whole += " " + std::to_string(k);
+      }
+    }
+    return ::testing::AssertionSuccess();
+  }
+
+  void expectNoWholeWindow(const std::vector<Step> & path)
+  {
+    forEachInflation([this, &path](Inflation inflation) {
+        std::string whole;
+        ASSERT_TRUE(wholeWindowCycles(inflation, path, whole));
+        EXPECT_TRUE(whole.empty()) << "these cycles repainted the whole window:" << whole;
+      });
+  }
+};
+
+TEST_F(WholeWindowTest, DiagonalTravelNeverRepaintsTheWholeWindow)
+{
+  for (const auto & velocity : std::vector<std::pair<double, double>>{{0.5, 0.5}, {1.5, 0.5},
+      {1.0, 1.0}})
+  {
+    SCOPED_TRACE(
+      "velocity (" + std::to_string(velocity.first) + ", " + std::to_string(velocity.second) +
+      ") m per cycle");
+    expectNoWholeWindow(line(20.5, 20.5, velocity.first, velocity.second, 40));
+  }
+}
+
+// East then west, north then south, and north-east then, after a stop of 2
+// cycles, south-west, at 1 m per cycle. East and north turn back with a
+// first step of 2 m, so that the window moves back in the very next cycle
+// (from x.5, a step of 1 m back truncates to no move, a free gap).
+TEST_F(WholeWindowTest, ReversalNeverRepaintsTheWholeWindow)
+{
+  {
+    SCOPED_TRACE("east then west");
+    expectNoWholeWindow(join(line(20.5, 20.5, 1.0, 0.0, 8), line(25.5, 20.5, -1.0, 0.0, 12)));
+  }
+  {
+    SCOPED_TRACE("north then south");
+    expectNoWholeWindow(join(line(20.5, 20.5, 0.0, 1.0, 8), line(20.5, 25.5, 0.0, -1.0, 12)));
+  }
+  {
+    SCOPED_TRACE("north-east, a stop, then south-west");
+    expectNoWholeWindow(
+      join(line(20.5, 20.5, 1.0, 1.0, 8), line(27.5, 27.5, -1.0, -1.0, 12)));
+  }
+}
+
+// The one case the strips cannot serve without the whole window: diagonal
+// travel turned back on both axes at once. Cells on all four sides are then
+// waiting, and two of them would wait 4 cycles, so chooseStrip reports the
+// whole window once (the inflation layer's merge repaints it in that cycle
+// and the next). This pins that cost at one report.
+TEST_F(WholeWindowTest, SharpDiagonalReversalRepaintsTheWholeWindowOnce)
 {
   forEachInflation([this](Inflation inflation) {
-      for (const auto & velocity : std::vector<std::pair<double, double>>{{0.5, 0.5}, {1.5, 0.5},
-          {1.0, 1.0}})
-      {
-        SCOPED_TRACE(
-          "velocity (" + std::to_string(velocity.first) + ", " + std::to_string(velocity.second) +
-          ") m per cycle");
-        makeNode(inflation);
-        window_ = build(inflation, true, false, landChart());
-        auto last = std::make_shared<BoundsLayer>(0.0);
-        window_.costmap->addPlugin(last);
-        last->initialize(window_.costmap.get(), "last", tf_buffer_.get(), node_, nullptr);
-        std::string whole;
-        for (int k = 0; k < 40; k++) {
-          window_.costmap->updateMap(20.5 + k * velocity.first, 20.5 + k * velocity.second, 0.0);
-          const bool any = last->given[0] < last->given[2] && last->given[1] < last->given[3];
-          unsigned int x0, xn, y0, yn;
-          window_.costmap->getBounds(&x0, &xn, &y0, &yn);
-          if (k >= 2 && any && x0 == 0 && y0 == 0 && xn == kCells && yn == kCells) {
-            whole += " " + std::to_string(k);
-          }
-        }
-        EXPECT_TRUE(whole.empty()) << "these cycles repainted the whole window:" << whole;
-        TearDown();
-      }
+      std::string whole;
+      ASSERT_TRUE(
+        wholeWindowCycles(
+          inflation, join(line(20.5, 20.5, 1.0, 1.0, 8), line(26.5, 26.5, -1.0, -1.0, 12)),
+          whole));
+      EXPECT_EQ(whole, inflation == Inflation::none ? " 11" : " 11 12");
     });
+}
+
+// Station keeping: the position jitters by up to 1 m on each axis around a
+// fixed point, a fixed pseudo-random sequence, at x.5 so that the window
+// origin is the same under both size formulas.
+TEST_F(WholeWindowTest, StationKeepingNeverRepaintsTheWholeWindow)
+{
+  std::vector<Step> path;
+  unsigned int state = 12345u;
+  auto jitter = [&state]() {
+      state = state * 1103515245u + 12345u;
+      return static_cast<double>((state >> 16) % 3) - 1.0;
+    };
+  for (int k = 0; k < 80; k++) {
+    const double dx = jitter();
+    const double dy = jitter();
+    path.push_back({30.5 + dx, 30.5 + dy});
+  }
+  expectNoWholeWindow(path);
 }
 
 // Control: a window that does not move, with the robot moving inside it.

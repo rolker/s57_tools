@@ -371,28 +371,23 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
   if(rolling)
   {
     const Strip strip = report_whole ? Strip::whole : chooseStrip();
-    switch(strip)
+    if(strip == Strip::whole)
     {
-      case Strip::whole:
-        own.include(window.min_x, window.min_y, window.max_x, window.max_y);
-        pending_x_ = Span();
-        pending_y_ = Span();
-        break;
+      own.include(window.min_x, window.min_y, window.max_x, window.max_y);
+      for(auto & span: pending_)
+        span = Span();
+    }
+    else if(strip != Strip::none)
+    {
       // A strip's edges are cell edges. Nav2's conversion (the minimum
       // truncated, the maximum truncated plus one) covers them whichever way
       // rounding goes; the half-cell margin keeps that from depending on it.
-      case Strip::x:
-        own.include(pending_x_.lo - half_cell, window.min_y, pending_x_.hi + half_cell, window.max_y);
-        pending_x_ = Span();
-        last_axis_ = Strip::x;
-        break;
-      case Strip::y:
-        own.include(window.min_x, pending_y_.lo - half_cell, window.max_x, pending_y_.hi + half_cell);
-        pending_y_ = Span();
-        last_axis_ = Strip::y;
-        break;
-      case Strip::none:
-        break;
+      const Span & span = pending_[strip];
+      if(strip == Strip::x_low || strip == Strip::x_high)
+        own.include(span.lo - half_cell, window.min_y, span.hi + half_cell, window.max_y);
+      else
+        own.include(window.min_x, span.lo - half_cell, window.max_x, span.hi + half_cell);
+      pending_[strip] = Span();
     }
     last_reported_ = strip;
     last_window_ = window;
@@ -421,51 +416,75 @@ bool S57Layer::recordUncovered(const Rect & window, double half_cell)
      window.min_y >= last_window_.max_y - half_cell || window.max_y <= last_window_.min_y + half_cell)
     return false;
 
+  // What has scrolled out of the window needs no repainting. A span that
+  // has wholly scrolled out is no longer pending, so it holds back no other
+  // strip (chooseStrip).
+  for(int s = Strip::x_low; s <= Strip::y_high; s++)
+  {
+    const bool x = s == Strip::x_low || s == Strip::x_high;
+    pending_[s].clip(x ? window.min_x : window.min_y, x ? window.max_x : window.max_y, half_cell);
+    pending_[s].age++;
+  }
+
   // A cell is uncovered when it lies outside last cycle's window on either
   // axis: in a column beyond one of its x edges, or a row beyond one of its
-  // y edges. Each span is the hull of what is pending on its axis, on both
-  // sides; a hull spanning the window after a reversal costs a whole-window
-  // strip, never a missed cell.
-  pending_x_.add(last_window_.max_x, window.max_x, half_cell);
-  pending_x_.add(window.min_x, last_window_.min_x, half_cell);
-  pending_y_.add(last_window_.max_y, window.max_y, half_cell);
-  pending_y_.add(window.min_y, last_window_.min_y, half_cell);
-
-  // What has scrolled out of the window needs no repainting.
-  pending_x_.clip(window.min_x, window.max_x, half_cell);
-  pending_y_.clip(window.min_y, window.max_y, half_cell);
+  // y edges.
+  pending_[Strip::x_low].add(window.min_x, last_window_.min_x, half_cell);
+  pending_[Strip::x_high].add(last_window_.max_x, window.max_x, half_cell);
+  pending_[Strip::y_low].add(window.min_y, last_window_.min_y, half_cell);
+  pending_[Strip::y_high].add(last_window_.max_y, window.max_y, half_cell);
   return true;
 }
 
-// Why an x strip and a y strip are never reported in consecutive cycles.
-// The inflation layer reports the bounds it was given this cycle merged
-// with last cycle's, padded by its radius (InflationLayer::updateBounds,
-// the same on Jazzy and Rolling), and LayeredCostmap::updateMap resets and
-// repaints that one rectangle. An x strip (the window's full height)
-// followed by a y strip (its full width) would therefore repaint and
+// Why two strips are never reported in consecutive cycles. The inflation
+// layer reports the bounds it was given this cycle merged with last
+// cycle's, padded by its radius (InflationLayer::updateBounds, the same on
+// Jazzy and Rolling), and LayeredCostmap::updateMap resets and repaints
+// that one rectangle. Any two different strips together span the window:
+// an x strip (the window's full height) and a y strip (its full width), or
+// an x strip at the west edge and one at the east, as when the window
+// reverses or jitters while station keeping. That would repaint and
 // re-inflate the whole window, which on BEN's 5 km global costmap took
-// 0.3-0.4 s per cycle on a desktop (#57). So the axis changes only after a
-// gap: a cycle in which this layer reports no strip, and the inflation
-// layer re-runs only last cycle's. While both axes are pending the cycles
-// go x, gap, y, gap; on travel along one axis its strip is reported every
-// cycle.
-// Each axis is reported at least once every 4 cycles, so an uncovered cell
-// is painted at most 3 cycles after the cycle that uncovered it.
+// 0.3-0.4 s per cycle on a desktop (#57). So a strip follows last cycle's
+// only when it is the same strip (steady travel along one axis) and no
+// other is pending; otherwise this layer first reports no strip for a
+// cycle (a gap), in which the inflation layer re-runs only last cycle's.
+//
+// After a gap, the strip whose oldest cell has waited longest goes next;
+// the next chance for another is two cycles later. A cell waiting 2 cycles
+// or more would then wait 4 or more, so if two strips have such cells the
+// whole window is reported instead, which keeps the bound: every uncovered
+// cell is painted at most 3 cycles after the cycle that uncovered it. On
+// travel along one axis that is the same cycle, or the next when the travel
+// reverses; on steady diagonal travel the strips go x, gap, y, gap. The
+// whole window is also reported on the first cycle, after reset() or
+// matchSize(), on a move past the window, and whenever tiles are flagged
+// for every cell of it (a tide step over the threshold, a change of the
+// chart set).
 S57Layer::Strip S57Layer::chooseStrip() const
 {
-  const bool x = pending_x_.valid;
-  const bool y = pending_y_.valid;
-  switch(last_reported_)
+  bool other = false;
+  for(int s = Strip::x_low; s <= Strip::y_high; s++)
+    other = other || (pending_[s].valid && s != last_reported_);
+  if(last_reported_ <= Strip::y_high)
   {
-    case Strip::x:
-      return y ? Strip::none : (x ? Strip::x : Strip::none);
-    case Strip::y:
-      return x ? Strip::none : (y ? Strip::y : Strip::none);
-    default:
-      if(x && y)
-        return last_axis_ == Strip::x ? Strip::y : Strip::x;
-      return x ? Strip::x : (y ? Strip::y : Strip::none);
+    if(other || !pending_[last_reported_].valid)
+      return Strip::none;
+    return last_reported_;
   }
+
+  Strip oldest = Strip::none;
+  int waiting = 0;
+  for(int s = Strip::x_low; s <= Strip::y_high; s++)
+  {
+    if(!pending_[s].valid)
+      continue;
+    if(pending_[s].age >= 2)
+      waiting++;
+    if(oldest == Strip::none || pending_[s].age > pending_[oldest].age)
+      oldest = static_cast<Strip>(s);
+  }
+  return waiting >= 2 ? Strip::whole : oldest;
 }
 
 
