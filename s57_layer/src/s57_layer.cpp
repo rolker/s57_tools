@@ -416,6 +416,20 @@ bool S57Layer::recordUncovered(const Rect & window, double half_cell)
      window.min_y >= last_window_.max_y - half_cell || window.max_y <= last_window_.min_y + half_cell)
     return false;
 
+  // A jump: a move of more than a tile on either axis in one cycle, as when
+  // localisation jumps. Its uncovered cells can reach the robot itself, and
+  // as strips they would wait their turn (up to 3 cycles, see chooseStrip),
+  // so the whole window is reported at once. Either axis, not both: a jump
+  // along one axis would wait a cycle behind a strip on the other. Travel
+  // never moves this far: BEN's global costmap moves about 5 cells per
+  // cycle at 5 m/s and its local one 2, against 100-cell tiles. A move past
+  // the window (the test above) is such a jump too, unless a tile is as wide
+  // as the window; that test is kept for that case.
+  const double tile = tile_size_*resolution_;
+  if(std::abs(window.min_x - last_window_.min_x) > tile + half_cell ||
+     std::abs(window.min_y - last_window_.min_y) > tile + half_cell)
+    return false;
+
   // What has scrolled out of the window needs no repainting. A span that
   // has wholly scrolled out is no longer pending, so it holds back no other
   // strip (chooseStrip).
@@ -458,7 +472,7 @@ bool S57Layer::recordUncovered(const Rect & window, double half_cell)
 // travel along one axis that is the same cycle, or the next when the travel
 // reverses; on steady diagonal travel the strips go x, gap, y, gap. The
 // whole window is also reported on the first cycle, after reset() or
-// matchSize(), on a move past the window, and whenever tiles are flagged
+// matchSize(), on a jump of more than a tile, and whenever tiles are flagged
 // for every cell of it (a tide step over the threshold, a change of the
 // chart set).
 S57Layer::Strip S57Layer::chooseStrip() const
