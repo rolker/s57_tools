@@ -7,7 +7,7 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "grid_map_core/iterators/SubmapIterator.hpp"
 #include "grid_map_ros/grid_map_ros.hpp"
-#include "tf2/utils.h"
+#include "tf2/utils.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
 #include "s57_msgs/srv/get_datasets.hpp"
@@ -31,6 +31,17 @@ void S57Layer::onInitialize()
 {
   auto node = node_.lock();
   current_ = false;
+
+  // Declare "<layer name>.<param>" on the owning node unless it already is.
+  // Plain rclcpp: Nav2 on Rolling removed Layer::declareParameter, and this
+  // does what Jazzy's version did, so the same code builds on both.
+  auto declareParameter =
+    [&node, this](const std::string & param, const rclcpp::ParameterValue & value) {
+      const std::string full_name = getFullName(param);
+      if (!node->has_parameter(full_name)) {
+        node->declare_parameter(full_name, value);
+      }
+    };
 
   declareParameter("enabled", rclcpp::ParameterValue(true));
   node->get_parameter(name_+".enabled", enabled_);
@@ -121,7 +132,12 @@ void S57Layer::onInitialize()
   declareParameter("get_datasets_service", rclcpp::ParameterValue(service_name));
   node->get_parameter(name_+".get_datasets_service", service_name);
   RCLCPP_INFO_STREAM(logger_, "Using get datasets service: " << service_name);
-  get_datasets_client_ = node->create_client<s57_msgs::srv::GetDatasets>(service_name);
+  // rclcpp's free function, not the node's member: Nav2 on Rolling wraps the
+  // member to return nav2::ServiceClient. The free function gives the same
+  // rclcpp::Client, QoS and callback group as Jazzy's member.
+  get_datasets_client_ = rclcpp::create_client<s57_msgs::srv::GetDatasets>(
+    node->get_node_base_interface(), node->get_node_graph_interface(),
+    node->get_node_services_interface(), service_name);
 
 
   global_frame_id_ = layered_costmap_->getGlobalFrameID();
@@ -652,7 +668,12 @@ void S57Layer::getDatasetsCallback(GetDatasetsClient::SharedFuture future)
       latched_qos.transient_local();
       latched_qos.keep_last(1);
 
-      auto grid_sub = node_.lock()->create_subscription<grid_map_msgs::msg::GridMap>(
+      // rclcpp's free function, not the node's member: Nav2 on Rolling wraps
+      // the member with a (topic, callback, qos) signature that Jazzy does not
+      // have. It takes the node as an lvalue, hence the named pointer.
+      auto node = node_.lock();
+      auto grid_sub = rclcpp::create_subscription<grid_map_msgs::msg::GridMap>(
+        node,
         s57_grids_namespace_+"datasets/"+dataset_info.topic,
         latched_qos,
         [this, label=dataset_info.label](const grid_map_msgs::msg::GridMap::SharedPtr msg)

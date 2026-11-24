@@ -8,11 +8,51 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <memory>
 #include <thread>
+#include <type_traits>
 #include <unordered_set>
 
 namespace s57_grids
 {
+
+namespace
+{
+
+/// True when ListenerT has the node-interfaces constructor (tf2_ros 0.45.0
+/// and later, Rolling): that constructor's parameter type is the
+/// RequiredInterfaces alias, which no earlier tf2_ros declares.
+template<class ListenerT, class = void>
+struct TakesNodeInterfaces : std::false_type {};
+
+template<class ListenerT>
+struct TakesNodeInterfaces<ListenerT, std::void_t<typename ListenerT::RequiredInterfaces>>
+  : std::true_type {};
+
+/// A TransformListener that subscribes on `node`, with no spin thread of its
+/// own. The constructor is chosen by what the listener type declares, not by
+/// tf2_ros' version: tf2_ros/version.h exists only from 0.36.22 on Jazzy and
+/// 0.46.3 on Rolling. Rolling's listener takes the node's interfaces, built
+/// from a node reference; Jazzy's (and 0.44.0's) template dereferences a node
+/// pointer, so a reference does not compile there. A node pointer must never
+/// reach Rolling's listener: from 0.46.2 it converts to the `bool spin_thread`
+/// of the simplified constructor, which then makes a hidden node with its own
+/// thread (rolker/unh_marine_autonomy#415, cause 14). ListenerT is a template
+/// parameter so that both branches are dependent and the one not taken is
+/// never instantiated. The same helper is in cube_bathymetry and mru_transform.
+template<class ListenerT = tf2_ros::TransformListener, class NodeT>
+std::shared_ptr<ListenerT> makeTransformListener(tf2::BufferCore & buffer, NodeT & node)
+{
+  static_assert(!std::is_pointer_v<NodeT>, "pass the node by reference");
+  constexpr bool spin_thread = false;
+  if constexpr (TakesNodeInterfaces<ListenerT>::value) {
+    return std::make_shared<ListenerT>(buffer, node, spin_thread);
+  } else {
+    return std::make_shared<ListenerT>(buffer, &node, spin_thread);
+  }
+}
+
+}  // namespace
 
 GridPublisher::GridPublisher(const std::string &node_name)
   : rclcpp_lifecycle::LifecycleNode(node_name)
@@ -22,6 +62,10 @@ GridPublisher::GridPublisher(const std::string &node_name)
 rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn
 GridPublisher::on_configure(const rclcpp_lifecycle::State &state)
 {
+  // on_cleanup sets the flag to abort grid jobs in flight; a new
+  // configuration starts with grid jobs enabled again.
+  abort_flag_ = false;
+
   std::string enc_root;
   if(!has_parameter("enc_root"))
   {
@@ -111,8 +155,16 @@ GridPublisher::on_configure(const rclcpp_lifecycle::State &state)
     std::bind(&GridPublisher::getDatasets, this, std::placeholders::_1, std::placeholders::_2)
   );
 
+  // The listener subscribes on this node, and the node's executor serves
+  // /tf, with no spin thread of its own. On Jazzy, a listener with its own
+  // thread can hang in its destructor (on_cleanup, or the node's destruction)
+  // when that comes before the thread has started spinning: its cancel() is
+  // lost and the join never returns (rclcpp issue 3172, fixed for Rolling in
+  // rclcpp 3174 and not backported). Every lookup here is non-blocking (no
+  // timeout), so it needs no thread of its own. makeTransformListener picks
+  // the constructor each distro's tf2_ros has.
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+  tf_listener_ = makeTransformListener(*tf_buffer_, *this);
 
   // Clamp to >= 1 ms — a zero-duration wall timer is undefined behaviour
   // and would also pin a CPU.
@@ -156,6 +208,10 @@ GridPublisher::on_cleanup(const rclcpp_lifecycle::State &state)
   for(auto& p: pending_dataset_grids_)
     if(p.second.valid())
       p.second.wait();
+  // Every pending job was waited for above and is dropped here, including one
+  // that finished before the cleanup and holds a grid; its grid is not
+  // published, and is rebuilt on the next request for that chart.
+  pending_dataset_grids_.clear();
 
   tf_listener_.reset();
   tf_buffer_.reset();
@@ -237,10 +293,29 @@ void GridPublisher::checkForNewGrids()
   std::vector<std::string> done_grids;
   for(auto& pg: pending_dataset_grids_)
   {
+    // Poll without waiting: this timer runs on the node's only executor
+    // thread, which also serves /tf. A job that finishes after this check
+    // is picked up on the next tick.
     if(pg.second.valid())
-      if(pg.second.wait_for(std::chrono::milliseconds(10)) == std::future_status::ready)
+      if(pg.second.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
       {
         auto grid = pg.second.get();
+        if(!grid)
+        {
+          // getGrid returns no grid when the chart cannot be opened (a cell
+          // file missing or unreadable) or when its position cannot be
+          // converted to the map frame. Both uses below dereference it, so
+          // skip the chart instead: no publisher is made, and the next
+          // get_datasets request that lists it tries again.
+          RCLCPP_ERROR_STREAM(get_logger(),
+            "No grid for chart " << pg.first
+            << " (it could not be opened or placed in the map frame); not publishing it.");
+          std::lock_guard<std::mutex> lock(requested_grids_mutex);
+          requested_grids_to_publish_.erase(pg.first);
+          grid_request_start_times_.erase(pg.first);
+          done_grids.push_back(pg.first);
+          continue;
+        }
         {
           std::lock_guard<std::mutex> lock(requested_grids_mutex);
           if(requested_grids_to_publish_.count(pg.first) > 0)
