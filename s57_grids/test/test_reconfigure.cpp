@@ -142,6 +142,20 @@ TEST_F(ReconfigureTest, ConfigureAfterCleanupClearsTheAbortFlag)
   EXPECT_FALSE(node->abort_flag_);
 }
 
+// The TF listener has no spin thread of its own: the node's executor serves
+// /tf. On Jazzy a listener with its own thread can hang in its destructor
+// (rclcpp issue 3172), which only a timing-dependent hang would otherwise
+// show. tf2_ros marks the buffer as using a dedicated thread only when the
+// listener starts one, on both distros.
+TEST_F(ReconfigureTest, TransformListenerHasNoThreadOfItsOwn)
+{
+  auto node = makeNode();
+  ASSERT_EQ("inactive", node->configure().label());
+  ASSERT_TRUE(node->tf_buffer_);
+  EXPECT_FALSE(node->tf_buffer_->isUsingDedicatedThread());
+  ASSERT_EQ("unconfigured", node->cleanup().label());
+}
+
 // A job the cleanup aborted is not kept for the next configuration. (No job
 // can be in flight here without a chart cell, so an aborted one is made by
 // hand: a finished future holding no grid, as getGrid returns.)
