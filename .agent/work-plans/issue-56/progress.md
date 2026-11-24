@@ -96,3 +96,11 @@ issue: 56
 **Decision**: proceed
 
 Read: the Issue Review, status complete. Scope stands: `std::floor` in `S57Layer::worldToTile` (`s57_layer/src/s57_layer.cpp:159-160`) and a test that fails without it: a rolling costmap whose lower-left corner is below the origin on x only, on y only and on both, with a control at an exact tile multiple, over an all-land grid, asserting every cell is lethal. For the planner: (1) the sibling conversion at `s57_layer.cpp:469` and `:474` (the master-to-layer origin offset truncated to int, where floating-point error at a resolution such as 0.1 m can shift a tile's content by one cell; `bathymetry_layer` uses `lround` there): include it as a **separate** commit only if a test can be made to fail without it; otherwise leave it and list it for rolker/s57_tools#54. (2) `s57_layer` does not build on Rolling until rolker/s57_tools#52 part 2 merges, so local verification is on a scratch copy that carries the port's changes plus this fix and test; the Jazzy CI job on the pull request into `rolling` is the first real run. (3) Both this branch and the port's add a test to `s57_layer/CMakeLists.txt`; whichever merges second rebases. (4) The issue text says `map`; the costmaps' global frame on BEN is `map_tide`, and whether that frame is anchored at the first fix was not verified; the fix does not depend on it, and the pull request says what is and is not known. The owner asked for this fix now, in parallel with the port, with its own pull request into `rolling` and a backport to `jazzy` as soon as it merges.
+
+## Plan Authored
+**Status**: complete
+**When**: 2026-11-24 11:12 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Plan**: `.agent/work-plans/issue-56/plan.md` at `dde57e4`
+
+Two commits: `std::floor` in `worldToTile` with a rolling-window test (six cases, every cell asserted; an exact tile multiple is not a control because `updateCosts` looks up cell centres), then `lround` for the master-to-layer offset at 469/474 with a 0.1 m test that shows land shown free without it. Each case was shown failing without its fix and passing with it on a Rolling scratch copy carrying the port's changes; Jazzy is CI only. Two further defects found (exposed cells not repainted after a move; empty chart list sets no needs_update) are left to the host.
