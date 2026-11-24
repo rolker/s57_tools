@@ -619,3 +619,31 @@ Scope: `git diff 3231db9..251aa67 -- . ':!.agent'` and the scheduling as it now 
 
 ### Checks
 Project pass: no `conventions=` hook rule, so every commit ran the repository's pre-commit hooks; none skipped, no `--no-verify`. The `ament` lint tests (cppcheck, lint_cmake, xmllint) ran in the suite above. Scratch work in the session scratchpad (`fix57r2/`), removed at the end; `build/`, `install/`, `log/` removed from the package worktree; no ROS daemon started, no GUI; `DISPLAY` unset; domains 193-198. Nothing pushed, nothing posted.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-11-24 17:33 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: changes-requested
+
+**Branch**: feature/issue-57 at `46ea9fb`
+**Base**: origin/rolling
+**Depth**: Standard (reason: round 3 convergence check per handoff; scope `251aa67..46ea9fb`, non-`.agent`)
+**Must-fix**: 1 | **Suggestions**: 1
+**Round**: 3 | **Ship**: recommended — 1 mechanical must-fix (a statement), not rising; fix and ship
+
+Cross-model: skipped (round-3 convergence check, per handoff). No adversarial subagent (per handoff); reviewed by the lead.
+
+### Checked
+- `aea5c18`: `age` is read only in `chooseStrip`, behind `pending_[s].valid`; `Span::add` sets `age = 0` when the span was invalid, and `Span()` resets it; `clip` can only clear `valid`. So an invalid span's age is never read and is reset when it becomes valid: nothing observable changes.
+- `c36cbac`: Nav2 `LayeredCostmap::updateMap` calls `updateBounds` on every plugin without checking `isEnabled()` (`layered_costmap.cpp:173`), so "runs every cycle on a layer configured disabled" holds.
+- Delay statements (same update on one-axis travel, the next after a single reversal, up to 2 on repeated reversals, 3 at most) match the code and the round-2 harness figures (oldest wrong age 2, streak 3).
+- Package suite (package worktree, `colcon build --parallel-workers 2`, `MAKEFLAGS=-j8`; `colcon test --parallel-workers 1 --ctest-args -j8`, domain 187, `DISPLAY` unset): 80 tests, 0 errors, 0 failures, 8 skipped. `test_rolling_window` 30 runs: 30 passed (28 tests each; `ldd`: the worktree's own freshly built `libs57_layer.so`).
+- Breaks on scratch copies (built in scratch workspaces, `ldd` shows the scratch library): jump threshold doubled fails `JumpOfMoreThanATile...` (" 6" / " 6 7" expected, "" given); halved fails it too (4 m jumps give " 6"/" 6 7") and changes the 2-cell station-keeping cycles; reversal allowance 0 fails `ReversalPastTheStartEveryCellWithinOneCycle`.
+- Companion test on Jazzy CI: its sequence is a 32-bit unsigned LCG with `>> 16` and `%`, exact and defined by the standard (no `<random>` distribution); every step asserts Jazzy's and Rolling's size formulas give the same origin and that the window has it; offsets are whole metres from x.5, where both formulas truncate alike. Safe.
+- Backport: 14 code commits since `origin/rolling` cherry-pick onto `origin/jazzy` in order without conflict (scratch worktree, removed). The six commits touch no `.agent/` file, one change each, each message ends "Backport to jazzy." before the trailers.
+- Station-keeping figures (harness timing mode, global 5000 x 5000 at 1 m, uniform noise per update, `mt19937` seeds 7, 1, 2): ±2 m, no inflation (each count is a layer report): 7 of 150, 16 of 600 (seed 7); Rolling's inflation (each report repaints 2 updates): 14 of 150, 32 / 40 / 46 of 600. ±1.5 m, no inflation: 9 and 6 of 600 (seeds 1, 2), 0 of 150 (seed 7, inflation); ±1.8 m: 14 of 600; ±1.2 m and ±1 m: 0 of 600. Round 2's "14 of 150" counts repainted updates with inflation; its "11 to 17 of 600" counts layer reports without inflation.
+
+### Findings
+- [ ] (must-fix) "Station keeping whose position jitters by less than 2 cells per update report[s] no whole window" is false: ±1.5 m uniform noise on the 1 m global costmap reported the whole window in 9 and 6 of 600 updates (±1.8 m: 14). The boundary is the window staying on 2 origins per axis, which holds when the position stays within ±1 cell of a point; say that, and that wider jitter (±1.5 cells measured) can report it. Same claim in the pull-request Design statement ("jitter under 2 cells per cycle") and the `chooseStrip` comment's "jitter of under 2 cells a cycle reported none in any run". — `s57_layer/README.md:38`, `s57_layer/src/s57_layer.cpp:504-508`, `progress.md` Implementation statements
+- [ ] (suggestion) Pull-request Cost and owner statements mix conditions: "11 to 17 of 600 cycles report" is layer reports without inflation, while the timings beside it are with Rolling's inflation, where each report repaints 2 updates (32-46 of 600, 14 of 150: about 5-9% of updates). State it as "about 2-3% of updates report the whole window, and with an inflation layer about 5-9% of updates repaint it". — `progress.md` Implementation "Cost" and "For the owner"
