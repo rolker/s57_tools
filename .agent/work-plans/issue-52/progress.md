@@ -958,3 +958,13 @@ The pull request body is stale against the records (placeholder "Results of both
 
 ### False positives
 - none (no external review comments to dismiss)
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 13:13 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: owner
+**After**: merge
+**Decision**: merge
+
+The owner, 2026-11-24, asked whether to merge pull request 58 (part 2) with the decision summary in the dialog: "Merge, then prepare the backport (Recommended)". The eighteen code commits are then backported to `jazzy` by hand and that pull request is brought to him with its CI result before it is merged. The owner also reported the same day that a whole-project Jazzy build on his Jazzy machine, synced before this merge, "built fine".
