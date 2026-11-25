@@ -1,6 +1,7 @@
-// Scratch comparison for rolker/s57_tools#59 (plan phase; not part of the package).
-// Two copies of the layer compiled in: today (s57_today, the checkout's source) and
-// aprime (s57_aprime, today's plus the (a') request). generateTile is called on each
+// Scratch comparison for rolker/s57_tools#59 (not part of the package).
+// Two copies of the layer compiled in: today (s57_today, origin/rolling's source) and
+// aprime (s57_aprime, the committed fix; in the plan phase, the base plus aprime.patch);
+// see measure.sh and instrument.py. generateTile is called on each
 // for the same tile and charts; every tile cell is compared between the two and with an
 // expectation computed from the chart specifications alone.
 #include <algorithm>
@@ -29,7 +30,10 @@
 #include "today/s57_layer.h"
 #include "aprime/s57_layer.h"
 
-long harness_aprime_failures = 0;
+long harness_aprime_failures = 0, harness_aprime_requests = 0, harness_aprime_chart_oor = 0,
+  harness_aprime_oor_requests = 0;
+long harness_today_failures = 0, harness_today_requests = 0, harness_today_chart_oor = 0,
+  harness_today_oor_requests = 0;
 
 namespace
 {
@@ -186,8 +190,10 @@ bool rangeInexact(long double a, long double b, long double w, long double k, in
 
 // Expected cost of tile (tx, ty) cell (i, j): charts finest first (by grid resolution,
 // then label), within a chart the east-most then north-most overlapping cell with data.
-unsigned char expected(const Case & cs, const std::vector<const Chart *> & order, int tx, int ty, int i, int j, bool & amb)
+unsigned char expected(const Case & cs, const std::vector<const Chart *> & order, int tx, int ty, int i, int j, bool & amb,
+  const Chart ** src = nullptr)
 {
+  if (src) {*src = nullptr;}
   for (const Chart * c : order) {
     int mlo, mhi, nlo, nhi;
     if (cs.exact) {
@@ -206,7 +212,7 @@ unsigned char expected(const Case & cs, const std::vector<const Chart *> & order
     for (int m = mhi; m >= mlo; m--) {
       for (int n = nhi; n >= nlo; n--) {
         int v = chartedAt(*c, m, n);
-        if (v) {return costOf(v);}
+        if (v) {if (src) {*src = c;} return costOf(v);}
       }
     }
   }
@@ -221,6 +227,15 @@ struct Stats
   long newly = 0, l2f = 0, f2l = 0, other_change = 0, unmarked = 0;
   long amb_cells = 0, aprime_fail = 0, oor = 0, chart_requests = 0, today_fail_requests = 0;
   long cells_iter_today = 0, cells_iter_aprime = 0;
+  // the layer copies' own counters: requests, rejected, chart indices outside the grid, requests yielding one
+  long t_req = 0, t_fail = 0, t_oor_idx = 0, t_oor_req = 0, a_req = 0, a_fail = 0, a_oor_idx = 0, a_oor_req = 0;
+  // changed cells where today's request failed, not ambiguous: lethal->free and free->lethal, by whether the
+  // chart the expectation names precedes (finer; same scale and first by label) the chart today's value came
+  // from (the expectation over the charts whose request succeeded today); bad = neither; exp_lethal: the
+  // expectation says lethal; t_mismatch: today's cell differs from that restricted expectation
+  long l2f_n = 0, l2f_finer = 0, l2f_label = 0, l2f_bad = 0, l2f_exp_lethal = 0;
+  long f2l_n = 0, f2l_finer = 0, f2l_label = 0, f2l_bad = 0, f2l_exp_free = 0, t_mismatch = 0, t_checked = 0;
+  long t_amb = 0;  // the expectation over today's charts reaches a chart edge within 1e-6 m: not classified
   long ok_clamped = 0, ok_submap_diff = 0, zero_width = 0, today_idx_oor = 0, today_idx_oor_tiles = 0;
   void add(const Stats & o)
   {
@@ -232,6 +247,11 @@ struct Stats
     chart_requests += o.chart_requests; today_fail_requests += o.today_fail_requests;
     ok_clamped += o.ok_clamped; today_idx_oor += o.today_idx_oor; today_idx_oor_tiles += o.today_idx_oor_tiles; zero_width += o.zero_width; ok_submap_diff += o.ok_submap_diff;
     cells_iter_today += o.cells_iter_today; cells_iter_aprime += o.cells_iter_aprime;
+    t_req += o.t_req; t_fail += o.t_fail; t_oor_idx += o.t_oor_idx; t_oor_req += o.t_oor_req;
+    a_req += o.a_req; a_fail += o.a_fail; a_oor_idx += o.a_oor_idx; a_oor_req += o.a_oor_req;
+    l2f_n += o.l2f_n; l2f_finer += o.l2f_finer; l2f_label += o.l2f_label; l2f_bad += o.l2f_bad; l2f_exp_lethal += o.l2f_exp_lethal;
+    f2l_n += o.f2l_n; f2l_finer += o.f2l_finer; f2l_label += o.f2l_label; f2l_bad += o.f2l_bad; f2l_exp_free += o.f2l_exp_free;
+    t_mismatch += o.t_mismatch; t_checked += o.t_checked; t_amb += o.t_amb;
   }
 };
 
@@ -278,6 +298,7 @@ Stats runCase(Case & cs)
     grid_map::Position tc(wminx + cs.res * cs.T / 2.0, wminy + cs.res * cs.T / 2.0);
     grid_map::Length tl(cs.res * cs.T, cs.res * cs.T);
     bool all_ok = true; int passed = 0;
+    std::set<const Chart *> today_ok;
     for (auto & c : cs.charts) {
       const auto & p = c.grid->getPosition(); const auto & l = c.grid->getLength();
       double bx0 = p.x() - l.x() / 2.0, by0 = p.y() - l.y() / 2.0, bx1 = p.x() + l.x() / 2.0, by1 = p.y() + l.y() / 2.0;
@@ -289,6 +310,7 @@ Stats runCase(Case & cs)
       if (!ok) {
         all_ok = false; st.today_fail_requests++;
       } else {
+        today_ok.insert(&c);
         st.cells_iter_today += static_cast<long>(sg.getSize().prod());
         long oor = 0;
         for (grid_map::SubmapIterator it(sg); !it.isPastEnd(); ++it) {
@@ -320,10 +342,20 @@ Stats runCase(Case & cs)
     if (passed == 0) {continue;}
     st.tiles++;
     g_calls = 0; g_oor = 0;
-    long before = harness_aprime_failures;
+    const long b_tr = harness_today_requests, b_tf = harness_today_failures, b_to = harness_today_chart_oor,
+      b_toq = harness_today_oor_requests;
+    const long b_ar = harness_aprime_requests, b_af = harness_aprime_failures, b_ao = harness_aprime_chart_oor,
+      b_aoq = harness_aprime_oor_requests;
     auto t0 = g_today->gen(tx, ty);
     auto t1 = g_aprime->gen(tx, ty);
-    st.aprime_fail += harness_aprime_failures - before;
+    st.aprime_fail += harness_aprime_failures - b_af;
+    st.t_req += harness_today_requests - b_tr; st.t_fail += harness_today_failures - b_tf;
+    st.t_oor_idx += harness_today_chart_oor - b_to; st.t_oor_req += harness_today_oor_requests - b_toq;
+    st.a_req += harness_aprime_requests - b_ar; st.a_fail += harness_aprime_failures - b_af;
+    st.a_oor_idx += harness_aprime_chart_oor - b_ao; st.a_oor_req += harness_aprime_oor_requests - b_aoq;
+    std::vector<const Chart *> order_today;
+    for (const Chart * c : order) {if (today_ok.count(c)) {order_today.push_back(c);}}
+    auto rank = [&](const Chart * c) {return static_cast<long>(std::find(order.begin(), order.end(), c) - order.begin());};
     st.oor += g_oor;
     if (!t0 || !t1) {std::fprintf(stderr, "no costmap\n"); std::exit(3);}
     long diff = 0, wt = 0, wa = 0, cells = 0;
@@ -332,7 +364,28 @@ Stats runCase(Case & cs)
         unsigned char a = t0->getCharMap()[t0->getIndex(i, j)];
         unsigned char b = t1->getCharMap()[t1->getIndex(i, j)];
         bool amb = false;
-        unsigned char e = expected(cs, order, tx, ty, i, j, amb);
+        const Chart * esrc = nullptr;
+        unsigned char e = expected(cs, order, tx, ty, i, j, amb, &esrc);
+        if (!all_ok && !amb) {
+          bool amb2 = false; const Chart * tsrc = nullptr;
+          unsigned char et = expected(cs, order_today, tx, ty, i, j, amb2, &tsrc);
+          if (amb2) {st.t_amb++;} else {
+          st.t_checked++;
+          if (a != et) {st.t_mismatch++;}
+          const bool l2f = a == LETHAL_OBSTACLE && b == FREE_SPACE, f2l = a == FREE_SPACE && b == LETHAL_OBSTACLE;
+          if (l2f || f2l) {
+            const bool precedes = esrc && tsrc && rank(esrc) < rank(tsrc);
+            const bool finer = precedes && esrc->grid->getResolution() < tsrc->grid->getResolution();
+            if (l2f) {
+              st.l2f_n++; if (e == LETHAL_OBSTACLE) {st.l2f_exp_lethal++;}
+              if (a != et || b != e || !precedes) {st.l2f_bad++;} else if (finer) {st.l2f_finer++;} else {st.l2f_label++;}
+            } else {
+              st.f2l_n++; if (e == FREE_SPACE) {st.f2l_exp_free++;}
+              if (a != et || b != e || !precedes) {st.f2l_bad++;} else if (finer) {st.f2l_finer++;} else {st.f2l_label++;}
+            }
+          }
+          }
+        }
         if (a != b) {
           diff++;
           if (!all_ok) {
@@ -615,8 +668,8 @@ int main(int argc, char ** argv)
       for (double inset : {0.25, 10.0, 36.25, 49.0}) {
         for (int axis = 0; axis < 2; axis++) {
           const int T = 100; const double tl = res * T; const double cr = 3.75; const int nx = 1627, ny = 2213;
-          double lo = 1e9, hi = -1e9; long fails = 0, n = 0;
-          for (double X = -3000.0; X <= 3000.0; X += 0.37) {
+          double lo = 1e9, hi = -1e9; long fails = 0, n = 0, afails = 0;
+          for (double X = -2000.0; X <= 2000.0; X += 0.173) {
             double cw = X + inset * res;  // chart's near edge
             Chart c = freeChart("a", axis == 0 ? cw : 5.0, axis == 0 ? 5.0 : cw, cr, nx, ny, 0);
             // geometry only: no data needed
@@ -628,13 +681,66 @@ int main(int argc, char ** argv)
             grid_map::Position ac; grid_map::Length al; bool ok2 = false;
             aprimeRequest(g, wx, wy, wx + tl, wy + tl, tc, tlen, ac, al);
             grid_map::SubmapGeometry sg2(g, ac, al, ok2);
-            if (!ok2) {std::printf("APRIME FAIL X=%g\n", X);}
+            if (!ok2) {afails++; std::printf("APRIME FAIL X=%g\n", X);}
             if (!ok) {fails++; lo = std::min(lo, X); hi = std::max(hi, X);}
           }
-          std::printf("res %.1f axis %c inset %5.2f cells: today fails %ld of %ld tile corners, from %.1f to %.1f m\n",
-            res, axis ? 'y' : 'x', inset, fails, n, lo, hi);
+          std::printf("res %.1f axis %c inset %5.2f cells: today fails %ld of %ld tile corners, from %.1f to %.1f m; after fails %ld\n",
+            res, axis ? 'y' : 'x', inset, fails, n, lo, hi, afails);
         }
       }
+    }
+    return 0;
+  }
+  if (mode == "oorreal") {
+    // A 1:12000-size chart (1630 x 2213 cells of 3.75 m, no data), its west edge, south
+    // edge or both inside a random 100-cell tile whose corner is within +-3 km of the
+    // map's origin, the chart covering the rest of the tile on the other axis. Both layer
+    // copies' generateTile on that tile; their own counters: requests rejected, and
+    // succeeding requests yielding chart indices outside the grid (with the tile's
+    // west/south edge range of those).
+    g_check = false;
+    const double cr = 3.75; const int nx = 1630, ny = 2213;
+    auto grid = std::make_shared<grid_map::GridMap>(
+      std::vector<std::string>{"elevation", "overhead", "restricted", "unsurveyed", "caution"});
+    grid->setGeometry(grid_map::Length(nx * cr, ny * cr), cr, grid_map::Position(0.0, 0.0));
+    for (const auto & name : grid->getLayers()) {(*grid)[name].setConstant(std::numeric_limits<float>::quiet_NaN());}
+    for (double res : {1.0, 0.5}) {
+      const int T = 100; const double tl = res * T;
+      const long b_tr = harness_today_requests, b_tf = harness_today_failures, b_toq = harness_today_oor_requests,
+        b_to = harness_today_chart_oor;
+      const long b_ar = harness_aprime_requests, b_af = harness_aprime_failures, b_aoq = harness_aprime_oor_requests,
+        b_ao = harness_aprime_chart_oor;
+      double oxlo = 1e9, oxhi = -1e9, oylo = 1e9, oyhi = -1e9; long ox_n = 0, oy_n = 0;
+      for (long k = 0; k < nrandom; k++) {
+        const int tx = static_cast<int>(I(static_cast<long long>(std::floor(-3000.0 / tl)), static_cast<long long>(std::floor(3000.0 / tl))));
+        const int ty = static_cast<int>(I(static_cast<long long>(std::floor(-3000.0 / tl)), static_cast<long long>(std::floor(3000.0 / tl))));
+        const double x0 = tx * res * T, y0 = ty * res * T;
+        const int which = static_cast<int>(I(0, 2));  // 0 west edge, 1 south edge, 2 both
+        const double west = which != 1 ? x0 + U(0.0, tl) : x0 - U(0.3, 0.7) * nx * cr;
+        const double south = which != 0 ? y0 + U(0.0, tl) : y0 - U(0.3, 0.7) * ny * cr;
+        grid->setPosition(grid_map::Position(west + nx * cr / 2.0, south + ny * cr / 2.0));
+        g_today->setup(res, T, 0.0, 0.0); g_aprime->setup(res, T, 0.0, 0.0);
+        g_today->add("a", grid); g_aprime->add("a", grid);
+        const long before = harness_today_oor_requests;
+        g_today->gen(tx, ty);
+        g_aprime->gen(tx, ty);
+        if (harness_today_oor_requests != before) {
+          // which axis ran past the grid: today's request, recomputed
+          bool ok = false;
+          grid_map::SubmapGeometry sg(*grid, grid_map::Position(x0 + tl / 2.0, y0 + tl / 2.0), grid_map::Length(tl, tl), ok);
+          const auto & st = sg.getStartIndex(); const auto & sz = sg.getSize();
+          if (st(0) + sz(0) > grid->getSize()(0)) {ox_n++; oxlo = std::min(oxlo, x0); oxhi = std::max(oxhi, x0);}
+          if (st(1) + sz(1) > grid->getSize()(1)) {oy_n++; oylo = std::min(oylo, y0); oyhi = std::max(oyhi, y0);}
+        }
+      }
+      const long tr = harness_today_requests - b_tr, tf = harness_today_failures - b_tf;
+      std::printf("res %.1f (%g m tiles), %ld tiles: today %ld requests, %ld rejected, %ld succeeded, of which %ld yielded %ld "
+        "chart indices outside the grid (%.2f%%; x past the west end %ld, tile west edge %.1f to %.1f m; y past the south "
+        "end %ld, tile south edge %.1f to %.1f m); after %ld requests, %ld rejected, %ld yielded %ld indices outside\n",
+        res, tl, nrandom, tr, tf, tr - tf, harness_today_oor_requests - b_toq, harness_today_chart_oor - b_to,
+        100.0 * (harness_today_oor_requests - b_toq) / std::max(1L, tr - tf), ox_n, oxlo, oxhi, oy_n, oylo, oyhi,
+        harness_aprime_requests - b_ar, harness_aprime_failures - b_af, harness_aprime_oor_requests - b_aoq,
+        harness_aprime_chart_oor - b_ao);
     }
     return 0;
   }
@@ -727,5 +833,13 @@ int main(int argc, char ** argv)
   std::printf("(a') requests of zero width on an axis: %ld\n", s.zero_width);
   std::printf("today-failed requests %ld of %ld; chart cells iterated today %ld, aprime %ld\n",
     s.today_fail_requests, s.chart_requests, s.cells_iter_today, s.cells_iter_aprime);
+  std::printf("layer copies, own counters: today requests %ld rejected %ld (succeeded %ld), of the succeeding %ld yielded "
+    "%ld chart indices outside the grid; after requests %ld rejected %ld, %ld yielded %ld indices outside the grid\n",
+    s.t_req, s.t_fail, s.t_req - s.t_fail, s.t_oor_req, s.t_oor_idx, s.a_req, s.a_fail, s.a_oor_req, s.a_oor_idx);
+  std::printf("changed cells where today fails (not ambiguous): lethal->free %ld (finer chart %ld, same scale first by label %ld, "
+    "other %ld; expectation lethal %ld); free->lethal %ld (finer %ld, by label %ld, other %ld; expectation free %ld); "
+    "today's cell vs expectation over today's succeeding charts: %ld of %ld differ (%ld more ambiguous there, not classified)\n",
+    s.l2f_n, s.l2f_finer, s.l2f_label, s.l2f_bad, s.l2f_exp_lethal, s.f2l_n, s.f2l_finer, s.f2l_label, s.f2l_bad, s.f2l_exp_free,
+    s.t_mismatch, s.t_checked, s.t_amb);
   return 0;
 }
