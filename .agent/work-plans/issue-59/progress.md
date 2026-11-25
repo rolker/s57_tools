@@ -207,3 +207,13 @@ The plan is ready. Its central claims check out independently: (a′) is never r
 - [ ] In the pull request, state today's out-of-range read as finding 2 gives it, and that the fix removes it.
 - [ ] In the pull request, name the pre-filter's ≤ r/4 sliver as left in place (finding 3).
 - [ ] Optional: the misleading second failure message and the stray blank lines (finding 4).
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 22:16 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (the plan review's verdict is ready; its independent runs confirmed the condition the host set; its findings are wording and one comment)
+**After**: plan
+**Decision**: proceed
+
+Read: the Plan Review at `308d1b3`, verdict ready, three minor findings and a nit. The fix replaces today's request outright: the review's own comparison (24,000 cases, 716 million cells where today's request succeeds for every chart, a different generator) found 0 differing cells, and where today's request fails 0 cells wrong after the fix; no cell lethal today becomes free where the expectation says lethal. Findings applied: (1) the comment on `chartCellsBeyondTile` in `test_tile_edges.cpp` is reworded with the other two (the layer sends the tile unchanged only where nothing is clamped, which holds for the four one-ulp cases). (2) **The pull request states today's out-of-range read of a chart's buffer exactly**: where today's request succeeds after grid_map pulls in the south-west corner and part of its epsilon is lost, the submap runs one index past the grid's west or south end; the layer then reads a neighbouring chart cell (west) or past the end of each layer's buffer (south, up to several kilobytes), discards the value and paints nothing; about 1.3% of succeeding requests on a realistic 1:12000 chart, all just outside the map-axis band; in a Release grid_map no check fires, and a crash cannot be excluded; this fix removes it. It is recorded in the pull request and in this issue's records; whether it gets a record of its own is put to the owner. (3) The pull request does not claim every chart edge is now complete: the tile pre-filter, which is left as it is, can still skip a tile that overlaps a chart's grid only within a quarter chart cell outside the chart's stated bounds (at most 0.94 m for a 1:12000 chart); no data inside stated coverage is lost. (4) The misleading "tile accesses are not reaching them" message on today's source, where nothing is painted, is reworded or ordered after the wrong-cell count; stray blank lines removed.
