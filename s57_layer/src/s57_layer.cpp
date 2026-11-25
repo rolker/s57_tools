@@ -667,8 +667,11 @@ void S57Layer::generateTile(TileID id)
       if(!overlaps)
         continue;
 
-      // By the argument above the request cannot fail; a failure is still
-      // handled as before (the chart paints nothing in this tile).
+      // By the argument above the request cannot fail for finite geometry;
+      // a failure is still handled as before (the chart paints nothing in
+      // this tile). With a NaN in the grid's position or length every
+      // comparison above is false, so the request is the tile's own, which
+      // grid_map rejects, as before this change.
       bool submap_ok = false;
       grid_map::SubmapGeometry overlap(*grid.second, request_center, request_length, submap_ok);
       if(submap_ok)
