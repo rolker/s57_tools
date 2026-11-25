@@ -468,3 +468,13 @@ None open. The only carried-forward local finding (round 1 suggestion on the pul
 - `test_tile_edges`: 23 of 23 OK (`[  PASSED  ] 23 tests.`), `7/10 Test #7: test_tile_edges ... Passed 0.37 sec`; none skipped, disabled or failed. Package: `100% tests passed, 0 tests failed out of 10`; workspace: `Summary: 288 tests, 0 errors, 0 failures, 33 skipped`.
 - The tests assert at least as many `setCost` calls on tiles reached the bounds-checking accessors as cells were painted (test_tile_edges.cpp ~line 368), so 23 passes show the interposition took effect on Jazzy.
 - Pull-request body checked against the run and these records (15 of 40 / 0 of 72 crash counts are the sums of the 20-round-per-run tables, 7+8 of 40 and 0 of 36+36; 8 lines of arithmetic; 19 of 23 failing before; 105 tests on Rolling). Only the sentence "This pull request's Jazzy CI job is the first Jazzy compile and run." is out of date; the host replaces it (host action, not a finding).
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 20:53 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: owner
+**After**: merge
+**Decision**: merge
+
+The owner, 2026-11-24, asked whether to merge pull request 66 and backport it, with the decision summary in the dialog: "Merge, backport, merge the backport when green (Recommended)". So the three code commits (`4250a7f`, `c3cd7a5`, `c2acf6c`) are backported to `jazzy` by hand and that pull request is merged when its CI is green, without a further question; the host reports the result.
