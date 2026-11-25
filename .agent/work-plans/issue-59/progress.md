@@ -433,3 +433,31 @@ Pre-commit hooks ran on both commits. Scratch work in a folder of my own in the 
 **Decision**: publish
 
 Read: the Local Review (Pre-Push) round 3 at `8c650af`, approved, nothing open. Six code commits: `edd754b`, `b39ec5b`, `21d9838`, `4dbfa81`, `f2a0230`, `8c650af`. The pull request's Jazzy CI job is the first Jazzy compile and run.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-11-24 23:23 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+**Reviews-read**: none
+
+**PR**: #68 at `ce41b10`
+**Sources**: 2 (Local Review (Pre-Push) rounds 1-3, last at `8c650af`, which covers the head through bookkeeping-only commits; CI rollup). No pull-request review, inline comment or conversation comment exists (no human, Copilot or bot).
+**Cross-source confirmations**: 0
+**CI**: all-pass
+
+### Findings
+- [x] No open findings. The local timeline holds nothing open: round 1's must-fix and five suggestions were taken, round 2's second suggestion was ruled not changed by the host, round 3 approved with none. Known and not findings: the pre-filter's quarter-cell limit, the within-rounding behaviour, the straddle rule, the same-scale tie.
+
+### False positives
+- (none: no bot or human comment to dismiss)
+
+### CI evidence (run 45545835177, both jobs SUCCESS)
+- Jazzy job 138975109814 built the merge commit `28d9bbd` ("Merge ce41b10a... into e95d7bd"), where `e95d7bd` is the current tip of `rolling`, so it builds the head's tree. `s57_layer` was built there ("Finished <<< s57_layer [49.5s]") from `src/s57_tools/s57_layer`.
+- `7: [==========] Running 51 tests from 1 test suite.`, `7: [  PASSED  ] 51 tests.`, `7/10 Test #7: test_tile_edges ... Passed 0.52 sec`, `100% tests passed, 0 tests failed out of 10`, `Summary: 316 tests, 0 errors, 0 failures, 33 skipped`. 51 cases are listed OK; no FAILED, DISABLED or SKIPPED line in the test_tile_edges output.
+- Cases named: one-cell OneCellLongOnXLowCentreAbove, OneCellLongOnYLowCentreAbove, OneCellLongOnXHighCentreBelow, OneCellLongOnYHighCentreBelow; map-axis ChartEdgeInTileAtMapXZero1m, ChartEdgeInTileAtMapXZeroHalfMetre, ChartEdgeInTileAtMapYZero1m, ChartEdgeInTileAtMapOrigin100CellTiles1m (and ChartEdgeJustWestOfMapXZero1m); FineWaterOverCoarseLand1m; grid versus bounds GridLargerThanBoundsWest1m, GridLargerThanBoundsNorth1m, GridSmallerThanBounds1m, GridLargerThanBoundsPreFilterSkips1m. All OK.
+- Compiler warnings: none from `s57_layer.cpp` or `test_tile_edges.cpp` (GCC 13.3.0 on Ubuntu 24.04). The only build warnings are `-Wlogical-not-parentheses` in `unh_marine_autonomy/.../gz4d_geo.h`, not this change.
+- Installed: `ros-jazzy-grid-map-core 2.2.2-2noble.20261025.230136`; `ros-jazzy-nav2-costmap-2d 1.3.14-1noble.20261105.140901`.
+- The Rolling job (`build-and-test (rolling)`, 138975109522) does not build `s57_layer` (no mention of it in its log).
+
+### Pull request body
+Replace "This pull request's Jazzy CI job is the first Jazzy compile and run." with the result (see the final message). No unsupported count found: 23 before and 51 after match `TEST` counts in `rolling` and the branch; the 17 failures were of the first batch (17 fail, 26 pass of 43) per progress.md; the six code commits match the commit list.
