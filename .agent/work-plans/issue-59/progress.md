@@ -268,3 +268,44 @@ Read: the Plan Review at `308d1b3`, verdict ready, three minor findings and a ni
 
 ### Housekeeping
 Scratch work in a folder of my own in the session scratchpad, removed; `core_ws/build`, `install`, `log` removed; no process left running; nothing pushed, nothing posted.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-11-24 22:48 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: changes-requested
+
+**Branch**: feature/issue-59 at `d565fd4`
+**Base**: origin/rolling
+**Depth**: Deep (reason: hazard-marking code deployed on a vehicle; changes which chart data reaches the costmap and can lower costs; host asked for full depth)
+**Must-fix**: 1 | **Suggestions**: 5
+**Round**: 1 | **Ship**: continue — one must-fix (std::clamp precondition); mechanical, but round 1 needs a re-review
+
+Reviewed code commit `edd754b` (diff `origin/rolling...HEAD -- . ':!.agent'`). Reviewers: Claude adversarial subagent (fresh context), Gemini and Codex via `cross_model_review.sh` (both completed). All three raised the std::clamp finding independently. A fourth claim (missing `<algorithm>`) is a false positive: `s57_layer.h:4` includes it.
+
+### Findings
+- [ ] (must-fix) `std::clamp(v, lo, hi)` is called with `lo > hi` for a chart grid one cell long on an axis: `grid_lo + r/2` rounds one ulp above `grid_hi - r/2` (my search: 71 of 1.64 M requests, every one a 1-cell axis, at ordinary coordinates such as P = 2039.7 m, r = 67.7 m; Codex: P = -7.97, r = 3.75; Gemini: P = 4.0, r = 0.2). That breaks std::clamp's precondition (undefined behaviour). libstdc++ without assertions returns `hi` for both edges, which gives a zero-length request at the cell centre, so it does no harm today: 0 rejected, 0 cells missed. Built with `-D_GLIBCXX_ASSERTIONS`, it aborts: reproduced with the case above, "stl_algo.h:3638 ... Assertion !(__hi < __lo) failed", exit 134. Mechanical fix: order the bounds first (e.g. `hi_b = std::max(lo_b, hi_b)`, or both bounds = `grid_position[a]` when the axis has one cell), or use `std::min(std::max(v, lo_b), hi_b)` explicitly. Add a 1-cell-axis test case with a non-binary centre. A zero-length grid cannot reach this code (`mapGridCallback` rejects length <= 0, `s57_layer.cpp:1027`). NaN geometry does not trigger it (every comparison is false, so the precondition holds and the request is today's). — `s57_layer/src/s57_layer.cpp:650-651`
+- [ ] (suggestion) PR text, equivalence: "0 differing cells wherever today's request succeeds" holds in the implementer's set but not in mine. Over 8 seeds of my own generator, 476 cells in 5.2 G differ where today's request succeeds for every chart. All 476 are cells where a chart cell edge lies within 1e-7 cell of a tile-cell edge: either neighbour is acceptable under #63's rounding rule, and 0 non-ambiguous cells differ. They include lethal to free. State the equivalence as "identical except where a chart edge lies within floating-point rounding of a tile-cell edge" (the adversarial reviewer saw the same ±1 touching row/column at snapped edges). — PR description / `progress.md` Implementation "Equivalence"
+- [ ] (suggestion) The tests cannot tell the grid's geometry from `chart_bounds_`: the fixture sets `chart_bounds_` equal to the grid's extent, and the `bounds` mutation (clip to `chart_bounds_`) passes all 43 tests. The comment at `:630-631` says the distinction matters. A chart whose stated bounds are not whole cells would separate them. — `s57_layer/test/test_tile_edges.cpp:145-160` (fixture `addChart`)
+- [ ] (suggestion) `TilesInsideChartGuard1m`'s comment says it pins "the request is today's, unchanged". Rebuilding centre and length on every axis (mutations `alwaysx`, `alwaysy`) passes all tests, so it pins the cells only, not the request. Reword the comment, or assert the request where the tile lies inside the cell-centre range. — `s57_layer/test/test_tile_edges.cpp:770-772`
+- [ ] (suggestion) The comment "By the argument above the request cannot fail" assumes finite geometry. With NaN geometry the request is today's and grid_map rejects it, as before. Say so in a few words. — `s57_layer/src/s57_layer.cpp:661-662`
+- [ ] (suggestion) Owner question for the PR: at a seam of one scale, the winner is the chart whose label sorts first (`std::map<std::pair<resolution, label>>`, `:566`, first writer wins). That order is pre-existing and undocumented. On real charts, `getGrid` rounds each grid to whole cells centred on its bounds, so abutting same-scale grids can overlap by up to r/2 (≤ 1.9 m for 3.75 m cells). Their edge cells hold data, so in that strip this fix can turn lethal to free (or free to lethal) where today the label-first chart was dropped. This is the rule the rest of the seam already follows. Whether lethal should win at a same-scale tie is for the owner. — PR description
+
+### Evidence (own runs; grid_map 2.5.0, Release; scratch builds only)
+- **Superset and no rejection** (own program, real grid_map, 2 M random and near-aligned grid/tile pairs: chart cells 0.05-100 m, 1 cell to 100 km, positions to ±1e6 m, tile edges on, one ulp off, 1e-12 to 1e-3 m off, cell edges and centres, plus 500 k one-cell grids). The committed request: 1 642 264 requests, **0 rejected**, 0 indices out of range. Cells overlapping the tile by more than 1e-6 m missing from the submap: 0 (largest missed overlap 1.9e-10 m). No extra cell beyond one that only touches. Skipped charts that overlapped: 0.
+- **Old vs new through `generateTile`** (both layer copies in one executable; own generator: 1-3 charts, including two adjoining same-scale charts built as getGrid builds them, over a coarse chart; scales aligned and not; positions near both map axes and at ±9e4 m; layer origins 0, ±50 m and ±1e5 m; resolutions 1, 0.5, 0.25 and 0.1 m; tiles of 4, 10, 25 and 100 cells; 15% no data; expectation in long double, a cell ambiguous when an edge lies within 1e-7 cell; 24 000 cases, 8 seeds):
+  - Today's request succeeds for every chart: 51.5 M tiles with requests, 5.22 G cells, **476 differ, all ambiguous**; 0 wrong after.
+  - Today's request fails for some chart: 1.91 M tiles, 635 M cells, 110.6 M wrong today, **0 wrong after** (13.8 M ambiguous). Today's value equals the expectation over today's succeeding charts: 0 mismatches.
+  - Lethal to free: 7 200 332. **0 that are not the expectation's value, 0 where the expectation says lethal.** Of these, 6 908 908 are a finer chart's value; 291 396 are a same-scale chart first by label (111 754 of them in the adjoining-seam scenario); 28 are cells ambiguous for today's expectation.
+  - Free to lethal: 3 899 691. Newly charted: 99.5 M. Charted to uncharted: 0.
+  - Today rejected 1 951 973 of 60.9 M requests; the fix rejected 0 of 60.87 M.
+- **Out-of-range read** (instrumented): today, 582 requests yielded chart indices past the grid: 1 023 past the **west** end (x index = size) and 440 past the **south** end (y index = size), none east or north. The search program found both too (west 209, south 217). The fix: 0. So the implementer's unverified sentence (both ends) holds. Today reads the next column's first element (x), or past the end of each layer's buffer (y), discards the value and paints nothing (`getPosition` rejects the index).
+- **Tests**: with only the source reverted (scratch build, `ldd` confirmed the scratch library), the 17 fail with exactly the stated wrong-cell counts. Each message is the cell count. For example, FineWaterOverCoarseLand1m gives "first (4, 0) is 254, expected 0". The 23 existing cases and 3 guards pass. Mutations of HEAD (`test_tile_edges`, 43 tests):
+  - far index without `- 1` (#63): x fails 31, y fails 32 (existing cases included).
+  - today's request restored: fails exactly the 17.
+  - no half-cell inset: x fails the three XZero / JustWest cases; y fails YZero.
+  - skip test strict (each comparison, on x and on y), skip removed, centre as `(lo+hi)/2`: caught by nothing. Each paints the same cells (a touching chart's request yields only a touching column, which paints nothing).
+  - rebuild always, `chart_bounds_` for the grid: caught by nothing (findings above).
+- Suite (scratch workspace at HEAD, `--parallel-workers 1`, ctest `-j1`): 125 tests, 0 failures, 9 skipped. `test_tile_edges` passed 30 of 30 runs. No new compiler warning.
+- **Jazzy, by reading**: `git diff 2.2.2 2.5.0` is empty for GridMap, GridMapMath, SubmapGeometry, SubmapIterator, GridMapIterator and TypeDefs. `s57_layer/` is identical on `origin/rolling` and `origin/jazzy`. A cherry-pick merge of `edd754b` onto `origin/jazzy` is clean. The code commit touches no `.agent/` file. `std::clamp` is C++17, set in CMakeLists.
+- **Comments**: the code comment's account of both rejection causes matches `GridMapMath.cpp` (`boundPositionToRange` `<= 0`, the final `getIndexFromPosition`). Its superset claim matches the search. The three reworded test comments are accurate.
