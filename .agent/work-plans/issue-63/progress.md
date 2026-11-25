@@ -433,3 +433,13 @@ Verified here:
 
 ### Findings
 - [ ] (suggestion) The pull-request statement "grid_map's corner arithmetic is assumed the same there" can say it is checked: Jazzy's released grid_map_core 2.2.2 has the same GridMapMath/SubmapGeometry/SubmapIterator/GridMap sources as 2.5.0, and every product in the path is exact, so FMA or compiler version cannot move the one-ulp result — `.agent/work-plans/issue-63/progress.md:407`
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 20:34 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (pre-push review round 2 approved with no must-fix)
+**After**: publish
+**Decision**: publish
+
+Read: the Local Review (Pre-Push) round 2 at `c2acf6c`, approved, one suggestion about a sentence in the pull-request statements, applied in the pull request's text (grid_map's submap arithmetic is the same source on Jazzy's released 2.2.2 as on 2.5.0 here, and every product in the one-ulp tests' path is exact). Three code commits: `4250a7f`, `c3cd7a5`, `c2acf6c`. The pull request's Jazzy CI job is the first Jazzy compile and run.
