@@ -358,3 +358,13 @@ Verified here:
   - The "tile accesses out of range" message counts out-of-range accesses on any costmap (Gemini).
   — `s57_layer/test/test_tile_edges.cpp:79-87,327,395-417`
 - [ ] (suggestion) The interposition relies on default ELF semantics: no LTO, `-Bsymbolic` or `-fno-semantic-interposition` on Nav2 or the layer. The call-count check catches a total failure. Name this in the CMakeLists comment — `s57_layer/CMakeLists.txt:149-152`
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 20:19 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (the review approved with no must-fix; its three suggestions are cheap and two of them concern what a reader of hazard-marking code is told and what the tests cover, so they are taken before publishing)
+**After**: publish
+**Decision**: address
+
+Read: the Local Review (Pre-Push) round 1 at `4250a7f`, approved, three suggestions, all three outside reviewers run. One pass, then a narrow re-review, then publish. (1) The comment above the loop, and the pull request's statement of the rule, say the rule holds in exact arithmetic and that where a chart cell edge lies within floating-point rounding of a tile-cell edge either neighbour may be taken, as before this change (the review's near-aligned comparison: the new value matches an independent calculation in 65,450 of 67,234 differing cells, the old in 1,607). Two outside reviewers rated that rounding behaviour a must-fix; it is older than this change, does not occur on non-aligned geometry (0 differing cells in 135.9 million), and the old code is worse there; it goes to the owner as a follow-up question beside the straddle rule. (2) Tests: value cases with chart cells smaller than a tile cell and larger than a tile; the out-of-range message counts tile accesses only, or says what it counts; and the mutation that survives every test (the near index clamped to `tile_size_ - 1` instead of `tile_size_`, which paints the last column or row from a chart cell wholly east or north of the tile) gets a test if such a chart cell can be put in front of the loop deterministically, and otherwise a comment saying that the line is exercised only at near-aligned geometry and by which recorded run. (3) The CMake comment names the linker assumptions the test's accessors rely on.
