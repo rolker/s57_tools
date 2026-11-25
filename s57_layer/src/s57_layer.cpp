@@ -612,8 +612,68 @@ void S57Layer::generateTile(TileID id)
     for(auto grid: grids)
     {
       auto grid_half_resolution = grid.second->getResolution()/2.0;
+
+      // Ask grid_map for this chart's cells under the tile with the tile
+      // clipped, per axis, to the grid's cell centres (rolker/s57_tools#59).
+      // grid_map rejects a request whose centre is outside the grid (a chart
+      // edge or a seam between the tile's centre and part of the tile, or a
+      // chart smaller than a tile and off its centre). When it pulls a corner
+      // on or beyond the grid's south-west edge back in, it adds an epsilon
+      // that rounding loses in a band around the map's x = 0 and y = 0 lines
+      // (wider for a longer chart), and rejects that request too. Either way
+      // the chart was dropped from the whole tile. A request whose corners
+      // lie within the grid's cell centres is never pulled in and its centre
+      // is inside the grid, so it cannot be rejected. Its submap holds
+      // every chart cell that overlaps the tile with positive area (up to
+      // floating-point rounding of an edge), plus at most a row or column
+      // that only touches the tile, which the loop below paints nothing from.
+      // The grid's own geometry is used, not chart_bounds_: setGeometry
+      // rounds the grid to whole cells. Where nothing is clipped, the request
+      // is the tile's own centre and size, as before this change.
+      const grid_map::Position grid_position = grid.second->getPosition();
+      const grid_map::Length grid_length = grid.second->getLength();
+      const double tile_lo[2] = {world_min_x, world_min_y};
+      const double tile_hi[2] = {world_max_x, world_max_y};
+      grid_map::Position request_center = tile_center;
+      grid_map::Length request_length = tile_size;
+      bool overlaps = true;
+      for(int a = 0; a < 2; a++)
+      {
+        const double grid_lo = grid_position[a] - grid_length[a]/2.0;
+        const double grid_hi = grid_position[a] + grid_length[a]/2.0;
+        // No overlap with positive extent: nothing to paint.
+        if(grid_lo >= tile_hi[a] || grid_hi <= tile_lo[a])
+        {
+          overlaps = false;
+          break;
+        }
+        double centre_lo = grid_lo + grid_half_resolution;
+        double centre_hi = grid_hi - grid_half_resolution;
+        // One cell on this axis: the two can round an ulp apart in either
+        // order, and std::clamp needs them ordered. Use the cell's centre.
+        if(centre_hi < centre_lo)
+        {
+          centre_lo = grid_position[a];
+          centre_hi = grid_position[a];
+        }
+        const double lo = std::clamp(tile_lo[a], centre_lo, centre_hi);
+        const double hi = std::clamp(tile_hi[a], centre_lo, centre_hi);
+        if(lo != tile_lo[a] || hi != tile_hi[a])
+        {
+          request_center[a] = lo + (hi - lo)/2.0;
+          request_length[a] = hi - lo;
+        }
+      }
+      if(!overlaps)
+        continue;
+
+      // By the argument above the request cannot fail for finite geometry;
+      // a failure is still handled as before (the chart paints nothing in
+      // this tile). With a NaN in the grid's position or length every
+      // comparison above is false, so the request is the tile's own, which
+      // grid_map rejects, as before this change.
       bool submap_ok = false;
-      grid_map::SubmapGeometry overlap(*grid.second, tile_center, tile_size, submap_ok);
+      grid_map::SubmapGeometry overlap(*grid.second, request_center, request_length, submap_ok);
       if(submap_ok)
       {
         for(grid_map::SubmapIterator smi(overlap); !smi.isPastEnd(); ++smi)

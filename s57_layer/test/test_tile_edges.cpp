@@ -8,6 +8,11 @@
 // checked against an expectation computed from the chart alone, and every
 // getCost and setCost call generateTile makes on a tile is bounds-checked
 // (see the definitions of Costmap2D::getCost and setCost below).
+//
+// Charts whose edges or seams lie inside a tile, wherever the tile's centre
+// falls and wherever the tile lies relative to the map's x = 0 and y = 0
+// lines (rolker/s57_tools#59): each chart contributes every cell that
+// overlaps the tile, the finest chart first.
 
 #include <gtest/gtest.h>
 
@@ -137,7 +142,11 @@ namespace
 class S57LayerForTest : public s57_layer::S57Layer
 {
 public:
-  void addChart(const std::string & label, std::shared_ptr<grid_map::GridMap> grid)
+  // The chart's stated bounds (chart_bounds_, which getDatasetsCallback
+  // takes from the dataset) are the grid's extent, shrunk on every side by
+  // bounds_inset metres (grown, if negative).
+  void addChart(
+    const std::string & label, std::shared_ptr<grid_map::GridMap> grid, double bounds_inset = 0.0)
   {
     s57_msgs::msg::DatasetInfo info;
     info.label = label;
@@ -146,10 +155,10 @@ public:
     const auto & position = grid->getPosition();
     const auto & length = grid->getLength();
     geometry_msgs::msg::Point min_point, max_point;
-    min_point.x = position.x() - length.x() / 2.0;
-    min_point.y = position.y() - length.y() / 2.0;
-    max_point.x = position.x() + length.x() / 2.0;
-    max_point.y = position.y() + length.y() / 2.0;
+    min_point.x = position.x() - length.x() / 2.0 + bounds_inset;
+    min_point.y = position.y() - length.y() / 2.0 + bounds_inset;
+    max_point.x = position.x() + length.x() / 2.0 - bounds_inset;
+    max_point.y = position.y() + length.y() / 2.0 - bounds_inset;
     chart_bounds_[label] = std::make_pair(min_point, max_point);
     grids_[label] = grid;
   }
@@ -288,16 +297,30 @@ unsigned char expectedCost(const Geometry & g, unsigned int i, unsigned int j)
   return nav2_costmap_2d::NO_INFORMATION;
 }
 
-// The chart cells generateTile's SubmapIterator yields for tile (tx, ty),
-// requested as generateTile requests it, that lie wholly east of the tile
-// (east == true) or wholly north of it, by their quarter-cell edges: a chart
-// cell whose west (south) edge is on or past the tile's east (north) edge.
+// The chart cells generateTile's SubmapIterator yields for tile (tx, ty)
+// that lie wholly east of the tile (east == true) or wholly north of it, by
+// their quarter-cell edges: a chart cell whose west (south) edge is on or
+// past the tile's east (north) edge. The request here is the tile's own
+// centre and size. generateTile sends exactly that only where the tile lies
+// within the chart grid's cell centres on both axes (otherwise it clips the
+// request), so this returns -1 if the tile does not, and the caller asserts
+// that it does.
 int chartCellsBeyondTile(
   const Geometry & g, const grid_map::GridMap & chart, int tx, int ty, bool east)
 {
   const double tile_length = g.resolution * kTileSize;
   const double world_min_x = g.origin_x + tx * g.resolution * kTileSize;
   const double world_min_y = g.origin_y + ty * g.resolution * kTileSize;
+  const double tile_lo[2] = {world_min_x, world_min_y};
+  const double tile_hi[2] = {world_min_x + tile_length, world_min_y + tile_length};
+  for (int a = 0; a < 2; a++) {
+    const double half = chart.getResolution() / 2.0;
+    const double grid_lo = chart.getPosition()[a] - chart.getLength()[a] / 2.0;
+    const double grid_hi = chart.getPosition()[a] + chart.getLength()[a] / 2.0;
+    if (tile_lo[a] < grid_lo + half || tile_hi[a] > grid_hi - half) {
+      return -1;
+    }
+  }
   const grid_map::Position tile_center(
     world_min_x + g.resolution * kTileSize / 2.0, world_min_y + g.resolution * kTileSize / 2.0);
   bool ok = false;
@@ -320,6 +343,110 @@ int chartCellsBeyondTile(
     }
   }
   return beyond;
+}
+
+// ---- rolker/s57_tools#59: several charts, any window, tile size and origin ----
+// Every chart edge is an integer number of quarter window cells from the
+// window origin, which is also the tiles' origin.
+//
+// A chart's stated bounds (chart_bounds_) are its grid's extent, inset by
+// bounds_inset_q quarter window cells on every side (outset if negative).
+// S57Dataset::getGrid makes the grid round(stated length / r) cells long,
+// centred on the stated bounds, so the two differ by the same amount on
+// both sides, less than a quarter chart cell: check(Scene) asserts that a
+// spec is one getGrid could produce (4 |bounds_inset_q| < cell_q, strictly,
+// so the rounding is not a tie).
+enum class Fill { hashed, land, water };
+struct ChartSpec
+{
+  std::string label;
+  int cell_q, west_q, south_q, cells_x, cells_y;
+  Fill fill = Fill::hashed;
+  int seed = 0;
+  int bounds_inset_q = 0;
+};
+struct Scene
+{
+  double resolution;
+  int origin_x, origin_y;  // window origin, in window cells
+  unsigned int cells;      // window, in cells, on each axis
+  unsigned int tile;       // tile size, in cells
+  std::vector<ChartSpec> charts;
+};
+
+Charted chartedAt(const ChartSpec & c, int m, int n)
+{
+  if (c.fill == Fill::land) {return Charted::land;}
+  if (c.fill == Fill::water) {return Charted::water;}
+  return chartedAt(m + 7919 * c.seed, n);
+}
+
+std::shared_ptr<grid_map::GridMap> makeChart(const Scene & s, const ChartSpec & c)
+{
+  auto grid = std::make_shared<grid_map::GridMap>(
+    std::vector<std::string>{"elevation", "overhead", "restricted", "unsurveyed", "caution"});
+  const double r = c.cell_q * s.resolution / 4.0;
+  const double west = (s.origin_x + c.west_q / 4.0) * s.resolution;
+  const double south = (s.origin_y + c.south_q / 4.0) * s.resolution;
+  grid->setGeometry(grid_map::Length(c.cells_x * r, c.cells_y * r), r,
+    grid_map::Position(west + c.cells_x * r / 2.0, south + c.cells_y * r / 2.0));
+  for (const auto & name : grid->getLayers()) {
+    (*grid)[name].setConstant(std::numeric_limits<float>::quiet_NaN());
+  }
+  for (grid_map::GridMapIterator it(*grid); !it.isPastEnd(); ++it) {
+    grid_map::Position position;
+    grid->getPosition(*it, position);
+    const int m = static_cast<int>(std::floor((position.x() - west) / r));
+    const int n = static_cast<int>(std::floor((position.y() - south) / r));
+    switch (chartedAt(c, m, n)) {
+      case Charted::land: grid->at("elevation", *it) = 1.0f; break;
+      case Charted::water: grid->at("elevation", *it) = -10.0f; break;
+      default: break;
+    }
+  }
+  return grid;
+}
+
+// Window cell (i, j): the charts finest first (then by label, as the layer's
+// map orders them); within a chart, the east-most then north-most cell that
+// overlaps the window cell with positive area and has data. A chart counts
+// only in the tiles generateTile's pre-filter passes: those its stated
+// bounds overlap or touch (the pre-filter compares with > and <). That
+// pins current behaviour where the grid reaches past the stated bounds and
+// the pre-filter skips a tile the grid overlaps (GridLargerThanBounds
+// PreFilterSkips1m); elsewhere it changes nothing, as a chart whose grid
+// only touches a tile paints nothing in it.
+unsigned char expectedCost(const Scene & s, unsigned int i, unsigned int j)
+{
+  std::vector<const ChartSpec *> order;
+  for (const auto & c : s.charts) {order.push_back(&c);}
+  std::sort(order.begin(), order.end(), [](const ChartSpec * a, const ChartSpec * b) {
+      return std::make_pair(a->cell_q, a->label) < std::make_pair(b->cell_q, b->label);});
+  const int x0 = 4 * static_cast<int>(i), y0 = 4 * static_cast<int>(j);
+  const int tile_q = 4 * static_cast<int>(s.tile);
+  const int tile_x0 = tile_q * static_cast<int>(i / s.tile);
+  const int tile_y0 = tile_q * static_cast<int>(j / s.tile);
+  for (const ChartSpec * c : order) {
+    const int inset = c->bounds_inset_q;
+    if (c->west_q + inset > tile_x0 + tile_q ||
+      c->west_q + c->cells_x * c->cell_q - inset < tile_x0 ||
+      c->south_q + inset > tile_y0 + tile_q ||
+      c->south_q + c->cells_y * c->cell_q - inset < tile_y0)
+    {
+      continue;
+    }
+    for (int m = c->cells_x - 1; m >= 0; m--) {
+      const int west = c->west_q + m * c->cell_q;
+      if (!(west < x0 + 4 && west + c->cell_q > x0)) {continue;}
+      for (int n = c->cells_y - 1; n >= 0; n--) {
+        const int south = c->south_q + n * c->cell_q;
+        if (!(south < y0 + 4 && south + c->cell_q > y0)) {continue;}
+        const auto charted = chartedAt(*c, m, n);
+        if (charted != Charted::none) {return costOf(charted);}
+      }
+    }
+  }
+  return nav2_costmap_2d::NO_INFORMATION;
 }
 
 class TileEdgesTest : public ::testing::Test
@@ -364,29 +491,32 @@ protected:
     log_ = access_log;
   }
 
-  // No tile access out of range, and the tile accesses reached the checked
-  // definitions: at least one setCost on a tile per painted window cell.
-  ::testing::AssertionResult accessesInRange()
+  // No tile access out of range, and (if require_reach) the tile accesses
+  // reached the checked definitions: at least one setCost on a tile per
+  // painted window cell, and some cell painted.
+  ::testing::AssertionResult accessesInRange(bool require_reach = true)
   {
     auto * master = layered_costmap_->getCostmap();
     std::uint64_t painted = 0;
-    for (unsigned int j = 0; j < kCells; j++) {
-      for (unsigned int i = 0; i < kCells; i++) {
+    const unsigned int cells = master->getSizeInCellsX();
+    const unsigned int tile = log_.tile_size;
+    for (unsigned int j = 0; j < cells; j++) {
+      for (unsigned int i = 0; i < cells; i++) {
         if (master->getCharMap()[master->getIndex(i, j)] != nav2_costmap_2d::NO_INFORMATION) {
           painted++;
         }
       }
     }
-    if (painted == 0 || log_.tile_sets < painted) {
+    if (require_reach && (painted == 0 || log_.tile_sets < painted)) {
       return ::testing::AssertionFailure() <<
              "the checked accessors saw " << log_.tile_sets << " setCost calls on " <<
-             kTileSize << " x " << kTileSize << " tiles for " << painted <<
+             tile << " x " << tile << " tiles for " << painted <<
              " painted cells: the layer's tile accesses are not reaching them";
     }
     if (log_.tile_out_of_range != 0) {
       return ::testing::AssertionFailure() <<
              log_.tile_out_of_range << " of " << log_.tile_calls <<
-             " getCost/setCost calls on " << kTileSize << " x " << kTileSize <<
+             " getCost/setCost calls on " << tile << " x " << tile <<
              " tiles out of range; first " << log_.first_tile_out_of_range;
     }
     if (log_.other_out_of_range != 0) {
@@ -447,7 +577,10 @@ protected:
   {
     Geometry g{resolution, kOriginX * resolution, kOriginY * resolution, 4, west_q, south_q};
     (east ? g.ulps_x : g.ulps_y) = -1;
-    ASSERT_GT(chartCellsBeyondTile(g, *makeChart(g), tx, ty, east), 0) <<
+    const int beyond = chartCellsBeyondTile(g, *makeChart(g), tx, ty, east);
+    ASSERT_NE(beyond, -1) << "tile (" << tx << ", " << ty << ") is not within the chart grid's " <<
+      "cell centres, so generateTile clips its request and the check below does not apply";
+    ASSERT_GT(beyond, 0) <<
       "the iterator yields no chart cell wholly " << (east ? "east" : "north") <<
       " of tile (" << tx << ", " << ty << "): this case would not reach the near clamp";
     paint(g);
@@ -461,6 +594,175 @@ protected:
     const Geometry g{0.1, -12.3, 4.7, cell_q, -16, -16};
     paint(g);
     EXPECT_TRUE(accessesInRange());
+  }
+
+  // As paint(Geometry) for a Scene: its window, tile size and charts.
+  void paint(const Scene & s)
+  {
+    node_ = std::make_shared<TestLifecycleNode>("test_tile_edges");
+    node_->declare_parameter("chart_layer.tile_size", static_cast<int>(s.tile));
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+    layered_costmap_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>("map", false, true);
+    layered_costmap_->resizeMap(s.cells, s.cells, s.resolution,
+      s.origin_x * s.resolution, s.origin_y * s.resolution);
+    layer_ = std::make_shared<S57LayerForTest>();
+    layered_costmap_->addPlugin(layer_);
+    layer_->initialize(layered_costmap_.get(), "chart_layer", tf_buffer_.get(), node_, nullptr);
+    for (const auto & c : s.charts) {
+      layer_->addChart(c.label, makeChart(s, c), c.bounds_inset_q * s.resolution / 4.0);
+    }
+    access_log.reset(s.tile);
+    layered_costmap_->updateMap(
+      (s.origin_x + s.cells / 2.0) * s.resolution, (s.origin_y + s.cells / 2.0) * s.resolution, 0.0);
+    log_ = access_log;
+  }
+
+  // Every window cell equals expectedCost(Scene).
+  ::testing::AssertionResult cellsAsCharted(const Scene & s)
+  {
+    auto * master = layered_costmap_->getCostmap();
+    if (master->getOriginX() != s.origin_x * s.resolution ||
+      master->getOriginY() != s.origin_y * s.resolution)
+    {
+      return ::testing::AssertionFailure() << "window origin is (" << master->getOriginX() <<
+             ", " << master->getOriginY() << "), not the scene's";
+    }
+    unsigned int wrong = 0;
+    std::ostringstream first;
+    for (unsigned int j = 0; j < s.cells; j++) {
+      for (unsigned int i = 0; i < s.cells; i++) {
+        const int cost = master->getCharMap()[master->getIndex(i, j)];
+        const int expected = expectedCost(s, i, j);
+        if (cost != expected) {
+          if (wrong == 0) {
+            first << "first (" << i << ", " << j << ") is " << cost << ", expected " << expected;
+          }
+          wrong++;
+        }
+      }
+    }
+    if (wrong == 0) {return ::testing::AssertionSuccess();}
+    return ::testing::AssertionFailure() << wrong << " of " << s.cells * s.cells <<
+           " cells differ from the expectation; " << first.str();
+  }
+
+  // The cells first: where they are wrong (as where a chart is dropped and
+  // nothing is painted), that is the failure reported, and the accesses are
+  // checked for range only; where they are right, the accessors must also
+  // have seen the painting.
+  void check(const Scene & s)
+  {
+    for (const auto & c : s.charts) {
+      ASSERT_LT(4 * std::abs(c.bounds_inset_q), c.cell_q) << "chart " << c.label <<
+        ": getGrid cannot make a grid that far from its stated bounds";
+    }
+    paint(s);
+    const auto cells = cellsAsCharted(s);
+    EXPECT_TRUE(cells);
+    EXPECT_TRUE(accessesInRange(static_cast<bool>(cells)));
+  }
+
+  // Which of the two cell centres generateTile computes for a one-cell axis
+  // is off the cell's position, and in which direction (the other equals it).
+  enum class Crossing { low_above, high_below };
+
+  // A chart grid one cell long on axis short_axis (0: x, 1: y), the cell
+  // 3.75 m on a side centred at `centre` m on that axis (centre_q in units of
+  // 5 mm); four cells from -12.6 m on the other. The window: 12 x 12 cells of
+  // 1 m from (-12, -12) m, tiles of 4 cells; one update. Asserts first that
+  // the grid's west and east (south and north) cell centres, computed as
+  // generateTile computes them, cross in the stated direction:
+  // Crossing::low_above, grid_lo + r/2 above the position and grid_hi - r/2
+  // equal to it; Crossing::high_below, grid_hi - r/2 below the position and
+  // grid_lo + r/2 equal to it. Then every window cell and the accesses. In
+  // units of 5 mm every edge is an integer: the cell spans centre_q - 375 to
+  // centre_q + 375 on the short axis, the other cells' edges are
+  // -2520 + 750 n, window cell k spans -2400 + 200 k to -2200 + 200 k.
+  void checkOneCellAxis(int short_axis, double centre, int centre_q, Crossing crossing)
+  {
+    ASSERT_EQ(std::lround(centre * 200.0), centre_q);
+    const double r = 3.75;
+    auto grid = std::make_shared<grid_map::GridMap>(
+      std::vector<std::string>{"elevation", "overhead", "restricted", "unsurveyed", "caution"});
+    grid->setGeometry(
+      short_axis == 0 ? grid_map::Length(r, 4 * r) : grid_map::Length(4 * r, r), r,
+      short_axis == 0 ? grid_map::Position(centre, -5.1) : grid_map::Position(-5.1, centre));
+    ASSERT_EQ(grid->getSize()[short_axis], 1);
+    ASSERT_EQ(grid->getSize()[1 - short_axis], 4);
+    const double half = grid->getResolution() / 2.0;
+    const double position = grid->getPosition()[short_axis];
+    const double grid_lo = position - grid->getLength()[short_axis] / 2.0;
+    const double grid_hi = position + grid->getLength()[short_axis] / 2.0;
+    const double centre_lo = grid_lo + half;
+    const double centre_hi = grid_hi - half;
+    ASSERT_LT(centre_hi, centre_lo) <<
+      "the cell centres do not cross here, so this case would not reach the crossed bounds";
+    if (crossing == Crossing::low_above) {
+      ASSERT_GT(centre_lo, position);
+      ASSERT_EQ(centre_hi, position);
+    } else {
+      ASSERT_LT(centre_hi, position);
+      ASSERT_EQ(centre_lo, position);
+    }
+
+    for (const auto & name : grid->getLayers()) {
+      (*grid)[name].setConstant(std::numeric_limits<float>::quiet_NaN());
+    }
+    // Long-axis cell n, counted from the south (west) edge, holds chartedAt(0, n).
+    for (grid_map::GridMapIterator it(*grid); !it.isPastEnd(); ++it) {
+      grid_map::Position position;
+      grid->getPosition(*it, position);
+      const int n = static_cast<int>(std::floor((position[1 - short_axis] + 12.6) / r));
+      switch (chartedAt(0, n)) {
+        case Charted::land: grid->at("elevation", *it) = 1.0f; break;
+        case Charted::water: grid->at("elevation", *it) = -10.0f; break;
+        default: break;
+      }
+    }
+
+    node_ = std::make_shared<TestLifecycleNode>("test_tile_edges");
+    node_->declare_parameter("chart_layer.tile_size", 4);
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+    layered_costmap_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>("map", false, true);
+    layered_costmap_->resizeMap(12, 12, 1.0, -12.0, -12.0);
+    layer_ = std::make_shared<S57LayerForTest>();
+    layered_costmap_->addPlugin(layer_);
+    layer_->initialize(layered_costmap_.get(), "chart_layer", tf_buffer_.get(), node_, nullptr);
+    layer_->addChart("c", grid);
+    access_log.reset(4);
+    layered_costmap_->updateMap(-6.0, -6.0, 0.0);
+    log_ = access_log;
+
+    auto * master = layered_costmap_->getCostmap();
+    unsigned int wrong = 0;
+    std::ostringstream first;
+    for (unsigned int j = 0; j < 12; j++) {
+      for (unsigned int i = 0; i < 12; i++) {
+        const int s = -2400 + 200 * static_cast<int>(short_axis == 0 ? i : j);
+        const int l = -2400 + 200 * static_cast<int>(short_axis == 0 ? j : i);
+        unsigned char expected = nav2_costmap_2d::NO_INFORMATION;
+        if (s < centre_q + 375 && s + 200 > centre_q - 375) {
+          // The cell with data that is north-most (east-most) of those overlapping.
+          for (int n = 3; n >= 0; n--) {
+            const int south = -2520 + 750 * n;
+            if (south < l + 200 && south + 750 > l && chartedAt(0, n) != Charted::none) {
+              expected = costOf(chartedAt(0, n));
+              break;
+            }
+          }
+        }
+        const int cost = master->getCharMap()[master->getIndex(i, j)];
+        if (cost != expected) {
+          if (wrong == 0) {
+            first << "first (" << i << ", " << j << ") is " << cost << ", expected " <<
+              static_cast<int>(expected);
+          }
+          wrong++;
+        }
+      }
+    }
+    EXPECT_EQ(wrong, 0u) << first.str();
+    EXPECT_TRUE(accessesInRange(wrong == 0));
   }
 
   std::shared_ptr<TestLifecycleNode> node_;
@@ -542,5 +844,154 @@ TEST_F(TileEdgesTest, QuarterCellOffControlHalfMetre) {checkExact(0.5, 4, -11, -
 TEST_F(TileEdgesTest, TenthMetreHalfCellChart) {checkAccessOnly(2);}
 TEST_F(TileEdgesTest, TenthMetreOneCellChart) {checkAccessOnly(4);}
 TEST_F(TileEdgesTest, TenthMetreTwoCellChart) {checkAccessOnly(8);}
+
+// ---- rolker/s57_tools#59 ----
+// Window as above (12 x 12 cells, 4-cell tiles, origin (-8, 4) cells) unless
+// stated. Tile column 1 spans window quarters 16..32, its centre at 24.
+Scene small(double r, std::vector<ChartSpec> charts, int ox = -8, int oy = 4)
+{
+  return Scene{r, ox, oy, 12, 4, std::move(charts)};
+}
+
+// One chart over part of tile column / row 1 with the tile's centre outside it.
+TEST_F(TileEdgesTest, CentreOutsideChartWest1m) {check(small(1.0, {{"c", 4, -11, -12, 8, 15}}));}
+TEST_F(TileEdgesTest, CentreOutsideChartWestHalfMetre) {check(small(0.5, {{"c", 4, -11, -12, 8, 15}}));}
+TEST_F(TileEdgesTest, CentreOutsideChartEast1m) {check(small(1.0, {{"c", 4, 27, -12, 9, 15}}));}
+TEST_F(TileEdgesTest, CentreOutsideChartSouth1m) {check(small(1.0, {{"c", 4, -12, -11, 15, 8}}));}
+TEST_F(TileEdgesTest, CentreOutsideChartNorth1m) {check(small(1.0, {{"c", 4, -12, 27, 15, 9}}));}
+TEST_F(TileEdgesTest, CentreOutsideChartCorner1m) {check(small(1.0, {{"c", 4, -11, -11, 8, 8}}));}
+// Two charts of one scale meeting at a seam west of, on, and east of the
+// centre of tile column 1, and on the centre of tile row 1.
+TEST_F(TileEdgesTest, SeamWestOfCentre1m)
+{
+  check(small(1.0, {{"a", 4, -11, -12, 8, 15}, {"b", 4, 21, -12, 10, 15, Fill::hashed, 1}}));
+}
+TEST_F(TileEdgesTest, SeamOnCentre1m)
+{
+  check(small(1.0, {{"a", 4, -12, -12, 9, 15}, {"b", 4, 24, -12, 9, 15, Fill::hashed, 1}}));
+}
+TEST_F(TileEdgesTest, SeamEastOfCentre1m)
+{
+  check(small(1.0, {{"a", 4, -13, -12, 10, 15}, {"b", 4, 27, -12, 9, 15, Fill::hashed, 1}}));
+}
+TEST_F(TileEdgesTest, SeamOnCentreNorthHalfMetre)
+{
+  check(small(0.5, {{"a", 4, -12, -12, 15, 9}, {"b", 4, -12, 24, 15, 9, Fill::hashed, 1}}));
+}
+// A chart smaller than a tile, inside tile (1, 1), off its centre; guard: over it.
+TEST_F(TileEdgesTest, SmallChartOffCentre1m) {check(small(1.0, {{"c", 2, 17, 25, 3, 3}}));}
+TEST_F(TileEdgesTest, SmallChartOverCentreGuard1m) {check(small(1.0, {{"c", 2, 21, 21, 3, 3}}));}
+// A fine all-water chart over the west 5 quarters of tile column 1, a coarse
+// all-land chart under the whole window: the fine chart's water wins there.
+TEST_F(TileEdgesTest, FineWaterOverCoarseLand1m)
+{
+  check(small(1.0, {{"fine", 4, -11, -12, 8, 15, Fill::water}, {"coarse", 32, -16, -16, 3, 3, Fill::land}}));
+}
+// The map-axis band. Tile column 2 starts at map x = 0 (origin -8 cells). A
+// chart 64 m or more long whose west edge is 3 quarters inside that tile and
+// which covers its centre.
+TEST_F(TileEdgesTest, ChartEdgeInTileAtMapXZero1m) {check(small(1.0, {{"c", 4, 35, -12, 70, 15}}));}
+TEST_F(TileEdgesTest, ChartEdgeInTileAtMapXZeroHalfMetre) {check(small(0.5, {{"c", 4, 35, -12, 140, 15}}));}
+TEST_F(TileEdgesTest, ChartEdgeInTileAtMapYZero1m)
+{
+  check(small(1.0, {{"c", 4, -12, 35, 15, 70}}, -8, -8));
+}
+// The same at 100-cell tiles: 200 x 200 window from (-100, -100) cells, tile
+// (1, 1) from map (0, 0); the chart's west and south edges 36.25 cells in.
+TEST_F(TileEdgesTest, ChartEdgeInTileAtMapOrigin100CellTiles1m)
+{
+  check(Scene{1.0, -100, -100, 200, 100, {{"c", 4, 545, 545, 67, 67}}});
+}
+// A chart whose own west edge is 0.75 m west of map x = 0, the tile from -4 m
+// to 0 (its centre outside the chart). Clipping the request to the chart's
+// edge (the issue's first proposal) loses grid_map's epsilon there.
+TEST_F(TileEdgesTest, ChartEdgeJustWestOfMapXZero1m) {check(small(1.0, {{"c", 4, 29, -12, 70, 15}}));}
+// Guards: tiles wholly inside the chart, and a chart whose east edge only
+// touches tile column 1. The first pins the cells there, not the request:
+// generateTile sends the tile's own centre and length where nothing is
+// clipped, but rebuilding them from the edges differs by at most an ulp,
+// which moves the submap's edge only where it lies within rounding of a
+// chart cell edge, gaining or losing a cell that only touches the tile.
+// No cell here can tell the two requests apart.
+TEST_F(TileEdgesTest, TilesInsideChartGuard1m) {check(small(1.0, {{"c", 4, -13, -13, 17, 17}}));}
+TEST_F(TileEdgesTest, ChartTouchingTileEdgeGuard1m) {check(small(1.0, {{"c", 4, -12, -12, 7, 15}}));}
+
+// A chart's stated bounds differ from its grid's extent (as getGrid makes
+// it, by less than a quarter chart cell on each side); a tile edge lies on
+// the stated bound. Chart cells of two window cells. The pre-filter passes
+// the tile on the outer side of that edge (it compares with > and <), so
+// what the chart paints there is the clip's: it must clip to the grid's
+// extent, not to the stated bounds.
+// The grid a quarter window cell larger than the stated bounds on every
+// side: the stated west bound on tile column 1's east edge (quarter 32), the
+// grid's first column from quarter 31, so it paints window column 7 from
+// [31, 32]; and the stated north bound on tile row 2's south edge, the
+// grid's last row to quarter 33, so it paints window row 8 from [32, 33].
+// Clipping to the stated bounds skips the chart in those tiles.
+TEST_F(TileEdgesTest, GridLargerThanBoundsWest1m)
+{
+  check(small(1.0, {{"c", 8, 31, -12, 6, 8, Fill::hashed, 0, 1}}));
+}
+TEST_F(TileEdgesTest, GridLargerThanBoundsNorth1m)
+{
+  check(small(1.0, {{"c", 8, -12, -15, 8, 6, Fill::hashed, 0, 1}}));
+}
+// The grid a quarter window cell smaller: the stated west bound on tile
+// column 1's east edge, the grid from quarter 33; the stated north bound on
+// tile row 2's south edge, the grid to quarter 31. The pre-filter passes
+// tile column 1 and row 2, which the grid does not reach: the chart must
+// paint nothing there. (Clipping to the stated bounds gives the same cells:
+// its request then yields only the grid's edge column or row, which lies
+// wholly outside the tile and paints nothing.)
+TEST_F(TileEdgesTest, GridSmallerThanBounds1m)
+{
+  check(small(1.0, {{"c", 8, 33, -17, 6, 6, Fill::hashed, 0, -1}}));
+}
+// Pins current behaviour, not the behaviour wanted: the grid half a window
+// cell larger than the stated bounds (chart cells of three window cells),
+// the grid's first column from quarter 31, the stated west bound at 33.
+// Tile column 1 ends at 32, so the pre-filter (stated bounds, left as it is
+// by this change) skips it, and the grid's [31, 32] in window column 7 is
+// not painted.
+TEST_F(TileEdgesTest, GridLargerThanBoundsPreFilterSkips1m)
+{
+  check(small(1.0, {{"c", 12, 31, -12, 4, 6, Fill::hashed, 0, 2}}));
+}
+
+// A chart grid one cell long on x, then on y, whose two cell centres on that
+// axis round an ulp apart in the wrong order (checkOneCellAxis asserts it):
+// generateTile must order the bounds it clamps the tile to, as std::clamp
+// requires. The crossing goes both ways, so each direction has its own pair:
+// LowCentreAbove, the cell centred at -7.97 m, where grid_lo + r/2 rounds
+// above the cell's position and grid_hi - r/2 equals it (a fix that reset
+// only the upper bound would still pass crossed bounds); HighCentreBelow,
+// centred at 0.47 m (the cell from -1.405 m, partly inside the window's
+// last two columns or rows), where grid_hi - r/2 rounds below and
+// grid_lo + r/2 equals it (a fix that reset only the lower bound would).
+// Both sums are additions and subtractions of exact halves (1.875) to the
+// literal, so they round the same with any IEEE double toolchain.
+// The unfixed source passed crossed bounds. Where libstdc++ checks
+// its assertions (-D_GLIBCXX_ASSERTIONS, which GCC 15's libstdc++ also
+// defines in an unoptimized build such as this package's default colcon
+// build) it aborts in std::clamp here. Without them it returns the upper
+// bound, which gives these same cells, so in an optimized build (and with
+// GCC 13 on Jazzy) this case cannot fail on the unfixed source. The fixed
+// source passes either way.
+TEST_F(TileEdgesTest, OneCellLongOnXLowCentreAbove)
+{
+  checkOneCellAxis(0, -7.97, -1594, Crossing::low_above);
+}
+TEST_F(TileEdgesTest, OneCellLongOnYLowCentreAbove)
+{
+  checkOneCellAxis(1, -7.97, -1594, Crossing::low_above);
+}
+TEST_F(TileEdgesTest, OneCellLongOnXHighCentreBelow)
+{
+  checkOneCellAxis(0, 0.47, 94, Crossing::high_below);
+}
+TEST_F(TileEdgesTest, OneCellLongOnYHighCentreBelow)
+{
+  checkOneCellAxis(1, 0.47, 94, Crossing::high_below);
+}
 
 }  // namespace
