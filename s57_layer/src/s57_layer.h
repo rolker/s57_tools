@@ -1,7 +1,9 @@
 #ifndef S57_LAYER_H
 #define S57_LAYER_H
 
+#include <algorithm>
 #include <future>
+#include <limits>
 #include <unordered_set>
 
 #include "geometry_msgs/msg/point_stamped.hpp"
@@ -143,6 +145,100 @@ private:
   // (~0.5 m/hr near peak ⇒ 1 cm step every ~72 s). Sim runs with
   // accelerated tide should override to a larger value.
   double tide_invalidate_threshold_ = 0.01;
+
+  // A rectangle in world coordinates; empty until something is included.
+  struct Rect
+  {
+    double min_x = std::numeric_limits<double>::max();
+    double min_y = std::numeric_limits<double>::max();
+    double max_x = std::numeric_limits<double>::lowest();
+    double max_y = std::numeric_limits<double>::lowest();
+
+    bool empty() const {return min_x >= max_x || min_y >= max_y;}
+    void include(double x0, double y0, double x1, double y1)
+    {
+      min_x = std::min(min_x, x0);
+      min_y = std::min(min_y, y0);
+      max_x = std::max(max_x, x1);
+      max_y = std::max(max_y, y1);
+    }
+    void clip(double x0, double y0, double x1, double y1)
+    {
+      min_x = std::max(min_x, x0);
+      min_y = std::max(min_y, y0);
+      max_x = std::min(max_x, x1);
+      max_y = std::min(max_y, y1);
+    }
+  };
+
+  // Repainting the cells a rolling window's move uncovers (#57).
+  //
+  // When the window moves, Costmap2D::updateOrigin keeps the cells the old
+  // and new windows share and resets the others to the default value, and
+  // LayeredCostmap::updateMap repaints only the bounds its layers report.
+  // So this layer reports the uncovered cells itself, as strips: an x strip
+  // is a span of columns at the window's west or east edge over its full
+  // height, a y strip a span of rows at its south or north edge over its
+  // full width. chooseStrip says when each is reported.
+
+  // A span [lo, hi] of world coordinates on one axis; empty unless valid.
+  // Every real span is whole cells wide, so anything narrower than
+  // min_width is rounding between two equal cell edges and is dropped.
+  struct Span
+  {
+    double lo = 0.0;
+    double hi = 0.0;
+    bool valid = false;
+    // Cycles since the oldest cell in the span was uncovered (0 in that
+    // cycle). After a clip the oldest cells may be gone; it then overstates,
+    // which only makes the span more urgent.
+    int age = 0;
+
+    void add(double a, double b, double min_width)
+    {
+      if(b - a < min_width)
+        return;
+      if(!valid)
+        age = 0;
+      lo = valid ? std::min(lo, a) : a;
+      hi = valid ? std::max(hi, b) : b;
+      valid = true;
+    }
+    void clip(double a, double b, double min_width)
+    {
+      lo = std::max(lo, a);
+      hi = std::min(hi, b);
+      valid = valid && hi - lo >= min_width;
+    }
+  };
+
+  // The four strips (each an index into pending_), and what a cycle can
+  // report instead of one: no strip (a gap), or the whole window.
+  enum Strip {x_low, x_high, y_low, y_high, none, whole};
+
+  // True when the next rolling cycle must report the whole window: no
+  // window has been seen yet, reset() or matchSize() ran since, or the
+  // layer was disabled for a cycle since (updateBounds).
+  // last_window_ is meaningful only while this is false.
+  bool whole_pending_ = true;
+  // The window of the last rolling cycle, by its cell edges.
+  Rect last_window_;
+  // For each strip, the columns or rows a move uncovered on that side of the
+  // window that have not been reported since. Each lies within last_window_:
+  // its cells are still in the window and not yet painted from the charts.
+  // The two sides of an axis are kept apart: after a reversal both can be
+  // pending, and one strip over both would span the window.
+  Span pending_[4];
+  // What this layer reported in the last rolling cycle: none in a gap.
+  Strip last_reported_ = Strip::none;
+
+  // Phase 1 of a rolling cycle: clip the pending spans to window, age them,
+  // and add the columns and rows this cycle's move uncovered. Returns false
+  // when the whole window must be reported instead: whole_pending_, no
+  // overlap with last_window_, or a jump of more than a tile.
+  bool recordUncovered(const Rect & window, double half_cell);
+  // Phase 3: what to report this cycle when recordUncovered returned true.
+  Strip chooseStrip() const;
 
   typedef std::pair<int, int> TileID;
 

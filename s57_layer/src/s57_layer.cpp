@@ -154,6 +154,14 @@ void S57Layer::reset()
   //grids_.clear();
   //tiles_.clear();
   current_ = false;
+  // Costmap2DROS::resetLayers resets the whole window before this, so the
+  // next cycle reports all of it, including any tile not generated yet.
+  // Defensive: the loop below flags every tile already generated, and every
+  // tile in the window has been by the time a reset can come, so the flags
+  // alone repaint the window and no test fails without this line
+  // (ResetWhileMovingEveryCellEveryCycle passes). It covers a tile that
+  // update_timeout left ungenerated.
+  whole_pending_ = true;
   for(auto& t: tiles_)
     t.second.needs_update = true;
 }
@@ -167,6 +175,13 @@ void S57Layer::matchSize()
   resolution_ = parent->getResolution();
   tiles_.clear();
   current_ = false;
+  // The window's size or resolution may have changed, so last_window_ no
+  // longer describes it. Defensive as far as the tests go: their only
+  // resizeMap comes before the first cycle, when whole_pending_ is true
+  // already, and the cleared tiles are regenerated and reported anyway. A
+  // resize while running (Costmap2DROS's width, height or resolution
+  // parameters) reaches it; no test drives one.
+  whole_pending_ = true;
 }
 
 
@@ -181,7 +196,16 @@ S57Layer::TileID S57Layer::worldToTile(double x, double y)
 void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y, double* max_x, double* max_y)
 {
   if (!enabled_)
+  {
+    // Defensive: the window moves on while this layer is disabled, so
+    // last_window_ goes stale; repaint the whole window once it is enabled
+    // again. This line runs every cycle on a layer configured disabled, but
+    // its effect cannot be observed today: enabled_ is set only in
+    // onInitialize and no parameter callback changes it, so nothing
+    // re-enables the layer, and no test can see the repaint.
+    whole_pending_ = true;
     return;
+  }
 
   // Tide only matters for the depth ramp; in suppressed mode (D10) skip the
   // lookup entirely so a missing chart_datum TF never warns or invalidates.
@@ -313,42 +337,205 @@ void S57Layer::updateBounds(double, double, double, double* min_x, double* min_y
   }
 
 
+  // The window by its cell edges. world_max_x and world_max_y above come
+  // from getSizeInMetersX/Y, which is half a cell short on Jazzy; they only
+  // choose the tiles and the chart request.
+  const double half_cell = parent->getResolution()/2.0;
+  Rect window;
+  window.include(world_min_x, world_min_y,
+    world_min_x + parent->getSizeInCellsX()*parent->getResolution(),
+    world_min_y + parent->getSizeInCellsY()*parent->getResolution());
+
+  // Phase 1, rolling window: record the columns and rows this cycle's move
+  // uncovered, or find that the whole window must be reported.
+  const bool rolling = layered_costmap_->isRolling();
+  const bool report_whole = rolling && !recordUncovered(window, half_cell);
+
+  // Phase 2: generate the tiles in the window, and collect the ones that
+  // need repainting into this layer's own rectangle.
   TileID start_tile = worldToTile(world_min_x, world_min_y);
   TileID end_tile = worldToTile(world_max_x, world_max_y);
 
+  Rect own;
   bool done = false;
-  int tiles_needing_update = 0;
   for(int i = start_tile.first; i <= end_tile.first && !done; i++)
     for(int j = start_tile.second; j <= end_tile.second && !done; j++)
     {
       auto id = std::make_pair(i,j);
       if(!tiles_[id].complete)
         generateTile(id);
+      double tile_min_x = x_origin_+id.first*resolution_*tile_size_;
+      double tile_max_x = tile_min_x + resolution_*tile_size_;
+      double tile_min_y = y_origin_+id.second*resolution_*tile_size_;
+      double tile_max_y = tile_min_y + resolution_*tile_size_;
+      // A tile wholly outside last cycle's window has every cell it has in
+      // this window in the spans phase 1 just recorded, so it is painted
+      // with them. Reporting it as well would add a tile column or row to
+      // this cycle's bounds, and with the next cycle's strip on the other
+      // axis the whole window (see chooseStrip).
+      if(rolling && !report_whole &&
+         (tile_max_x <= last_window_.min_x + half_cell ||
+          tile_min_x >= last_window_.max_x - half_cell ||
+          tile_max_y <= last_window_.min_y + half_cell ||
+          tile_min_y >= last_window_.max_y - half_cell))
+        tiles_[id].needs_update = false;
       if(tiles_[id].needs_update)
-      {
-        tiles_needing_update += 1;
-        double tile_min_x = x_origin_+id.first*resolution_*tile_size_;
-        double tile_max_x = tile_min_x + resolution_*tile_size_;
-        double tile_min_y = y_origin_+id.second*resolution_*tile_size_;
-        double tile_max_y = tile_min_y + resolution_*tile_size_;
-
-        *min_x = std::min(*min_x, tile_min_x-resolution_);
-        *max_x = std::max(*max_x, tile_max_x+resolution_);
-        *min_y = std::min(*min_y, tile_min_y-resolution_);
-        *max_y = std::max(*max_y, tile_max_y+resolution_);
-      }
+        own.include(tile_min_x-resolution_, tile_min_y-resolution_,
+          tile_max_x+resolution_, tile_max_y+resolution_);
       if(clock_->now() - start_time > rclcpp::Duration::from_seconds(update_timeout_))
         done = true;
     }
 
-  if(tiles_needing_update > 0)
+  // Phase 3, rolling window: add this cycle's strip, if any, to the
+  // layer's own rectangle, and remember the window.
+  if(rolling)
   {
-    *min_x = std::max(*min_x, world_min_x);
-    *max_x = std::min(*max_x, world_max_x);
-    *min_y = std::max(*min_y, world_min_y);
-    *max_y = std::min(*max_y, world_max_y);
+    const Strip strip = report_whole ? Strip::whole : chooseStrip();
+    if(strip == Strip::whole)
+    {
+      own.include(window.min_x, window.min_y, window.max_x, window.max_y);
+      for(auto & span: pending_)
+        span = Span();
+    }
+    else if(strip != Strip::none)
+    {
+      // A strip's edges are cell edges. Nav2's conversion (the minimum
+      // truncated, the maximum truncated plus one) covers them whichever way
+      // rounding goes; the half-cell margin keeps that from depending on it.
+      // Defensive: no test fails without the margin, nor any harness run,
+      // at 1 m or 0.1 m cells, because that conversion already covers them.
+      const Span & span = pending_[strip];
+      if(strip == Strip::x_low || strip == Strip::x_high)
+        own.include(span.lo - half_cell, window.min_y, span.hi + half_cell, window.max_y);
+      else
+        own.include(window.min_x, span.lo - half_cell, window.max_x, span.hi + half_cell);
+      pending_[strip] = Span();
+    }
+    last_reported_ = strip;
+    last_window_ = window;
+    whole_pending_ = false;
   }
 
+  // Phase 4: clip this layer's own rectangle to the window, then widen the
+  // bounds the layers before it reported. Never narrow them: they are what
+  // those layers need repainted (Nav2's layer contract;
+  // LayeredCostmap::updateMap warns "Illegal bounds change" when a layer
+  // does).
+  own.clip(window.min_x, window.min_y, window.max_x, window.max_y);
+  if(!own.empty())
+  {
+    *min_x = std::min(*min_x, own.min_x);
+    *min_y = std::min(*min_y, own.min_y);
+    *max_x = std::max(*max_x, own.max_x);
+    *max_y = std::max(*max_y, own.max_y);
+  }
+}
+
+bool S57Layer::recordUncovered(const Rect & window, double half_cell)
+{
+  if(whole_pending_ ||
+     window.min_x >= last_window_.max_x - half_cell || window.max_x <= last_window_.min_x + half_cell ||
+     window.min_y >= last_window_.max_y - half_cell || window.max_y <= last_window_.min_y + half_cell)
+    return false;
+
+  // A jump: a move of more than a tile on either axis in one cycle, as when
+  // localisation jumps. Its uncovered cells can reach the robot itself, and
+  // as strips they would wait their turn (up to 3 cycles, see chooseStrip),
+  // so the whole window is reported at once. Either axis, not both: a jump
+  // along one axis would wait a cycle behind a strip on the other. Travel
+  // never moves this far: BEN's global costmap moves about 5 cells per
+  // cycle at 5 m/s and its local one 2, against 100-cell tiles. A move past
+  // the window (the test above) is such a jump too, unless a tile is as wide
+  // as the window; that test is kept for that case. On a window no wider
+  // than a tile plus a cell (a 60-cell local costmap with the default
+  // 100-cell tiles) the test above always fires first, so this rule never
+  // decides there.
+  const double tile = tile_size_*resolution_;
+  if(std::abs(window.min_x - last_window_.min_x) > tile + half_cell ||
+     std::abs(window.min_y - last_window_.min_y) > tile + half_cell)
+    return false;
+
+  // What has scrolled out of the window needs no repainting. A span that
+  // has wholly scrolled out is no longer pending, so it holds back no other
+  // strip (chooseStrip). Only a pending span ages: an empty one's age is
+  // reset when cells are next added to it, and aging it every cycle would
+  // overflow the int (undefined behaviour) after 2^31 cycles with nothing
+  // pending on that side, about 13.6 years at 5 Hz.
+  for(int s = Strip::x_low; s <= Strip::y_high; s++)
+  {
+    const bool x = s == Strip::x_low || s == Strip::x_high;
+    pending_[s].clip(x ? window.min_x : window.min_y, x ? window.max_x : window.max_y, half_cell);
+    if(pending_[s].valid)
+      pending_[s].age++;
+  }
+
+  // A cell is uncovered when it lies outside last cycle's window on either
+  // axis: in a column beyond one of its x edges, or a row beyond one of its
+  // y edges.
+  pending_[Strip::x_low].add(window.min_x, last_window_.min_x, half_cell);
+  pending_[Strip::x_high].add(last_window_.max_x, window.max_x, half_cell);
+  pending_[Strip::y_low].add(window.min_y, last_window_.min_y, half_cell);
+  pending_[Strip::y_high].add(last_window_.max_y, window.max_y, half_cell);
+  return true;
+}
+
+// Why two strips are never reported in consecutive cycles. The inflation
+// layer reports the bounds it was given this cycle merged with last
+// cycle's, padded by its radius (InflationLayer::updateBounds, the same on
+// Jazzy and Rolling), and LayeredCostmap::updateMap resets and repaints
+// that one rectangle. Any two different strips together span the window:
+// an x strip (the window's full height) and a y strip (its full width), or
+// an x strip at the west edge and one at the east, as when the window
+// reverses or jitters while station keeping. That would repaint and
+// re-inflate the whole window, which on BEN's 5 km global costmap took
+// 0.3-0.4 s per cycle on a desktop (#57). So a strip follows last cycle's
+// only when it is the same strip (steady travel along one axis) and no
+// other is pending; otherwise this layer first reports no strip for a
+// cycle (a gap), in which the inflation layer re-runs only last cycle's.
+//
+// After a gap, the strip whose oldest cell has waited longest goes next;
+// the next chance for another is two cycles later. A cell waiting 2 cycles
+// or more would then wait 4 or more, so if two strips have such cells the
+// whole window is reported instead, which keeps the bound: every uncovered
+// cell is painted at most 3 cycles after the cycle that uncovered it. On
+// travel along one axis that is the same cycle, or the next after a single
+// reversal (repeated reversals of 2 cells or more a cycle can make a cell
+// wait 2); on steady diagonal travel the strips go x, gap, y, gap, and no
+// whole window is reported at any heading. Two strips with cells waiting 2
+// cycles happen when station keeping jitters widely enough to put the window
+// on 3 or more origins per axis, on a sharp turn from oblique travel, and
+// when travel reverses on both axes. The whole window is never reported
+// while the window stays on 2 origins per axis, which holds when the
+// position stays within one cell of a point. Wider jitter can report it
+// (measured: uniform noise of 1.5 cells a cycle reported it in 6 to 9 of
+// 600 cycles, 2 cells in about 2 to 3%) (#57). The whole window
+// is also reported on the first cycle, after reset() or matchSize(), on a
+// jump of more than a tile, and whenever tiles are flagged for every cell
+// of it (a tide step over the threshold, a change of the chart set).
+S57Layer::Strip S57Layer::chooseStrip() const
+{
+  bool other = false;
+  for(int s = Strip::x_low; s <= Strip::y_high; s++)
+    other = other || (pending_[s].valid && s != last_reported_);
+  if(last_reported_ <= Strip::y_high)
+  {
+    if(other || !pending_[last_reported_].valid)
+      return Strip::none;
+    return last_reported_;
+  }
+
+  Strip oldest = Strip::none;
+  int waiting = 0;
+  for(int s = Strip::x_low; s <= Strip::y_high; s++)
+  {
+    if(!pending_[s].valid)
+      continue;
+    if(pending_[s].age >= 2)
+      waiting++;
+    if(oldest == Strip::none || pending_[s].age > pending_[oldest].age)
+      oldest = static_cast<Strip>(s);
+  }
+  return waiting >= 2 ? Strip::whole : oldest;
 }
 
 
@@ -367,6 +554,10 @@ void S57Layer::generateTile(TileID id)
     // chart coverage. updateCosts treats nullptr+complete as uncharted
     // and handles it according to allow_uncharted_.
     tiles_[id].costmap = nullptr;
+    // Report the tile, as the branch below does for a tile no chart covers:
+    // with allow_uncharted false it must be painted unknown, and nothing
+    // else would ask for it on a window that does not move.
+    tiles_[id].needs_update = true;
     return;
   }
 
