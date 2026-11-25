@@ -22,7 +22,9 @@
 
 #include "geometry_msgs/msg/point.hpp"
 #include "grid_map_core/GridMap.hpp"
+#include "grid_map_core/SubmapGeometry.hpp"
 #include "grid_map_core/iterators/GridMapIterator.hpp"
+#include "grid_map_core/iterators/SubmapIterator.hpp"
 #include "nav2_costmap_2d/cost_values.hpp"
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
@@ -49,9 +51,11 @@ struct AccessLog
 {
   std::uint64_t tile_calls = 0;  // calls on costmaps of the tile's size
   std::uint64_t tile_sets = 0;   // setCost calls among them
-  std::uint64_t all_calls = 0;
-  std::uint64_t out_of_range = 0;
-  std::string first_out_of_range;
+  std::uint64_t tile_out_of_range = 0;  // tile_calls out of range
+  std::string first_tile_out_of_range;
+  std::uint64_t other_calls = 0;  // calls on any other costmap
+  std::uint64_t other_out_of_range = 0;
+  std::string first_other_out_of_range;
   unsigned int tile_size = 0;
 
   void reset(unsigned int size)
@@ -70,21 +74,25 @@ AccessLog access_log;
 bool checkAccess(
   unsigned int size_x, unsigned int size_y, unsigned int mx, unsigned int my, bool set)
 {
-  access_log.all_calls++;
-  if (size_x == access_log.tile_size && size_y == access_log.tile_size) {
+  const bool tile = size_x == access_log.tile_size && size_y == access_log.tile_size;
+  if (tile) {
     access_log.tile_calls++;
     if (set) {
       access_log.tile_sets++;
     }
+  } else {
+    access_log.other_calls++;
   }
   if (mx >= size_x || my >= size_y) {
-    if (access_log.out_of_range == 0) {
+    auto & count = tile ? access_log.tile_out_of_range : access_log.other_out_of_range;
+    if (count == 0) {
       std::ostringstream first;
       first << (set ? "setCost" : "getCost") << "(" << mx << ", " << my << ") in a " <<
         size_x << " x " << size_y << " costmap";
-      access_log.first_out_of_range = first.str();
+      (tile ? access_log.first_tile_out_of_range : access_log.first_other_out_of_range) =
+        first.str();
     }
-    access_log.out_of_range++;
+    count++;
   }
   return static_cast<std::uint64_t>(my) * size_x + mx <
          static_cast<std::uint64_t>(size_x) * size_y;
@@ -180,7 +188,9 @@ unsigned char costOf(Charted charted)
 
 // A chart and window in quarter cells, so every edge is an integer. The
 // chart's west and south edges lie west_q and south_q quarter cells from the
-// window origin, its cells are cell_q quarter cells on a side.
+// window origin, its cells are cell_q quarter cells on a side. ulps_x and
+// ulps_y move the chart's centre that many representable doubles east or
+// north (west or south if negative) of where those integers put it.
 struct Geometry
 {
   double resolution;  // window cell, metres
@@ -189,6 +199,8 @@ struct Geometry
   int cell_q;
   int west_q;
   int south_q;
+  int ulps_x = 0;
+  int ulps_y = 0;
 
   // Chart cells per side: from its west/south edge to 3 window cells past
   // the window's east/north edge, rounded up.
@@ -203,6 +215,14 @@ struct Geometry
   double chartSouth() const {return origin_y + south_q * resolution / 4.0;}
 };
 
+double stepUlps(double value, int ulps)
+{
+  for (int k = 0; k < std::abs(ulps); k++) {
+    value = std::nextafter(value, ulps > 0 ? HUGE_VAL : -HUGE_VAL);
+  }
+  return value;
+}
+
 // The chart grid with every channel the layer reads, all NaN but elevation,
 // which follows chartedAt by the cell's index counted from the chart's own
 // west and south edges.
@@ -214,7 +234,9 @@ std::shared_ptr<grid_map::GridMap> makeChart(const Geometry & g)
   const double length = g.chartCells() * chart_resolution;
   grid->setGeometry(
     grid_map::Length(length, length), chart_resolution,
-    grid_map::Position(g.chartWest() + length / 2.0, g.chartSouth() + length / 2.0));
+    grid_map::Position(
+      stepUlps(g.chartWest() + length / 2.0, g.ulps_x),
+      stepUlps(g.chartSouth() + length / 2.0, g.ulps_y)));
   for (const auto & name : grid->getLayers()) {
     (*grid)[name].setConstant(std::numeric_limits<float>::quiet_NaN());
   }
@@ -239,7 +261,11 @@ std::shared_ptr<grid_map::GridMap> makeChart(const Geometry & g)
 // quotient, so a mistake there cannot pass on both sides. The chart cell
 // that overlaps the cell with positive area and has data, east-most and
 // then north-most (SubmapIterator's order; the first writer wins), or
-// NO_INFORMATION if there is none.
+// NO_INFORMATION if there is none. With chart cells smaller than a window
+// cell, several overlap it: of those with data, the one with the greatest
+// m, then the greatest n. A chart cell larger than a tile paints every cell
+// of each tile it overlaps. ulps_x and ulps_y are ignored: the expectation
+// is that of the exact quarter-cell geometry.
 unsigned char expectedCost(const Geometry & g, unsigned int i, unsigned int j)
 {
   const int cells = g.chartCells();
@@ -260,6 +286,40 @@ unsigned char expectedCost(const Geometry & g, unsigned int i, unsigned int j)
     }
   }
   return nav2_costmap_2d::NO_INFORMATION;
+}
+
+// The chart cells generateTile's SubmapIterator yields for tile (tx, ty),
+// requested as generateTile requests it, that lie wholly east of the tile
+// (east == true) or wholly north of it, by their quarter-cell edges: a chart
+// cell whose west (south) edge is on or past the tile's east (north) edge.
+int chartCellsBeyondTile(
+  const Geometry & g, const grid_map::GridMap & chart, int tx, int ty, bool east)
+{
+  const double tile_length = g.resolution * kTileSize;
+  const double world_min_x = g.origin_x + tx * g.resolution * kTileSize;
+  const double world_min_y = g.origin_y + ty * g.resolution * kTileSize;
+  const grid_map::Position tile_center(
+    world_min_x + g.resolution * kTileSize / 2.0, world_min_y + g.resolution * kTileSize / 2.0);
+  bool ok = false;
+  grid_map::SubmapGeometry overlap(
+    chart, tile_center, grid_map::Length(tile_length, tile_length), ok);
+  if (!ok) {
+    return 0;
+  }
+  int beyond = 0;
+  for (grid_map::SubmapIterator it(overlap); !it.isPastEnd(); ++it) {
+    grid_map::Position position;
+    chart.getPosition(*it, position);
+    const double chart_resolution = g.chartResolution();
+    const int m = static_cast<int>(std::floor((position.x() - g.chartWest()) / chart_resolution));
+    const int n = static_cast<int>(std::floor((position.y() - g.chartSouth()) / chart_resolution));
+    const int near_q = east ? g.west_q + m * g.cell_q : g.south_q + n * g.cell_q;
+    const int tile_far_q = 4 * static_cast<int>(kTileSize) * ((east ? tx : ty) + 1);
+    if (near_q >= tile_far_q) {
+      beyond++;
+    }
+  }
+  return beyond;
 }
 
 class TileEdgesTest : public ::testing::Test
@@ -323,10 +383,17 @@ protected:
              kTileSize << " x " << kTileSize << " tiles for " << painted <<
              " painted cells: the layer's tile accesses are not reaching them";
     }
-    if (log_.out_of_range != 0) {
+    if (log_.tile_out_of_range != 0) {
       return ::testing::AssertionFailure() <<
-             log_.out_of_range << " of " << log_.tile_calls <<
-             " tile accesses out of range; first " << log_.first_out_of_range;
+             log_.tile_out_of_range << " of " << log_.tile_calls <<
+             " getCost/setCost calls on " << kTileSize << " x " << kTileSize <<
+             " tiles out of range; first " << log_.first_tile_out_of_range;
+    }
+    if (log_.other_out_of_range != 0) {
+      return ::testing::AssertionFailure() <<
+             log_.other_out_of_range << " of " << log_.other_calls <<
+             " getCost/setCost calls on costmaps other than tiles out of range; first " <<
+             log_.first_other_out_of_range;
     }
     return ::testing::AssertionSuccess();
   }
@@ -371,6 +438,23 @@ protected:
     EXPECT_TRUE(cellsAsCharted(g));
   }
 
+  // As checkExact, the chart's centre moved one double west (east == true)
+  // or south of its exact place; first asserts that generateTile's
+  // SubmapIterator then yields, for tile (tx, ty), chart cells wholly east
+  // (north) of that tile, so the case cannot pass without reaching them.
+  void checkOneUlpBeyond(
+    double resolution, int west_q, int south_q, bool east, int tx, int ty)
+  {
+    Geometry g{resolution, kOriginX * resolution, kOriginY * resolution, 4, west_q, south_q};
+    (east ? g.ulps_x : g.ulps_y) = -1;
+    ASSERT_GT(chartCellsBeyondTile(g, *makeChart(g), tx, ty, east), 0) <<
+      "the iterator yields no chart cell wholly " << (east ? "east" : "north") <<
+      " of tile (" << tx << ", " << ty << "): this case would not reach the near clamp";
+    paint(g);
+    EXPECT_TRUE(accessesInRange());
+    EXPECT_TRUE(cellsAsCharted(g));
+  }
+
   // At 0.1 m no edge can be placed exactly: access only.
   void checkAccessOnly(int cell_q)
   {
@@ -403,6 +487,50 @@ TEST_F(TileEdgesTest, EastAndNorthTileEdgesHalfMetre) {checkExact(0.5, 4, -12, -
 // tile's edge.
 TEST_F(TileEdgesTest, InteriorEdgesOnly1m) {checkExact(1.0, 8, -12, -12);}
 TEST_F(TileEdgesTest, InteriorEdgesOnlyHalfMetre) {checkExact(0.5, 8, -12, -12);}
+
+// Chart cells of half a window cell, two per window cell on each axis. A
+// window cell takes, of the four chart cells over it, the east one with
+// data, and of the two east or two west ones the north one with data
+// (expectedCost). From 3 cells west and south of the window (-12 quarter
+// cells) a chart cell edge lies on every tile-cell edge, the tiles' edges
+// among them; a quarter cell more (-11) keeps every edge off them (a guard:
+// the pre-fix code also passes it).
+TEST_F(TileEdgesTest, HalfCellChartOnEdges1m) {checkExact(1.0, 2, -12, -12);}
+TEST_F(TileEdgesTest, HalfCellChartOnEdgesHalfMetre) {checkExact(0.5, 2, -12, -12);}
+TEST_F(TileEdgesTest, HalfCellChartOffEdgesGuard1m) {checkExact(1.0, 2, -11, -11);}
+
+// Chart cells of 8 window cells, two tiles across. From 4 cells west and
+// south of the window (-16 quarter cells) their edges lie at -4, 4 and 12
+// cells: on tile edges only, the window's east and north edges among them.
+// From 3 cells (-12) they lie at -3, 5 and 13: on interior tile-cell edges,
+// a guard: the pre-fix code also passes it, as with this chart's data each
+// tile cell it spread a chart cell into already held its own chart cell's
+// value.
+TEST_F(TileEdgesTest, LargeCellChartOnTileEdges1m) {checkExact(1.0, 32, -16, -16);}
+TEST_F(TileEdgesTest, LargeCellChartOnTileEdgesHalfMetre) {checkExact(0.5, 32, -16, -16);}
+TEST_F(TileEdgesTest, LargeCellChartInteriorEdgesGuard1m) {checkExact(1.0, 32, -12, -12);}
+
+// The near index's clamp to tile_size_: a chart cell wholly east (north) of
+// a tile reaches the loop only when grid_map's submap corner lookup rounds
+// across the tile's edge, never with exact geometry. The East and North
+// cases above, with the chart moved one double west (south): grid_map then
+// yields chart cells wholly east (north) of some tiles, among them the tile
+// each case names, while the layer's own arithmetic puts their near edge
+// exactly on the tile's edge; they must paint nothing. (The far index's
+// clamp to -1 needs no such case: at a tile's west or south corner an exact
+// coincidence already yields the chart cell beyond the edge, and with that
+// clamp raised to 0 the EastAndNorth cases fail on either axis, and the
+// North and HalfCellChartOnEdges cases on y.)
+TEST_F(TileEdgesTest, EastTileEdgeOneUlpWest1m) {checkOneUlpBeyond(1.0, -12, -11, true, 2, 0);}
+TEST_F(TileEdgesTest, EastTileEdgeOneUlpWestHalfMetre)
+{
+  checkOneUlpBeyond(0.5, -12, -11, true, 2, 0);
+}
+TEST_F(TileEdgesTest, NorthTileEdgeOneUlpSouth1m) {checkOneUlpBeyond(1.0, -11, -12, false, 0, 0);}
+TEST_F(TileEdgesTest, NorthTileEdgeOneUlpSouthHalfMetre)
+{
+  checkOneUlpBeyond(0.5, -11, -12, false, 0, 0);
+}
 
 // Control: no chart cell edge on any tile-cell edge.
 TEST_F(TileEdgesTest, QuarterCellOffControl1m) {checkExact(1.0, 4, -11, -11);}
