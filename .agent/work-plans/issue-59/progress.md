@@ -461,3 +461,13 @@ Read: the Local Review (Pre-Push) round 3 at `8c650af`, approved, nothing open. 
 
 ### Pull request body
 Replace "This pull request's Jazzy CI job is the first Jazzy compile and run." with the result (see the final message). No unsupported count found: 23 before and 51 after match `TEST` counts in `rolling` and the branch; the 17 failures were of the first batch (17 fail, 26 pass of 43) per progress.md; the six code commits match the commit list.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-25 05:50 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: owner
+**After**: merge
+**Decision**: merge
+
+The owner, asked whether to merge pull request 68 with the decision summary in the dialog (including that this fix can lower costs as well as raise them, and what is not shown): "Merge, then prepare the backport (Recommended)". The six code commits are then backported to `jazzy` by hand and that pull request is brought to him with its CI result before it is merged.
