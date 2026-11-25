@@ -662,30 +662,48 @@ protected:
     EXPECT_TRUE(accessesInRange(static_cast<bool>(cells)));
   }
 
+  // Which of the two cell centres generateTile computes for a one-cell axis
+  // is off the cell's position, and in which direction (the other equals it).
+  enum class Crossing { low_above, high_below };
+
   // A chart grid one cell long on axis short_axis (0: x, 1: y), the cell
-  // 3.75 m on a side centred at -7.97 m on that axis; four cells from
-  // -12.6 m on the other. The window: 12 x 12 cells of 1 m from (-12, -12) m,
-  // tiles of 4 cells; one update. Asserts first that the grid's west and east
-  // (south and north) cell centres, computed as generateTile computes them,
-  // cross; then every window cell and the accesses. In units of 5 mm every
-  // edge is an integer: the cell spans -1969 to -1219 on the short axis, the
-  // other cells' edges are -2520 + 750 n, window cell k spans -2400 + 200 k
-  // to -2200 + 200 k.
-  void checkOneCellAxis(int short_axis)
+  // 3.75 m on a side centred at `centre` m on that axis (centre_q in units of
+  // 5 mm); four cells from -12.6 m on the other. The window: 12 x 12 cells of
+  // 1 m from (-12, -12) m, tiles of 4 cells; one update. Asserts first that
+  // the grid's west and east (south and north) cell centres, computed as
+  // generateTile computes them, cross in the stated direction:
+  // Crossing::low_above, grid_lo + r/2 above the position and grid_hi - r/2
+  // equal to it; Crossing::high_below, grid_hi - r/2 below the position and
+  // grid_lo + r/2 equal to it. Then every window cell and the accesses. In
+  // units of 5 mm every edge is an integer: the cell spans centre_q - 375 to
+  // centre_q + 375 on the short axis, the other cells' edges are
+  // -2520 + 750 n, window cell k spans -2400 + 200 k to -2200 + 200 k.
+  void checkOneCellAxis(int short_axis, double centre, int centre_q, Crossing crossing)
   {
+    ASSERT_EQ(std::lround(centre * 200.0), centre_q);
     const double r = 3.75;
     auto grid = std::make_shared<grid_map::GridMap>(
       std::vector<std::string>{"elevation", "overhead", "restricted", "unsurveyed", "caution"});
     grid->setGeometry(
       short_axis == 0 ? grid_map::Length(r, 4 * r) : grid_map::Length(4 * r, r), r,
-      short_axis == 0 ? grid_map::Position(-7.97, -5.1) : grid_map::Position(-5.1, -7.97));
+      short_axis == 0 ? grid_map::Position(centre, -5.1) : grid_map::Position(-5.1, centre));
     ASSERT_EQ(grid->getSize()[short_axis], 1);
     ASSERT_EQ(grid->getSize()[1 - short_axis], 4);
     const double half = grid->getResolution() / 2.0;
-    const double grid_lo = grid->getPosition()[short_axis] - grid->getLength()[short_axis] / 2.0;
-    const double grid_hi = grid->getPosition()[short_axis] + grid->getLength()[short_axis] / 2.0;
-    ASSERT_GT(grid_lo + half, grid_hi - half) <<
+    const double position = grid->getPosition()[short_axis];
+    const double grid_lo = position - grid->getLength()[short_axis] / 2.0;
+    const double grid_hi = position + grid->getLength()[short_axis] / 2.0;
+    const double centre_lo = grid_lo + half;
+    const double centre_hi = grid_hi - half;
+    ASSERT_LT(centre_hi, centre_lo) <<
       "the cell centres do not cross here, so this case would not reach the crossed bounds";
+    if (crossing == Crossing::low_above) {
+      ASSERT_GT(centre_lo, position);
+      ASSERT_EQ(centre_hi, position);
+    } else {
+      ASSERT_LT(centre_hi, position);
+      ASSERT_EQ(centre_lo, position);
+    }
 
     for (const auto & name : grid->getLayers()) {
       (*grid)[name].setConstant(std::numeric_limits<float>::quiet_NaN());
@@ -723,7 +741,7 @@ protected:
         const int s = -2400 + 200 * static_cast<int>(short_axis == 0 ? i : j);
         const int l = -2400 + 200 * static_cast<int>(short_axis == 0 ? j : i);
         unsigned char expected = nav2_costmap_2d::NO_INFORMATION;
-        if (s < -1219 && s + 200 > -1969) {
+        if (s < centre_q + 375 && s + 200 > centre_q - 375) {
           // The cell with data that is north-most (east-most) of those overlapping.
           for (int n = 3; n >= 0; n--) {
             const int south = -2520 + 750 * n;
@@ -943,14 +961,37 @@ TEST_F(TileEdgesTest, GridLargerThanBoundsPreFilterSkips1m)
 // A chart grid one cell long on x, then on y, whose two cell centres on that
 // axis round an ulp apart in the wrong order (checkOneCellAxis asserts it):
 // generateTile must order the bounds it clamps the tile to, as std::clamp
-// requires. The unfixed source passed crossed bounds. Where libstdc++ checks
+// requires. The crossing goes both ways, so each direction has its own pair:
+// LowCentreAbove, the cell centred at -7.97 m, where grid_lo + r/2 rounds
+// above the cell's position and grid_hi - r/2 equals it (a fix that reset
+// only the upper bound would still pass crossed bounds); HighCentreBelow,
+// centred at 0.47 m (the cell from -1.405 m, partly inside the window's
+// last two columns or rows), where grid_hi - r/2 rounds below and
+// grid_lo + r/2 equals it (a fix that reset only the lower bound would).
+// Both sums are additions and subtractions of exact halves (1.875) to the
+// literal, so they round the same with any IEEE double toolchain.
+// The unfixed source passed crossed bounds. Where libstdc++ checks
 // its assertions (-D_GLIBCXX_ASSERTIONS, which GCC 15's libstdc++ also
 // defines in an unoptimized build such as this package's default colcon
 // build) it aborts in std::clamp here. Without them it returns the upper
 // bound, which gives these same cells, so in an optimized build (and with
 // GCC 13 on Jazzy) this case cannot fail on the unfixed source. The fixed
 // source passes either way.
-TEST_F(TileEdgesTest, OneCellLongOnX) {checkOneCellAxis(0);}
-TEST_F(TileEdgesTest, OneCellLongOnY) {checkOneCellAxis(1);}
+TEST_F(TileEdgesTest, OneCellLongOnXLowCentreAbove)
+{
+  checkOneCellAxis(0, -7.97, -1594, Crossing::low_above);
+}
+TEST_F(TileEdgesTest, OneCellLongOnYLowCentreAbove)
+{
+  checkOneCellAxis(1, -7.97, -1594, Crossing::low_above);
+}
+TEST_F(TileEdgesTest, OneCellLongOnXHighCentreBelow)
+{
+  checkOneCellAxis(0, 0.47, 94, Crossing::high_below);
+}
+TEST_F(TileEdgesTest, OneCellLongOnYHighCentreBelow)
+{
+  checkOneCellAxis(1, 0.47, 94, Crossing::high_below);
+}
 
 }  // namespace
