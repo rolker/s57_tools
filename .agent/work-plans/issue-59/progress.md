@@ -380,3 +380,31 @@ Package suite and `test_tile_edges` ×30 as above; no new compiler warning (only
 **Decision**: address
 
 Read: the Local Review (Pre-Push) round 2 at `f2a0230`, approved, two suggestions. One short pass, then a narrow re-review, then publish. (1) The one-cell tests exercise one crossing direction only (`grid_lo + r/2` an ulp above the centre): a fix that reset only `centre_lo` passes all 49 tests. Add the mirrored case, where `grid_hi - r/2` rounds below the centre and `grid_lo + r/2` equals it (the review suggests a 3.75 m cell centred at 0.47 m, or 0.2 m at 0.08 m: verify by evaluating the layer's expressions), on x and on y, with the precondition asserted, and show that resetting only `centre_lo`, and resetting only `centre_hi`, each now fails a test in an assertions-on build. (2) The message of `b39ec5b` says the tests abort on the unfixed source "in an unoptimized or -D_GLIBCXX_ASSERTIONS build"; for an unoptimized build that holds with GCC 15 only. History is not rewritten for it; the test's comment is right, and the pull request states it correctly.
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 23:16 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+
+**Branch**: feature/issue-59 at `279ddef`
+**Addressed**: Local Review (Pre-Push) at `7944007` (2026-11-24 23:09 -05:00)
+**Commits**: `8c650af` (test only, `s57_layer/test/test_tile_edges.cpp`, ends "Backport to jazzy."); `279ddef` (records: boxes ticked)
+
+### Actions
+- [x] (suggestion) one-cell tests covered one crossing direction only — `s57_layer/test/test_tile_edges.cpp` (`checkOneCellAxis`, `8c650af`). The helper now takes the centre (and the same in 5 mm units) and a `Crossing` (`low_above`, `high_below`); it asserts `centre_hi < centre_lo` with the layer's own expressions on the grid's `getPosition/getLength/getResolution`, then for `low_above` `centre_lo > position` and `centre_hi == position`, for `high_below` `centre_hi < position` and `centre_lo == position`; then every window cell against the integer expectation (cell span `centre_q ± 375`) and the accesses. Existing pair renamed `OneCellLongOn{X,Y}LowCentreAbove` (3.75 m cell at -7.97 m: `lo - p` = +8.9e-16, `hi - p` = 0); new pair `OneCellLongOn{X,Y}HighCentreBelow` (3.75 m cell at 0.47 m: `lo - p` = 0, `hi - p` = -2.2e-16; the cell spans -1.405 to 2.345 m, so it reaches window columns/rows 10 and 11). The comment saying where these can fail without the fix (assertions-on: GCC 15 unoptimized or `-D_GLIBCXX_ASSERTIONS`; otherwise cells only) is kept and now names both directions.
+- [x] (suggestion) `b39ec5b`'s message on "unoptimized" — not changed (deferred: history is not rewritten; the test's comment and the pull request state it correctly).
+
+### Evidence (Rolling, GCC 15.2)
+- **Values**: found by evaluating `(p - L/2.0) + r/2.0` and `(p + L/2.0) - r/2.0` in doubles for L = r = 3.75: p = 0.47 gives lo = 0.46999999999999997 (= p), hi = 0.46999999999999975; p = -7.97 gives lo = p + 8.9e-16, hi = p. (0.2 m at 0.08 m also crosses the high-below way; 3.75 m was kept so one fixture shape serves both.)
+- **Jazzy (GCC 13, x86-64)**: for 0.47 as for -7.97, the arithmetic is only additions and subtractions of exact values (L = 1 × 3.75 and the halves 1.875 are exact; the division by 2.0 is exact) to the literal; no product that could be contracted (x86-64 without `-march` has no FMA, and a contracted `L*0.5` is exact anyway). The crossing is the same bit for bit; grid_map 2.2.2's `setGeometry` is as 2.5.0's (review round 2).
+- **Mutations** (scratch builds, `-O2 -D_GLIBCXX_ASSERTIONS`, layer source compiled into the test, `ldd`: no `libs57_layer`):
+  - full fix: `[  PASSED  ] 51 tests.`, each of the four one-cell tests passes alone.
+  - only `centre_lo` reset: `OneCellLongOnXHighCentreBelow` and `OneCellLongOnYHighCentreBelow` each exit 134, `stl_algo.h:3638: ... std::clamp ... Assertion '!(__hi < __lo)' failed.`; the two `LowCentreAbove` pass; the whole run aborts (exit 134).
+  - only `centre_hi` reset: `OneCellLongOnXLowCentreAbove` and `OneCellLongOnYLowCentreAbove` each exit 134 with the same assertion line; the two `HighCentreBelow` pass; the whole run aborts.
+- **Suite**: `build.sh --packages-up-to s57_layer --parallel-workers 4`; `test.sh --packages-select s57_layer --parallel-workers 1 --ctest-args -j1`: **133 tests, 0 errors, 0 failures, 9 skipped** (cppcheck's own skip). `test_tile_edges`: 51 tests, **30 of 30 runs pass** (`ldd`: the worktree's freshly built library).
+
+### Statement for the pull request (corrected, about `b39ec5b`)
+On the unfixed code the one-cell tests abort in an assertions-on build (GCC 15 unoptimized, which is this workspace's default build on Ubuntu 26.04, or any build with `-D_GLIBCXX_ASSERTIONS`); on GCC 13 without that flag (Jazzy CI) they check the cells only. They now cover both directions in which a one-cell axis's two centres can cross.
+
+### Checks
+Pre-commit hooks ran on both commits. Scratch work in a folder of my own in the session scratchpad, removed; `core_ws/build`, `install`, `log` removed; no process left running; nothing pushed, nothing posted.
