@@ -516,10 +516,11 @@ TEST_F(RollingWindowTest, NegativeNonBinaryOffsetRoundsToNearestCellOnBothAxes)
 // brings the offset's fraction into [0.75, 1) at some cycle, where the two
 // formulas truncate to different cells.
 //
-// Charts. Their cell edges lie a quarter cell off the tile edges, and they
-// cover every tile a path reaches, so rolker/s57_tools#63 (a chart cell
-// edge on a tile edge) and #59 (a tile whose centre is outside a chart)
-// cannot affect these cases.
+// Charts. Their cell edges lie a quarter cell off the tile-cell edges, so
+// which chart cell a tile cell takes never depends on rounding at an exact
+// edge (test_tile_edges covers exact edges), and they cover every tile a
+// path reaches, so #59 (a tile whose centre is outside a chart) cannot
+// affect these cases.
 
 constexpr unsigned int kCells = 20;
 
