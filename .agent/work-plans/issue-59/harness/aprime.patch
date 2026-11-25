@@ -1,0 +1,39 @@
+--- a/s57_layer/src/s57_layer.cpp
++++ b/s57_layer/src/s57_layer.cpp
+@@ -612,8 +612,35 @@
+     for(auto grid: grids)
+     {
+       auto grid_half_resolution = grid.second->getResolution()/2.0;
++      // (a'): clip the tile to the grid's cell centres.
++      const grid_map::Position grid_position = grid.second->getPosition();
++      const grid_map::Length grid_length = grid.second->getLength();
++      grid_map::Position request_center = tile_center;
++      grid_map::Length request_length = tile_size;
++      const double tile_lo[2] = {world_min_x, world_min_y};
++      const double tile_hi[2] = {world_max_x, world_max_y};
++      bool overlaps = true;
++      for(int a = 0; a < 2; a++)
++      {
++        const double grid_lo = grid_position[a] - grid_length[a]/2.0;
++        const double grid_hi = grid_position[a] + grid_length[a]/2.0;
++        if(grid_lo >= tile_hi[a] || grid_hi <= tile_lo[a])
++        {
++          overlaps = false;
++          break;
++        }
++        const double lo = std::clamp(tile_lo[a], grid_lo + grid_half_resolution, grid_hi - grid_half_resolution);
++        const double hi = std::clamp(tile_hi[a], grid_lo + grid_half_resolution, grid_hi - grid_half_resolution);
++        if(lo != tile_lo[a] || hi != tile_hi[a])
++        {
++          request_center[a] = lo + (hi - lo)/2.0;
++          request_length[a] = hi - lo;
++        }
++      }
++      if(!overlaps)
++        continue;
+       bool submap_ok = false;
+-      grid_map::SubmapGeometry overlap(*grid.second, tile_center, tile_size, submap_ok);
++      grid_map::SubmapGeometry overlap(*grid.second, request_center, request_length, submap_ok);
+       if(submap_ok)
+       {
+         for(grid_map::SubmapIterator smi(overlap); !smi.isPastEnd(); ++smi)
