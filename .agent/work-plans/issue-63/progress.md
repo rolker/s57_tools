@@ -408,3 +408,28 @@ Read: the Local Review (Pre-Push) round 1 at `4250a7f`, approved, three suggesti
 - Follow-up for the owner, beside the straddle question: a tolerance on the quotient, or lethal wins, for edges within rounding.
 
 Next: `/review-code --branch`.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-11-24 20:33 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: approved
+
+**Branch**: feature/issue-63 at `514b48b`
+**Base**: origin/rolling
+**Depth**: Deep (reason: whole-diff tier as round 1; round 2 narrow per handoff: the fix diff `4250a7f..c2acf6c`, no cross-model reviewers or adversarial subagent)
+**Must-fix**: 0 | **Suggestions**: 1
+**Round**: 2 | **Ship**: recommended — no must-fix findings; remaining suggestions can be applied or tracked
+
+Reviewed: code commits `c3cd7a5` and `c2acf6c` (head of code at `c2acf6c`; later commits touch `.agent/` only). Cross-model: skipped (round-2 narrow check, per handoff).
+
+Verified here:
+- Index arithmetic: `git diff 4250a7f..c2acf6c -- s57_layer/src/s57_layer.cpp` adds 6 comment lines only. The new comment is true (`S57Dataset::getGrid` exists in marine_charts); the CMake comment is accurate and the setCost-count assertion it names exists (`accessesInRange`).
+- One-ulp tests' precondition: computed with grid_map's `SubmapGeometry`/`SubmapIterator` requested as `generateTile` requests it (a change to that request needs the test updated), classified by integer quarter-cell edges, independent of the layer's quotient. Jazzy's released grid_map is 2.2.2-2 (rosdistro jazzy); tag 2.2.2 is `origin/jazzy` head `d961499`. `GridMapMath.cpp`, `SubmapGeometry.cpp`, `SubmapIterator.cpp`, `GridMap.cpp` and `GridMapMath.hpp` are identical between it and 2.5.0 (this machine); 2.2.2..2.5.0 touches no arithmetic in grid_map_core. Every product in the path (`resolution * index`, `0.5 * length`, the 2x2 sign transforms, `n * resolution / 4`) is exact, so contraction to FMA cannot change a result even where it applies; x86-64 uses SSE2 (no x87 excess precision), no `-ffast-math`; the jazzy CI job is ubuntu-24.04 x86-64. The precondition is deterministic there; if it ever failed, `ASSERT_GT` reports a failure, which is right (a skip would hide lost coverage of the near clamp).
+- Mutations, layer source compiled into a scratch build (ldd checked): near clamp to `tile_size_ - 1` on x fails exactly EastTileEdgeOneUlpWest1m/HalfMetre (by value), on y exactly NorthTileEdgeOneUlpSouth1m/HalfMetre; far lower clamp to 0 fails 2 (x) and 6 (y), the tests the comment names; near lower clamp removed fails TenthMetreOneCellChart on each axis. Pre-fix `s57_layer.cpp` (`origin/rolling`): 19 of 23 fail, the 2 guards and 2 controls pass; HalfCellChartOnEdges1m by access (getCost(4, 3)) and value, LargeCellChartOnTileEdges1m by access (getCost(4, 0)), InteriorEdgesOnly1m by value, the one-ulp cases by access and value. `expectedCost` (greatest m, then greatest n, with data) matches SubmapIterator's east-then-north order in integer arithmetic.
+- Rolling, `test.sh --packages-select s57_layer --parallel-workers 1`: 105 tests, 0 errors, 0 failures, 9 skipped. `test_tile_edges` 30 of 30 repeats pass.
+- Hygiene: neither commit touches `.agent/`; both name #63 and end their body with "Backport to jazzy." before the trailers. `4250a7f`, `c3cd7a5`, `c2acf6c` cherry-pick onto `origin/jazzy` `c8f253e` in that order without conflict (scratch worktree, removed).
+- The newest Implementation entry's pull-request statements: each supported by the runs above.
+
+### Findings
+- [ ] (suggestion) The pull-request statement "grid_map's corner arithmetic is assumed the same there" can say it is checked: Jazzy's released grid_map_core 2.2.2 has the same GridMapMath/SubmapGeometry/SubmapIterator/GridMap sources as 2.5.0, and every product in the path is exact, so FMA or compiler version cannot move the one-ulp result — `.agent/work-plans/issue-63/progress.md:407`
