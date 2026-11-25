@@ -237,3 +237,13 @@ The fix is correct and bounded for every input that can reach it. The checkpoint
 - [ ] In `test_tile_edges`, drop the "Nav2-internal calls are not checked" claim, and make the "at least one call" assertion specific to tile-sized costmaps (or to the number of painted cells).
 - [ ] Compute the test's expectation without the layer's quotient arithmetic (integer cell counts at binary-exact geometry), and say so in the test.
 - [ ] Use the equivalence statement in finding 4 in the pull request.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 19:48 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (the plan review's verdict is ready; its findings are implementation details; its independent run confirmed the condition the host set on the half-open form)
+**After**: plan
+**Decision**: proceed
+
+Read: the Plan Review at `c7479c9`, verdict ready, three minor findings and an information note. The half-open form stays: the review's own comparison (20,000 random cases, 66.2 million cells, a different generator and seeds) found 0 differing cells on non-aligned geometry, and in near-aligned geometry the new code is right in every differing cell not itself within rounding of an edge. Findings applied: (1) **both indices are clamped on both sides in double before the cast** (`std::min(double(tile_size_), ...)` on the near index and `std::max(-1.0, ...)` on the far one, added to the plan's one-sided clamps), so the cast is defined for every double; the comment says so and does not rely on the submap region. (2) The test's "at least one call" safeguard is made specific to the tiles: calls are counted on costmaps of the tile's size, or the count is at least the number of tile cells painted, since on Rolling Nav2's own calls are interposed too; the test's comment does not claim otherwise. (3) The expectation is computed in integer cell counts or in chart-index space from the chart's own edges, never with the layer's quotient, and the test says so. (4) The pull request carries the review's equivalence statement. The out-of-range check stays as the plan has it (bounds-checking accessors defined in the test executable); an extracted arithmetic function was weighed and not taken, because it would not have shown the north-edge access and restructures hazard-marking code.
