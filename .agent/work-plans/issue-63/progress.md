@@ -136,3 +136,104 @@ Read: the Issue Review, status complete. Scope stands: no out-of-range access in
 **Plan**: `.agent/work-plans/issue-63/plan.md` at `c7479c9`
 
 Option (b): each chart cell's tile-cell range from half-open intervals (near `max(0, floor(q))`, far `min(tile_size - 1, ceil(q) - 1)`), replacing the two `worldToMapEnforceBounds` calls. Measured identical to today over 20000 random real-chart-like cases (0 differing cells, 0 coincidences); in 3000 near-aligned cases every difference where no quotient is an integer (303 cells) traces to a chart cell where today's code accesses out of range or paints from a chart cell wholly outside the tile. Tested in a new `test_tile_edges` executable that interposes bounds-checking `Costmap2D::getCost`/`setCost` (checked sound on Rolling and on the Jazzy 1.3.14 binary, and self-checking by call count); prototype fails 5 of 6 tests on today's source and passes with the fix.
+
+## Plan Review
+**Status**: complete
+**When**: 2026-11-24 19:47 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: ready
+
+**Issue**: #63 — s57_layer generateTile reads and writes one cell past a tile row when a chart cell edge lies exactly on the tile edge
+**Plan**: `.agent/work-plans/issue-63/plan.md` at `c7479c9`
+**Branch**: `feature/issue-63`
+
+### Evaluation
+
+| Dimension | Verdict | Notes |
+|---|---|---|
+| Scope | Good | One loop in hazard-marking code (`s57_layer.cpp:628-638`), one new test executable, two comment rewordings. One code commit, cherry-pickable to `jazzy` (`s57_layer/src` is identical on `rolling` and `origin/jazzy` at `c8f253e`). |
+| Issue alignment | Good | Option (b), as the checkpoint chose. The checkpoint's condition is met; independently re-measured below. The issue review's recommendations are taken: test comments, bounds-checking accessors, access-only at 0.1 m, offsets kept. Its "0.25 m if cheap" is not taken (optional). Serves: "The project keeps no goals or design document; in practice: vessels' costmaps show charted hazards where they are charted, and the costmap node does not corrupt its memory." Checked, and accepted for a project with no goals written down. |
+| File targeting | Good | `s57_layer.cpp`, new `test/test_tile_edges.cpp`, `CMakeLists.txt`, and the two test comments. `grep` finds no other `worldToMap*`/`getCost`/`setCost` use in the layer. `updateCosts` is already half-open (issue review). |
+| Consequences | Good | README says nothing on compositing. #59 is a separate hunk. The two test comments are included. |
+| Principle alignment | Good | Test what breaks: each case fails on today's source by value or by access (planner's prototype; see finding 3 on keeping the expectation independent). Only what's needed: four index lines. Design picture: none; the project has no design document. Prior art: the issue review's harness, and the half-open ranges `updateCosts`/`bathymetry_layer` already use. |
+| ADR compliance | Good | 0013 (entries), 0002 (worktree), 0019 (base `rolling`, `cherry-pick -x` to `jazzy`). 0017 is not triggered. |
+| ROS conventions | Good | No topic, QoS or parameter change. Nav2 `Costmap2D` formulas are identical on both distros (issue review). The test fixture is a fixed, non-rolling costmap, so the Jazzy/Rolling rolling-window size difference cannot enter. |
+
+### Independent checks
+
+**Arithmetic.** `world_min_x` (`x_origin_ + id.first*resolution_*tile_size_`) and `resolution_` are the exact values passed to the tile's `Costmap2D` constructor, which stores them unchanged (`costmap_2d.cpp:53`). `worldToMap*` computes `(wx - origin_x_)/resolution_`. The planned quotient is therefore bit-identical to Nav2's. Loop variables are `int`, so `tile_min > tile_max` gives no iterations. Every case below was checked:
+- a chart cell wholly inside;
+- straddling each edge;
+- larger than the tile: `[0, T-1]`;
+- touching from outside: empty;
+- touching from inside: only the overlapped cells;
+- zero width: one cell if `q` is not an integer, none if it is.
+
+2,000,000 random chart cell edges within ±3 ulps of a tile or tile-cell edge (origins -12.3 and ±1e5, resolutions 1, 0.5, 0.25, 0.1, 0.05, 0.3, tiles 1, 4 and 100) gave 0 indices outside `[0, T-1]` in a non-empty loop. Today's far index came out as `T` 27,815 times. NaN coordinates give the whole tile (`std::max(0.0, NaN)` is 0 and `std::min(last, NaN)` is `last`), where today's code has an undefined cast. The clamps are one-sided (finding 1).
+
+**Equivalence, own harness.** Rolling's real `Costmap2D` (`worldToMapEnforceBounds` for today's loop) and real grid_map `SubmapGeometry`/`SubmapIterator`. Both loops run against checked accessors, with the east wrap kept visible by value. The expectation is computed in `long double` in chart-index space, measured from the chart's east/north edge (positive-area overlap, data, east-most then north-most, finest chart first). It ignores any chart whose `SubmapGeometry` fails, so #59 does not count as a difference.
+
+The generator differs from the planner's:
+- resolutions 1, 0.5, 0.25, 0.1, 0.05 m; tiles 1, 4 and 100;
+- chart/tile cell ratios log-uniform in 0.2-40, plus 0.03-0.13 and 2-7 tile widths;
+- one to three charts per case, each partial on any side;
+- layer origins 0, ±10 m, ±1e6 m and -1e5..-2e5 m;
+- tile IDs ±20 or down to -3000;
+- 20% no data.
+
+| Set | Cases | Tile cells | Differing cells | Today wrong vs expectation | Planned wrong | Out of range today / planned |
+|---|---|---|---|---|---|---|
+| Random, seed 4242 | 20000 | 66.2 M | **0** | 0 | 0 | 0 / 0 |
+| Near-aligned (snapped to tile-cell edges, jitter 0, ±1 ulp, ±1e-12, ±1e-9 m), seed 4243 | 6000 | 20.1 M | 74081 in 590 cases | 1386 unambiguous + rest within rounding | 0 unambiguous | 30840 / 0 |
+| Near-aligned, seed 99 | 6000 | 19.6 M | 74834 in 644 cases | 2557 unambiguous | 0 unambiguous | 38824 / 0 |
+
+Of the differing cells, the planned code was right in every one where no chart cell edge lies within 1e-7 cell of the tile cell's edge (1386 and 2557). Today's code was never right where the planned code was wrong. The rest (72695 and 72277) are within rounding of an edge, where the "right" owner depends on rounding.
+
+Per case, the planner's statement holds exactly. In every case where today's code makes no out-of-range access and writes no tile cell from a chart cell whose own double quotients say it only touches that cell or lies outside the tile (4873 of 6000 and 4794 of 6000), not one cell differs.
+
+**Chart cells wholly outside the tile.** These are the planner's second and third categories.
+- **Random geometry:** 0 writes in 66.2 M cells.
+- **Near-aligned geometry:** the largest gap between such a chart cell and the tile cell it painted was 1.4e-9 tile cells. It is never a full cell away.
+- **Mechanism:** `getSubmapInformation` finds each corner's chart cell as `trunc((map_east - corner)/res)` (`GridMapMath.cpp:156`, `:74-77`).
+  - The tile's west/south corner lying exactly on a chart cell edge selects the chart cell beyond it. This happens by construction at exact alignment.
+  - At the east/north corner it happens only when rounding goes the other way.
+  - `boundPositionToRange`'s epsilon applies only at a chart's own boundary, and moves the corner inward.
+
+So such a chart cell touches the tile only within rounding and overlaps it with zero area. Not painting from it is clearly correct.
+
+**Painting rule.** `incrementIndexForSubmap` (`GridMapMath.cpp:542-548`) runs index 1 (north to south) inner and index 0 (east to west) outer. With write-if-unknown, the first chart cell with data that the loop reaches wins. The fix changes neither the order nor the write rule. It changes only the set of tile cells a chart cell may claim, to those it overlaps with positive area (in the double quotient).
+
+**Interposition.**
+- **On this machine:** a scratch shared library calling `Costmap2D::getCost`/`setCost` gets `R_X86_64_JUMP_SLOT` relocations, and an executable defining both exports them `GLOBAL DEFAULT` and receives the calls. This holds with `-Wl,--as-needed`, with `-flto=auto`, and with `-Wl,-Bsymbolic-functions` on the executable; the latter two are Ubuntu resolute's `dpkg-buildflags` LDFLAGS here.
+- **`-Bsymbolic-functions` and LTO:** they bind only a library's calls to its own definitions. The layer defines neither function, so its calls are interposed whatever flags Nav2 or the layer is built with. Static linking of Nav2 would be a duplicate-symbol link error. Nav2 making them inline in the header would be a redefinition compile error. Both failures are loud.
+- **Standard and platform:** by the C++ standard this is an ODR violation (no diagnostic required). Under ELF it is defined symbol interposition, the same mechanism as malloc replacement.
+- **The remaining silent failure:** a platform where the executable's definition is not preferred, for example macOS two-level namespaces or Windows; neither is a target. The call-count assertion turns that into a failure. A CI failure for that reason is acceptable.
+- **Correction to the plan:** on this machine's Rolling underlay, `libnav2_costmap_2d_core.so` *does* call both through its own PLT (`JUMP_SLOT` at `0x1fa280`/`0x1faaa8`, no `DT_SYMBOLIC`). Nav2-internal calls are interposed too, which is harmless (finding 2).
+
+Recommendation: keep the interposition as planned. It checks every access the hazard path makes, wherever the arithmetic goes wrong, including future changes from #59. An extracted `tileCellRange()` pure function would test only the arithmetic, would not have shown the north overrun, and changes hazard-marking code's structure for a test. It is not needed. ASan builds would duplicate the build.
+
+### Findings
+
+1. **[Principle alignment: arithmetic], minor.** The clamps are one-sided. The plan's sentence "Clamping in `double` before the cast keeps the cast in range" is not true as stated:
+   - `tile_min` is unbounded above and `tile_max` is unbounded below;
+   - `q_near` = 1e300 or `+inf`, or `q_far` = `-inf`, reaches `static_cast<int>` out of range, which is undefined.
+
+   It is unreachable today, because `SubmapIterator` yields only chart cells that overlap the tile or touch it within rounding (measured gap ≤ 1.4e-9 cell). It would matter if #59 iterates a wider superset, as the plan's Consequences invites. Resolution: either clamp the other side too, at the cost of two calls in the same four lines, or make the comment state the reliance on the submap region. The two clamps are `std::min(double(tile_size_), ...)` on the near index and `std::max(-1.0, ...)` on the far one. The clamp is recommended: the cast is then defined for every double, including NaN, which gives the full tile.
+2. **[File targeting: test], minor.** The plan says `libnav2_costmap_2d_core.so` "has no PLT relocations of its own for them, so Nav2-internal calls are not checked". That holds for the Jazzy binary the planner inspected, but not for this machine's Rolling underlay: Nav2's own calls are interposed there too. Harmless, but the test's comment should not repeat the claim.
+   - **Why the safeguard needs tightening:** Nav2-internal calls can satisfy "at least one call", so that safeguard proves the layer's calls arrived only by inference.
+   - **Resolution:** count calls on the tiles' own costmaps (`size_x_ == tile_size`, as the fixture's master costmap is 12 x 12 and the tiles 4 x 4), or assert the count is at least the number of tile cells painted.
+3. **[Principle alignment: test], minor.** The expectation is described as computed "from the chart grid alone using the painting rule", but how is not specified. It must not reuse the layer's `floor`/`ceil` quotient on `(edge - world_min)/resolution`, or a shared mistake passes both. At the binary-exact 1 m and 0.5 m geometry the plan uses, compute it in integer cell counts, or in chart-index space from the chart's own edge, and say so in the test.
+4. **[Issue alignment], info.** The equivalence statement for the pull request, as checked here:
+
+   > Output is identical to today's in every tile where today's code makes no out-of-range access and writes no tile cell from a chart cell that, by the same double quotients, only touches that cell or lies outside the tile. Such chart cells arise only where a chart cell edge lies within floating-point rounding of a tile or tile-cell edge: never in 66.2 M cells of non-aligned geometry, and never more than 1.4e-9 cell away in near-aligned geometry. Where the output differs, the new value is the positive-area owner in every cell not itself within rounding of an edge.
+
+### Summary
+
+The fix is correct and bounded for every input that can reach it. The checkpoint's equivalence condition is independently confirmed: 0 differing cells over 66.2 M random, real-chart-like tile cells, and every unambiguous difference in near-aligned geometry favours the new code. The wholly-outside-the-tile painting that it removes happens only at zero-area contact within rounding. The interposition test is sound on ELF and fails loudly where it would not take. Ready for implementation; the three minor findings can be folded in while implementing.
+
+### Recommended Actions
+
+- [ ] Clamp `tile_min` above (to `tile_size_`) and `tile_max` below (to -1) in `double` before the casts, or reword the comment to state the reliance on `SubmapIterator`'s region.
+- [ ] In `test_tile_edges`, drop the "Nav2-internal calls are not checked" claim, and make the "at least one call" assertion specific to tile-sized costmaps (or to the number of painted cells).
+- [ ] Compute the test's expectation without the layer's quotient arithmetic (integer cell counts at binary-exact geometry), and say so in the test.
+- [ ] Use the equivalence statement in finding 4 in the pull request.
