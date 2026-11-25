@@ -423,3 +423,13 @@ Pre-commit hooks ran on both commits. Scratch work in a folder of my own in the 
 
 ### Findings
 - [ ] No issues found. LGTM.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 23:18 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (pre-push review round 3 approved with no findings)
+**After**: publish
+**Decision**: publish
+
+Read: the Local Review (Pre-Push) round 3 at `8c650af`, approved, nothing open. Six code commits: `edd754b`, `b39ec5b`, `21d9838`, `4dbfa81`, `f2a0230`, `8c650af`. The pull request's Jazzy CI job is the first Jazzy compile and run.
