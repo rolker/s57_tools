@@ -647,8 +647,17 @@ void S57Layer::generateTile(TileID id)
           overlaps = false;
           break;
         }
-        const double lo = std::clamp(tile_lo[a], grid_lo + grid_half_resolution, grid_hi - grid_half_resolution);
-        const double hi = std::clamp(tile_hi[a], grid_lo + grid_half_resolution, grid_hi - grid_half_resolution);
+        double centre_lo = grid_lo + grid_half_resolution;
+        double centre_hi = grid_hi - grid_half_resolution;
+        // One cell on this axis: the two can round an ulp apart in either
+        // order, and std::clamp needs them ordered. Use the cell's centre.
+        if(centre_hi < centre_lo)
+        {
+          centre_lo = grid_position[a];
+          centre_hi = grid_position[a];
+        }
+        const double lo = std::clamp(tile_lo[a], centre_lo, centre_hi);
+        const double hi = std::clamp(tile_hi[a], centre_lo, centre_hi);
         if(lo != tile_lo[a] || hi != tile_hi[a])
         {
           request_center[a] = lo + (hi - lo)/2.0;
