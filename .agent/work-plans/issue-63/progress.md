@@ -314,3 +314,47 @@ Scratch harness: today's loop copied verbatim (checked by `diff`) and the final 
 - **Not established:** Jazzy until the PR's Jazzy CI job (first Jazzy compile and run; GCC 13 not tried here). No real NOAA chart was run through the grid code. The straddle rule (owner's question) is untouched.
 
 Build folders and scratch removed; nothing left running.
+
+## Local Review (Pre-Push)
+**Status**: complete
+**When**: 2026-11-24 20:18 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Verdict**: approved
+
+**Branch**: feature/issue-63 at `48926a6`
+**Base**: origin/rolling
+**Depth**: Deep (reason: index arithmetic in hazard-marking code deployed on a vehicle; full depth per handoff)
+**Must-fix**: 0 | **Suggestions**: 3
+**Round**: 1 | **Ship**: recommended — no must-fix findings; remaining suggestions can be applied or tracked
+
+Code commit `4250a7f` (no `.agent/` file; applies cleanly onto `origin/jazzy` `c8f253e`). Reviewers: Claude adversarial subagent, Gemini and Codex (both completed). #59's `SubmapGeometry` call untouched; files match the plan.
+
+Verified here:
+- Build (Rolling, RelWithDebInfo, `-Wall -Wextra -Wpedantic`): no new warning. Suite: 95 results, 0 failures, 9 skipped (cppcheck). `test_tile_edges` 30 of 30 runs pass.
+- Old vs new loop, verbatim, against real `Costmap2D` and grid_map `SubmapGeometry`/`SubmapIterator`, with a long-double positive-area truth in chart-index space. Settings: costmap resolutions 1/0.5/0.25/0.1 m; tiles 4 and 100; chart cells 0.3-30 costmap cells (log-uniform plus simple ratios); random offsets; tile IDs ±1000; origins to ±1e5 m; land, shallow, deep and no data.
+  - **Non-aligned (seeds 777, 4242, 9001): 27,000 cases, 135.9 M cells.** 0 cells lethal before and not after; 0 the reverse; 0 differing cells; old and new both equal the truth everywhere.
+  - **Near-aligned (edges snapped within ±3 ulps, seed 31337): 6,000 cases.** Old made 25,724 out-of-range accesses (193 cases), new 0. Of 67,234 differing cells, the new value matches the truth in 65,450 and the old in 1,607; 25,164 cells lethal before not after (613 of them old-correct), 6,492 the reverse. Cells off the truth: new 239,582, old 303,425. All of this is within rounding.
+- Removing the fix makes the named cases fail as described:
+  - east: by access `getCost(4, 3)` and by value;
+  - north: by access `getCost(3, 4)` and by value;
+  - interior edges: by value only;
+  - 0.1 m: all three by access;
+  - control: passes.
+- Mutations, each compiled into the test:
+  - far index without `- 1`: x caught by 8 tests, y by 10;
+  - `ceil` to `floor` on the far index: x caught by North + control, y by East + control (the axes are caught separately);
+  - far upper clamp removed: x 9, y 9;
+  - x/y swapped in one line: 10 and 10;
+  - near clamps removed: 12;
+  - **near clamp lowered to `tile_size_ - 1`: survives for x and y** (see the second suggestion).
+- NaN, ±inf, ±1e300 and 1-3 ulps either side of an edge, traced numerically: every range is empty or correctly clamped, and every cast is defined.
+- Interposition binding confirmed with `readelf`/`nm`: the layer's calls go through JUMP_SLOTs and the test exports both definitions. The signatures and bodies match Nav2 on Rolling and on `origin/jazzy`. Only the layer's tiles are 4 x 4, so Nav2 cannot satisfy the call count on its own.
+
+### Findings
+- [ ] (suggestion) Where a chart cell edge falls on a tile-cell edge within rounding, as happens at decimal resolutions, the quotient lands at k±ε. A chart cell then takes a tile cell it only touches, or skips one it covers, and land can lose a cell to water. This is older than the change, and the old code is worse (see the near-aligned figures). Charts placed from latitude and longitude (`S57Dataset::getGrid`) do not align. Say "in exact arithmetic; within rounding either neighbour may be taken, as before" in the loop comment and in the PR's rule, and offer the owner a follow-up (a tolerance, or lethal wins) beside the straddle question (Codex and the adversarial reviewer) — `s57_layer/src/s57_layer.cpp:628-647`
+- [ ] (suggestion) Test gaps:
+  - The near-clamp mutation (`min(tile_size_ - 1, ...)`, which paints the last column or row from a chart cell wholly east or north of the tile) passes all 13 tests. Such chart cells are iterated only in near-aligned geometry: 809 east and 377 north in 2,000 near-aligned cases, 0 in random ones.
+  - There is no value case with chart cells smaller than a tile cell (`cell_q = 2`) or larger than a tile.
+  - The "tile accesses out of range" message counts out-of-range accesses on any costmap (Gemini).
+  — `s57_layer/test/test_tile_edges.cpp:79-87,327,395-417`
+- [ ] (suggestion) The interposition relies on default ELF semantics: no LTO, `-Bsymbolic` or `-fno-semantic-interposition` on Nav2 or the layer. The call-count check catches a total failure. Name this in the CMakeLists comment — `s57_layer/CMakeLists.txt:149-152`
