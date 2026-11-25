@@ -370,3 +370,13 @@ Package suite and `test_tile_edges` ×30 as above; no new compiler warning (only
 - **Suite** (package worktree, default build type, i.e. unoptimized): `build.sh --packages-up-to s57_layer --parallel-workers 4`; `test.sh --packages-select s57_layer --parallel-workers 1 --ctest-args -j1`: 131 tests, 0 errors, 0 failures, 9 skipped (cppcheck's own skip). `test_tile_edges` 30 of 30 runs pass (49 tests; `ldd`: the worktree's freshly built library). Scratch mutation builds: `LD_LIBRARY_PATH` first, `ldd` showed the scratch library. No new compiler warning.
 - **Hygiene**: the four commits touch only `s57_layer/`, one change each, subjects name #59, bodies end "Backport to jazzy." before the trailers. The five code commits `edd754b`, `b39ec5b`, `21d9838`, `4dbfa81`, `f2a0230` cherry-pick onto `origin/jazzy` in that order without conflict (scratch worktree, removed). Branch contains `origin/rolling`.
 - **PR statements** (newest Implementation entry): the qualified equivalence, the west/south out-of-range read, the same-scale tie (`std::map<std::pair<resolution, label>>`, `s57_layer.cpp:566`), the one-cell clamp (verified above) and the pre-filter limit (pinned by `PreFilterSkips`) are supported. Harness figures not rerun.
+
+## Checkpoint
+**Status**: complete
+**When**: 2026-11-24 23:10 -05:00
+**By**: Claude Code Agent (claude-fable-5-2)
+**Decided-by**: host (round 2 approved with no must-fix; one of its two suggestions closes a gap in what the tests pin about the fix made in round 1, and is cheap)
+**After**: publish
+**Decision**: address
+
+Read: the Local Review (Pre-Push) round 2 at `f2a0230`, approved, two suggestions. One short pass, then a narrow re-review, then publish. (1) The one-cell tests exercise one crossing direction only (`grid_lo + r/2` an ulp above the centre): a fix that reset only `centre_lo` passes all 49 tests. Add the mirrored case, where `grid_hi - r/2` rounds below the centre and `grid_lo + r/2` equals it (the review suggests a 3.75 m cell centred at 0.47 m, or 0.2 m at 0.08 m: verify by evaluating the layer's expressions), on x and on y, with the precondition asserted, and show that resetting only `centre_lo`, and resetting only `centre_hi`, each now fails a test in an assertions-on build. (2) The message of `b39ec5b` says the tests abort on the unfixed source "in an unoptimized or -D_GLIBCXX_ASSERTIONS build"; for an unoptimized build that holds with GCC 15 only. History is not rewritten for it; the test's comment is right, and the pull request states it correctly.
