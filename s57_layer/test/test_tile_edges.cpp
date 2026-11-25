@@ -142,7 +142,11 @@ namespace
 class S57LayerForTest : public s57_layer::S57Layer
 {
 public:
-  void addChart(const std::string & label, std::shared_ptr<grid_map::GridMap> grid)
+  // The chart's stated bounds (chart_bounds_, which getDatasetsCallback
+  // takes from the dataset) are the grid's extent, shrunk on every side by
+  // bounds_inset metres (grown, if negative).
+  void addChart(
+    const std::string & label, std::shared_ptr<grid_map::GridMap> grid, double bounds_inset = 0.0)
   {
     s57_msgs::msg::DatasetInfo info;
     info.label = label;
@@ -151,10 +155,10 @@ public:
     const auto & position = grid->getPosition();
     const auto & length = grid->getLength();
     geometry_msgs::msg::Point min_point, max_point;
-    min_point.x = position.x() - length.x() / 2.0;
-    min_point.y = position.y() - length.y() / 2.0;
-    max_point.x = position.x() + length.x() / 2.0;
-    max_point.y = position.y() + length.y() / 2.0;
+    min_point.x = position.x() - length.x() / 2.0 + bounds_inset;
+    min_point.y = position.y() - length.y() / 2.0 + bounds_inset;
+    max_point.x = position.x() + length.x() / 2.0 - bounds_inset;
+    max_point.y = position.y() + length.y() / 2.0 - bounds_inset;
     chart_bounds_[label] = std::make_pair(min_point, max_point);
     grids_[label] = grid;
   }
@@ -344,6 +348,14 @@ int chartCellsBeyondTile(
 // ---- rolker/s57_tools#59: several charts, any window, tile size and origin ----
 // Every chart edge is an integer number of quarter window cells from the
 // window origin, which is also the tiles' origin.
+//
+// A chart's stated bounds (chart_bounds_) are its grid's extent, inset by
+// bounds_inset_q quarter window cells on every side (outset if negative).
+// S57Dataset::getGrid makes the grid round(stated length / r) cells long,
+// centred on the stated bounds, so the two differ by the same amount on
+// both sides, less than a quarter chart cell: check(Scene) asserts that a
+// spec is one getGrid could produce (4 |bounds_inset_q| < cell_q, strictly,
+// so the rounding is not a tie).
 enum class Fill { hashed, land, water };
 struct ChartSpec
 {
@@ -351,6 +363,7 @@ struct ChartSpec
   int cell_q, west_q, south_q, cells_x, cells_y;
   Fill fill = Fill::hashed;
   int seed = 0;
+  int bounds_inset_q = 0;
 };
 struct Scene
 {
@@ -396,7 +409,13 @@ std::shared_ptr<grid_map::GridMap> makeChart(const Scene & s, const ChartSpec & 
 
 // Window cell (i, j): the charts finest first (then by label, as the layer's
 // map orders them); within a chart, the east-most then north-most cell that
-// overlaps the window cell with positive area and has data.
+// overlaps the window cell with positive area and has data. A chart counts
+// only in the tiles generateTile's pre-filter passes: those its stated
+// bounds overlap or touch (the pre-filter compares with > and <). That
+// pins current behaviour where the grid reaches past the stated bounds and
+// the pre-filter skips a tile the grid overlaps (GridLargerThanBounds
+// PreFilterSkips1m); elsewhere it changes nothing, as a chart whose grid
+// only touches a tile paints nothing in it.
 unsigned char expectedCost(const Scene & s, unsigned int i, unsigned int j)
 {
   std::vector<const ChartSpec *> order;
@@ -404,7 +423,18 @@ unsigned char expectedCost(const Scene & s, unsigned int i, unsigned int j)
   std::sort(order.begin(), order.end(), [](const ChartSpec * a, const ChartSpec * b) {
       return std::make_pair(a->cell_q, a->label) < std::make_pair(b->cell_q, b->label);});
   const int x0 = 4 * static_cast<int>(i), y0 = 4 * static_cast<int>(j);
+  const int tile_q = 4 * static_cast<int>(s.tile);
+  const int tile_x0 = tile_q * static_cast<int>(i / s.tile);
+  const int tile_y0 = tile_q * static_cast<int>(j / s.tile);
   for (const ChartSpec * c : order) {
+    const int inset = c->bounds_inset_q;
+    if (c->west_q + inset > tile_x0 + tile_q ||
+      c->west_q + c->cells_x * c->cell_q - inset < tile_x0 ||
+      c->south_q + inset > tile_y0 + tile_q ||
+      c->south_q + c->cells_y * c->cell_q - inset < tile_y0)
+    {
+      continue;
+    }
     for (int m = c->cells_x - 1; m >= 0; m--) {
       const int west = c->west_q + m * c->cell_q;
       if (!(west < x0 + 4 && west + c->cell_q > x0)) {continue;}
@@ -578,7 +608,9 @@ protected:
     layer_ = std::make_shared<S57LayerForTest>();
     layered_costmap_->addPlugin(layer_);
     layer_->initialize(layered_costmap_.get(), "chart_layer", tf_buffer_.get(), node_, nullptr);
-    for (const auto & c : s.charts) {layer_->addChart(c.label, makeChart(s, c));}
+    for (const auto & c : s.charts) {
+      layer_->addChart(c.label, makeChart(s, c), c.bounds_inset_q * s.resolution / 4.0);
+    }
     access_log.reset(s.tile);
     layered_costmap_->updateMap(
       (s.origin_x + s.cells / 2.0) * s.resolution, (s.origin_y + s.cells / 2.0) * s.resolution, 0.0);
@@ -620,6 +652,10 @@ protected:
   // have seen the painting.
   void check(const Scene & s)
   {
+    for (const auto & c : s.charts) {
+      ASSERT_LT(4 * std::abs(c.bounds_inset_q), c.cell_q) << "chart " << c.label <<
+        ": getGrid cannot make a grid that far from its stated bounds";
+    }
     paint(s);
     const auto cells = cellsAsCharted(s);
     EXPECT_TRUE(cells);
@@ -856,6 +892,48 @@ TEST_F(TileEdgesTest, ChartEdgeJustWestOfMapXZero1m) {check(small(1.0, {{"c", 4,
 // unchanged), and a chart whose east edge only touches tile column 1.
 TEST_F(TileEdgesTest, TilesInsideChartGuard1m) {check(small(1.0, {{"c", 4, -13, -13, 17, 17}}));}
 TEST_F(TileEdgesTest, ChartTouchingTileEdgeGuard1m) {check(small(1.0, {{"c", 4, -12, -12, 7, 15}}));}
+
+// A chart's stated bounds differ from its grid's extent (as getGrid makes
+// it, by less than a quarter chart cell on each side); a tile edge lies on
+// the stated bound. Chart cells of two window cells. The pre-filter passes
+// the tile on the outer side of that edge (it compares with > and <), so
+// what the chart paints there is the clip's: it must clip to the grid's
+// extent, not to the stated bounds.
+// The grid a quarter window cell larger than the stated bounds on every
+// side: the stated west bound on tile column 1's east edge (quarter 32), the
+// grid's first column from quarter 31, so it paints window column 7 from
+// [31, 32]; and the stated north bound on tile row 2's south edge, the
+// grid's last row to quarter 33, so it paints window row 8 from [32, 33].
+// Clipping to the stated bounds skips the chart in those tiles.
+TEST_F(TileEdgesTest, GridLargerThanBoundsWest1m)
+{
+  check(small(1.0, {{"c", 8, 31, -12, 6, 8, Fill::hashed, 0, 1}}));
+}
+TEST_F(TileEdgesTest, GridLargerThanBoundsNorth1m)
+{
+  check(small(1.0, {{"c", 8, -12, -15, 8, 6, Fill::hashed, 0, 1}}));
+}
+// The grid a quarter window cell smaller: the stated west bound on tile
+// column 1's east edge, the grid from quarter 33; the stated north bound on
+// tile row 2's south edge, the grid to quarter 31. The pre-filter passes
+// tile column 1 and row 2, which the grid does not reach: the chart must
+// paint nothing there. (Clipping to the stated bounds gives the same cells:
+// its request then yields only the grid's edge column or row, which lies
+// wholly outside the tile and paints nothing.)
+TEST_F(TileEdgesTest, GridSmallerThanBounds1m)
+{
+  check(small(1.0, {{"c", 8, 33, -17, 6, 6, Fill::hashed, 0, -1}}));
+}
+// Pins current behaviour, not the behaviour wanted: the grid half a window
+// cell larger than the stated bounds (chart cells of three window cells),
+// the grid's first column from quarter 31, the stated west bound at 33.
+// Tile column 1 ends at 32, so the pre-filter (stated bounds, left as it is
+// by this change) skips it, and the grid's [31, 32] in window column 7 is
+// not painted.
+TEST_F(TileEdgesTest, GridLargerThanBoundsPreFilterSkips1m)
+{
+  check(small(1.0, {{"c", 12, 31, -12, 4, 6, Fill::hashed, 0, 2}}));
+}
 
 // A chart grid one cell long on x, then on y, whose two cell centres on that
 // axis round an ulp apart in the wrong order (checkOneCellAxis asserts it):
