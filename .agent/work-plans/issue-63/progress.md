@@ -247,3 +247,70 @@ The fix is correct and bounded for every input that can reach it. The checkpoint
 **Decision**: proceed
 
 Read: the Plan Review at `c7479c9`, verdict ready, three minor findings and an information note. The half-open form stays: the review's own comparison (20,000 random cases, 66.2 million cells, a different generator and seeds) found 0 differing cells on non-aligned geometry, and in near-aligned geometry the new code is right in every differing cell not itself within rounding of an edge. Findings applied: (1) **both indices are clamped on both sides in double before the cast** (`std::min(double(tile_size_), ...)` on the near index and `std::max(-1.0, ...)` on the far one, added to the plan's one-sided clamps), so the cast is defined for every double; the comment says so and does not rely on the submap region. (2) The test's "at least one call" safeguard is made specific to the tiles: calls are counted on costmaps of the tile's size, or the count is at least the number of tile cells painted, since on Rolling Nav2's own calls are interposed too; the test's comment does not claim otherwise. (3) The expectation is computed in integer cell counts or in chart-index space from the chart's own edges, never with the layer's quotient, and the test says so. (4) The pull request carries the review's equivalence statement. The out-of-range check stays as the plan has it (bounds-checking accessors defined in the test executable); an extracted arithmetic function was weighed and not taken, because it would not have shown the north-edge access and restructures hazard-marking code.
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 20:07 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+**Branch**: feature/issue-63 at `4250a7f`
+
+Code commit `4250a7f` "s57_layer: half-open tile-cell ranges in generateTile (#63)" (no `.agent/` file; applies cleanly to `origin/jazzy` at `c8f253e`, where `s57_layer` is identical).
+
+- `s57_layer/src/s57_layer.cpp`: the two `worldToMapEnforceBounds` calls replaced by `near = max(0.0, min(double(tile_size_), floor(q_near)))` and `far = min(tile_size_ - 1.0, max(-1.0, ceil(q_far) - 1.0))`, `q = (edge - world_min)/resolution_`; loops, write-if-unknown and the `SubmapGeometry` call unchanged. Clamped on both sides in double (checkpoint finding 1). **NaN quotient: empty range, deliberately** (the inner `min`/`max` returns its first argument, the bound beyond the tile: near = `tile_size_`, far = -1); said in the comment. Not constructible through the layer: `SubmapGeometry` on a chart with a NaN position returns `ok=false` (checked), so the loop is never reached.
+- `s57_layer/test/test_tile_edges.cpp` (new, own `ament_add_gtest` entry after `test_rolling_window`'s): fixed 12 x 12 `LayeredCostmap`, `track_unknown` on, 4-cell tiles, origin (-8, 4) cells; chart land / 10 m water / ~20% no data by a hash of the chart index, 3 cells to spare. 13 tests: east, north, both, interior-only (2-cell chart cells offset 3 cells), quarter-cell control, each at 1 m and 0.5 m (value + access); 0.1 m at origin (-12.3, 4.7), chart cells 0.5, 1, 2 cells, starting 4 cells out so each has edges on tile edges (access only). Expectation in integer quarter cells from the chart's own edges, never the layer's quotient (said in the test). Interposed bounds-checking `Costmap2D::getCost(unsigned, unsigned) const` / `setCost(unsigned, unsigned, unsigned char)`; each test asserts zero out-of-range and that `setCost` calls on 4 x 4 costmaps are at least the painted cells (checkpoint finding 2).
+- `test_rolling_window.cpp` and `test_initialize.cpp`: comments reworded; offsets kept.
+
+Deviation from the plan: the 0.1 m charts start 4 cells (not 3) out, because with 2-cell chart cells 3 cells out every edge falls on an odd cell edge, never a tile edge, and that case passed on today's source.
+
+### Failing on today's source (scratch build, `ldd` showed the scratch `libs57_layer.so` loaded)
+
+- East 1 m / 0.5 m: `116 of 1084 tile accesses out of range; first getCost(4, 3) in a 4 x 4 costmap`; `19 of 144 cells differ from the expectation; first (0, 1) is 254, expected 0`
+- North 1 m / 0.5 m: `150 of 1153 ... first getCost(3, 4)`; `20 of 144 cells differ; first (7, 0) is 0, expected 254` (interior spread on the coincident y edges)
+- Both 1 m / 0.5 m: `278 of 1246 ... first getCost(4, 3)`; `44 of 144 cells differ; first (7, 0) is 0, expected 255`
+- Interior edges only 1 m / 0.5 m: `20 of 144 cells differ; first (7, 0) is 0, expected 255` (no out-of-range access)
+- Control 1 m / 0.5 m: pass
+- 0.1 m: `167 of 1710` (0.5-cell chart), `135 of 745` (1-cell), `26 of 365` (2-cell) tile accesses out of range
+
+With the fix: 13 of 13 pass; 30 of 30 separate runs pass. Suite (`colcon test --packages-select s57_layer --parallel-workers 1 --ctest-args -j1`, the freshly built library loaded): 95 results, 0 failures, 9 skipped (all cppcheck's, skipped by ament here). That is 73 gtests (60 existing + 13 new), lint_cmake 1, xmllint 2. pre-commit is not installed here; changed files checked by hand for trailing whitespace and end of file. Build: no new warnings under the package's `-Wall -Wextra -Wpedantic` (GCC 15.2; GCC 13 not installed).
+
+### Equivalence on the final code
+
+Scratch harness: today's loop copied verbatim (checked by `diff`) and the final loop (checked by `diff`), plus the plan's one-sided version, against the real Rolling `Costmap2D` and grid_map `SubmapGeometry`/`SubmapIterator`, with interposed checked accessors.
+
+- **Random, seed 63, 20,000 cases** (19,993 with a successful `SubmapGeometry`): 52,208,206 tile cells, resolutions 1/0.5/0.25/0.1/0.05/0.3, tiles 1/4/20/100, 1-3 charts at ratios 0.03-0.13, 0.2-40, or 2-7 tile widths, some partial, origins 0, ±10, ±1e6, -1e5..-2e5, tile IDs ±20 or down to -3000, 0% or 20% no data. **0 differing cells.** Out-of-range accesses: today 0, new 0. No zero-area write by today's code.
+- **Near-aligned, seeds 6364 and 99, 6,000 cases each** (chart edges snapped to tile-cell edges, jitter 0, ±1 ulp, ±1e-12, ±1e-9 m; resolutions 1, 0.5, 0.3, 0.1, 0.05; tiles 4, 20, 100; ratios 0.5, 1, 2, 3; origins at 0.1 m multiples in ±1000 m):
+  - 20,462,960 / 20,357,456 cells; 416,756 / 427,644 differing cells in 2,270 / 2,307 cases.
+  - Out-of-range accesses: today 198,094 / 200,298, new 0 / 0.
+  - Clean cases (today makes no out-of-range access and no zero-area write): 3,059 / 2,997, with **0 differing cells**.
+  - Differing cells with no data chart cell within 1e-7 cell of the cell's edge, ahead of the owner: 2,584 / 2,651. In all of them the new value is the long-double positive-area owner, and today's is not.
+  - The rest (414,172 / 424,993) are within rounding of an edge.
+- **Two-sided vs the plan's one-sided clamps:** 0 differing cells, 0 out-of-range accesses in all three sets.
+
+**Crash reproduction** through the real layer, Release, no interposition, 400 x 400 cells, 100-cell tiles (16 per round), chart cells aligned:
+
+| Library | 1 m | 0.5 m |
+|---|---|---|
+| Today, 20 rounds per run | 0 of 8 runs died | 2 of 8 died (one `malloc(): invalid next size` abort, one SIGSEGV) |
+| Today, 40 rounds per run | 7 of 20 died | 8 of 20 died |
+| Today, offset 0.37 cell | 0 of 8 died | 0 of 8 died |
+| Fixed, same runs (aligned and offset) | 0 of 36 died | 0 of 36 died |
+
+### Jazzy, by reading
+
+`origin/jazzy` `c7046550` of navigation2:
+
+- `costmap_2d.hpp` declares `unsigned char getCost(unsigned int mx, unsigned int my) const;` (:149) and `void setCost(unsigned int mx, unsigned int my, unsigned char cost);` (:164). Both are only declared there and defined in `costmap_2d.cpp` :264/:274 with the bodies the test copies, exactly the signatures it defines.
+- `getIndex` is inline, `my * size_x_ + mx`. `size_x_`, `size_y_` and `costmap_` are protected (:529-535).
+- `LayeredCostmap(std::string, bool, bool)`, `resizeMap(..., bool size_locked = false)`, `addPlugin`, `updateMap(double, double, double)`, `getCostmap`, `getCharMap`, `getIndex`, `getOriginX/Y` and the cost constants all exist. The `layered_costmap.cpp` differences from Rolling (`current_`, the `updateMap` early return restructured, setting disabled plugins current) do not touch a fixed, single-layer, track-unknown map.
+- Lifecycle node, `Layer::initialize`, `tf2_ros/buffer.h` and every grid_map call are the ones `test_rolling_window`, already run by Jazzy CI, makes. grid_map's `jazzy` branch (`d961499`) has no diff from Rolling's in `GridMap.hpp/.cpp`, `GridMapMath.cpp`, `SubmapGeometry.cpp`, `SubmapIterator.cpp` and `GridMapIterator.cpp`.
+
+### For the pull request
+
+- **Defect and fix:** generateTile took each chart cell's tile-cell range from `Costmap2D::worldToMapEnforceBounds`. That returns the tile size, one past the last cell, for a far corner on or within rounding of the tile's east or north edge. The read and write landed in the next row (east) or past the tile's buffer (north): heap corruption, sometimes a crash. A far corner on an interior tile-cell edge also claimed the next cell, spreading its value into a no-data neighbour. The fix uses half-open ranges, each index clamped on both sides before the cast.
+- **Equivalence:** output identical to today's in every tile where today's code makes no out-of-range access and writes no tile cell from a chart cell that only touches that cell or lies outside the tile. Such chart cells arise only where a chart cell edge lies within floating-point rounding of a tile or tile-cell edge. Where the output differs, the new value is the positive-area owner in every cell not itself within rounding of an edge. Figures: 0 differing cells in 52.2 M random non-aligned tile cells; in near-aligned geometry 0 differing cells in 6,056 clean cases, and 5,235 unambiguous differing cells, all now the positive-area owner.
+- **Rule after the fix:** a tile cell takes the value of the chart cell with data that overlaps it with positive area and comes first in `SubmapIterator`'s order (east-most, then north-most; finest chart first). A chart cell that only touches a tile cell's edge, lies outside the tile, or has a NaN position paints nothing.
+- **For a vessel:** real chart grids are placed from latitude and longitude with nothing snapped, so exact alignment is a floating-point accident. Output changes only there. A rare heap corruption and crash of the costmap node can no longer occur.
+- **Tests:** east, north and both tile edges, and interior edges, at 1 m and 0.5 m, every cell checked against an expectation in integer quarter cells; 0.1 m access only. Out-of-range access is detected by bounds-checking `getCost`/`setCost` defined in the test executable, which take Nav2's place by ELF symbol interposition. The call-count assertion fails if they ever stop doing so.
+- **Not established:** Jazzy until the PR's Jazzy CI job (first Jazzy compile and run; GCC 13 not tried here). No real NOAA chart was run through the grid code. The straddle rule (owner's question) is untouched.
+
+Build folders and scratch removed; nothing left running.
