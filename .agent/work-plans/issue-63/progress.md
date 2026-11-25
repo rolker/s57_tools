@@ -368,3 +368,43 @@ Verified here:
 **Decision**: address
 
 Read: the Local Review (Pre-Push) round 1 at `4250a7f`, approved, three suggestions, all three outside reviewers run. One pass, then a narrow re-review, then publish. (1) The comment above the loop, and the pull request's statement of the rule, say the rule holds in exact arithmetic and that where a chart cell edge lies within floating-point rounding of a tile-cell edge either neighbour may be taken, as before this change (the review's near-aligned comparison: the new value matches an independent calculation in 65,450 of 67,234 differing cells, the old in 1,607). Two outside reviewers rated that rounding behaviour a must-fix; it is older than this change, does not occur on non-aligned geometry (0 differing cells in 135.9 million), and the old code is worse there; it goes to the owner as a follow-up question beside the straddle rule. (2) Tests: value cases with chart cells smaller than a tile cell and larger than a tile; the out-of-range message counts tile accesses only, or says what it counts; and the mutation that survives every test (the near index clamped to `tile_size_ - 1` instead of `tile_size_`, which paints the last column or row from a chart cell wholly east or north of the tile) gets a test if such a chart cell can be put in front of the loop deterministically, and otherwise a comment saying that the line is exercised only at near-aligned geometry and by which recorded run. (3) The CMake comment names the linker assumptions the test's accessors rely on.
+
+## Implementation
+**Status**: complete
+**When**: 2026-11-24 20:27 -05:00
+**By**: Claude Code Agent (claude-opus-5-5)
+
+**Branch**: feature/issue-63 at `9f793e6`
+**Addressed**: Local Review (Pre-Push) at `48926a6` (2026-11-24 20:18 -05:00)
+**Commits**: `c3cd7a5` (comment), `c2acf6c` (tests and CMake comment), `9f793e6` (boxes)
+
+### Actions
+- [x] Loop comment says the rule holds in exact arithmetic; within rounding of a tile-cell edge either neighbour may be taken, as before; lat/lon-placed charts align only by accident. Index arithmetic unchanged. — `s57_layer/src/s57_layer.cpp:640-645` (`c3cd7a5`)
+- [x] Test gaps — `s57_layer/test/test_tile_edges.cpp` (`c2acf6c`):
+  - Half-cell chart (`cell_q = 2`): `HalfCellChartOnEdges1m`/`HalfMetre` fail on the pre-fix source ("407 of 2297 getCost/setCost calls on 4 x 4 tiles out of range; first getCost(4, 3)" and "15 of 144 cells differ ... first (0, 1) is 0, expected 254"); `HalfCellChartOffEdgesGuard1m` is a labelled guard (passes pre-fix).
+  - Two-tile chart cells (`cell_q = 32`): `LargeCellChartOnTileEdges1m`/`HalfMetre` fail pre-fix by access ("90 of 473 ... first getCost(4, 0)"); `LargeCellChartInteriorEdgesGuard1m` is a labelled guard.
+  - Out-of-range accesses counted and reported for tiles apart from other costmaps.
+  - Near clamp (`tile_size_`): reached deterministically with the chart centre moved one double (`std::nextafter`) west or south: `EastTileEdgeOneUlpWest1m`/`HalfMetre`, `NorthTileEdgeOneUlpSouth1m`/`HalfMetre`, each asserting first that the SubmapIterator, requested as generateTile requests it, yields a chart cell wholly beyond the tile. Not reachable with exact geometry (grid_map's corner lookup at the east/north corner takes the inside cell on exact coincidence). The mutation `min(tile_size_ - 1, near)` now fails 2 tests on x and 2 on y. Pre-fix: these fail by access and value.
+  - Far lower clamp raised to `0.0`: reachable by exact coincidence at the west/south corner; already caught (x: EastAndNorthTileEdges x2; y: those plus North x2 and HalfCellChartOnEdges x2). No new case.
+- [x] CMake comment names default ELF interposition (no `-Bsymbolic`, no `-fno-semantic-interposition` or LTO across the boundary, Nav2 not static) and the call-count assertion that fails loudly — `s57_layer/CMakeLists.txt:149-157` (`c2acf6c`)
+
+### Verification
+- Rolling, `colcon test --packages-select s57_layer --parallel-workers 4 --ctest-args -j4`: 105 tests, 0 errors, 0 failures, 9 skipped. `test_tile_edges` (23 tests) 30 of 30 runs pass.
+- Mutations on the final test file, layer source compiled into the test executable (no libs57_layer in `ldd`); failing tests out of 23:
+
+  | mutation | x | y |
+  |---|---|---|
+  | far index without `- 1` | 12 | 16 |
+  | `ceil` to `floor` on far | 8 | 9 |
+  | far upper clamp removed | 17 | 17 |
+  | x/y swapped in the near line | 18 | 18 |
+  | near clamp to `tile_size_ - 1` | 2 (EastTileEdgeOneUlpWest) | 2 (NorthTileEdgeOneUlpSouth) |
+  | far lower clamp to `0.0` | 2 | 6 |
+  | pre-fix source | 19 | |
+
+### Pull-request statements (updated)
+- Rule: a chart cell paints the tile cells it overlaps with positive area, in exact arithmetic. Where a chart cell edge lies within floating-point rounding of a tile-cell edge, the quotient lands a hair either side of the integer and either neighbour may be taken, as before. On near-aligned geometry (edges within ±3 ulps) the new value equals an independent positive-area calculation in 65,450 of 67,234 differing cells, the old in 1,607; out-of-range accesses 25,724 to 0. On 135.9 million non-aligned cells no difference at all, and no cell lethal before and not after.
+- Tests pin: chart cell edges on tile east/north edges, both, and interior tile-cell edges only, at 1 m and 0.5 m; half-cell and two-tile chart cells; every tile access in range (also at 0.1 m); both clamps of both indices on both axes, the near clamp through a one-ulp chart shift. Not pinned: the rounding behaviour itself (either neighbour within rounding), and a whole-project Jazzy run (grid_map's corner arithmetic is assumed the same there; the one-ulp cases assert their precondition and fail loudly if it differs).
+- Follow-up for the owner, beside the straddle question: a tolerance on the quotient, or lethal wins, for edges within rounding.
+
+Next: `/review-code --branch`.
