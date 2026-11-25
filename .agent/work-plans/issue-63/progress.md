@@ -443,3 +443,28 @@ Verified here:
 **Decision**: publish
 
 Read: the Local Review (Pre-Push) round 2 at `c2acf6c`, approved, one suggestion about a sentence in the pull-request statements, applied in the pull request's text (grid_map's submap arithmetic is the same source on Jazzy's released 2.2.2 as on 2.5.0 here, and every product in the one-ulp tests' path is exact). Three code commits: `4250a7f`, `c3cd7a5`, `c2acf6c`. The pull request's Jazzy CI job is the first Jazzy compile and run.
+
+## Integrated Review
+**Status**: complete
+**When**: 2026-11-24 20:42 -05:00
+**By**: Claude Code Agent (claude-sonnet-5-5)
+**Reviews-read**: none
+
+**PR**: #66 at `07c4e18`
+**Sources**: 3 (Local Review (Pre-Push) round 1 @ `514b48b` and round 2 @ `c2acf6c`, CI rollup; no GitHub review, inline comment or conversation comment exists on the pull request)
+**Cross-source confirmations**: 0
+**CI**: all-pass
+
+### Findings
+None open. The only carried-forward local finding (round 1 suggestion on the pull-request wording about grid_map on Jazzy) was applied in the pull-request body and is closed.
+
+### False positives
+- (none) No bot or human findings were raised. The within-rounding behaviour and the straddle rule are known follow-up questions for the owner, and rolker/s57_tools#59 is known and untouched; none is a finding of this change.
+
+### CI evidence (run 45526779997, merge ref `a7302d3` = `07c4e18` merged into rolling `a1ba225`)
+- Both jobs SUCCESS. The Rolling job builds s57_msgs, marine_charts, s57_to_geotiff, enc_updater only ("11 packages finished", "4 packages finished" in test); it does not build or test `s57_layer`.
+- Jazzy job built `s57_layer` ("Starting >>> s57_layer", "Finished <<< s57_layer [56.9s]") with no stderr output from `s57_layer`; the packages with stderr were geodesy, marine_autonomy, marine_bathymetry_store, marine_charts. No warning from `s57_layer.cpp` or `test_tile_edges.cpp`, none about redefinition or multiple definition of `Costmap2D::getCost`/`setCost`.
+- Installed: `ros-jazzy-nav2-costmap-2d 1.3.14-1noble.20261105.140901`, `ros-jazzy-grid-map-core 2.2.2-2noble.20261025.230136`.
+- `test_tile_edges`: 23 of 23 OK (`[  PASSED  ] 23 tests.`), `7/10 Test #7: test_tile_edges ... Passed 0.37 sec`; none skipped, disabled or failed. Package: `100% tests passed, 0 tests failed out of 10`; workspace: `Summary: 288 tests, 0 errors, 0 failures, 33 skipped`.
+- The tests assert at least as many `setCost` calls on tiles reached the bounds-checking accessors as cells were painted (test_tile_edges.cpp ~line 368), so 23 passes show the interposition took effect on Jazzy.
+- Pull-request body checked against the run and these records (15 of 40 / 0 of 72 crash counts are the sums of the 20-round-per-run tables, 7+8 of 40 and 0 of 36+36; 8 lines of arithmetic; 19 of 23 failing before; 105 tests on Rolling). Only the sentence "This pull request's Jazzy CI job is the first Jazzy compile and run." is out of date; the host replaces it (host action, not a finding).
