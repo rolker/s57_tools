@@ -519,8 +519,8 @@ TEST_F(RollingWindowTest, NegativeNonBinaryOffsetRoundsToNearestCellOnBothAxes)
 // Charts. Their cell edges lie a quarter cell off the tile-cell edges, so
 // which chart cell a tile cell takes never depends on rounding at an exact
 // edge (test_tile_edges covers exact edges), and they cover every tile a
-// path reaches, so #59 (a tile whose centre is outside a chart) cannot
-// affect these cases.
+// path reaches, so these cases do not depend on how generateTile handles a
+// chart edge inside a tile (test_tile_edges covers that too).
 
 constexpr unsigned int kCells = 20;
 
