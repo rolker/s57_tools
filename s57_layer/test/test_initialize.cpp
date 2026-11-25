@@ -408,9 +408,8 @@ constexpr char kChartTopic[] = "TEST0001_000";
 /// the rest is water 10 m deep. Two choices keep this test about the
 /// request path, not about generateTile's compositing, which it leaves as is:
 /// - the grid reaches past the layer's first tile ([0, 100], 100 cells of
-///   1 m) on every side, because generateTile takes a chart's cells through
-///   grid_map's SubmapGeometry, which fails when the tile's centre is outside
-///   the grid or a clipped corner falls on a grid edge at 0;
+///   1 m) on every side, so the test does not depend on how generateTile
+///   handles a chart edge inside a tile (test_tile_edges covers that);
 /// - no grid cell edge falls exactly on a tile-cell edge (the quarter-cell
 ///   offset), where which chart cell a straddled tile cell takes would
 ///   depend on rounding; test_tile_edges covers exact edges.
