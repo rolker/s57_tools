@@ -626,6 +626,91 @@ protected:
     EXPECT_TRUE(accessesInRange(static_cast<bool>(cells)));
   }
 
+  // A chart grid one cell long on axis short_axis (0: x, 1: y), the cell
+  // 3.75 m on a side centred at -7.97 m on that axis; four cells from
+  // -12.6 m on the other. The window: 12 x 12 cells of 1 m from (-12, -12) m,
+  // tiles of 4 cells; one update. Asserts first that the grid's west and east
+  // (south and north) cell centres, computed as generateTile computes them,
+  // cross; then every window cell and the accesses. In units of 5 mm every
+  // edge is an integer: the cell spans -1969 to -1219 on the short axis, the
+  // other cells' edges are -2520 + 750 n, window cell k spans -2400 + 200 k
+  // to -2200 + 200 k.
+  void checkOneCellAxis(int short_axis)
+  {
+    const double r = 3.75;
+    auto grid = std::make_shared<grid_map::GridMap>(
+      std::vector<std::string>{"elevation", "overhead", "restricted", "unsurveyed", "caution"});
+    grid->setGeometry(
+      short_axis == 0 ? grid_map::Length(r, 4 * r) : grid_map::Length(4 * r, r), r,
+      short_axis == 0 ? grid_map::Position(-7.97, -5.1) : grid_map::Position(-5.1, -7.97));
+    ASSERT_EQ(grid->getSize()[short_axis], 1);
+    ASSERT_EQ(grid->getSize()[1 - short_axis], 4);
+    const double half = grid->getResolution() / 2.0;
+    const double grid_lo = grid->getPosition()[short_axis] - grid->getLength()[short_axis] / 2.0;
+    const double grid_hi = grid->getPosition()[short_axis] + grid->getLength()[short_axis] / 2.0;
+    ASSERT_GT(grid_lo + half, grid_hi - half) <<
+      "the cell centres do not cross here, so this case would not reach the crossed bounds";
+
+    for (const auto & name : grid->getLayers()) {
+      (*grid)[name].setConstant(std::numeric_limits<float>::quiet_NaN());
+    }
+    // Long-axis cell n, counted from the south (west) edge, holds chartedAt(0, n).
+    for (grid_map::GridMapIterator it(*grid); !it.isPastEnd(); ++it) {
+      grid_map::Position position;
+      grid->getPosition(*it, position);
+      const int n = static_cast<int>(std::floor((position[1 - short_axis] + 12.6) / r));
+      switch (chartedAt(0, n)) {
+        case Charted::land: grid->at("elevation", *it) = 1.0f; break;
+        case Charted::water: grid->at("elevation", *it) = -10.0f; break;
+        default: break;
+      }
+    }
+
+    node_ = std::make_shared<TestLifecycleNode>("test_tile_edges");
+    node_->declare_parameter("chart_layer.tile_size", 4);
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+    layered_costmap_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>("map", false, true);
+    layered_costmap_->resizeMap(12, 12, 1.0, -12.0, -12.0);
+    layer_ = std::make_shared<S57LayerForTest>();
+    layered_costmap_->addPlugin(layer_);
+    layer_->initialize(layered_costmap_.get(), "chart_layer", tf_buffer_.get(), node_, nullptr);
+    layer_->addChart("c", grid);
+    access_log.reset(4);
+    layered_costmap_->updateMap(-6.0, -6.0, 0.0);
+    log_ = access_log;
+
+    auto * master = layered_costmap_->getCostmap();
+    unsigned int wrong = 0;
+    std::ostringstream first;
+    for (unsigned int j = 0; j < 12; j++) {
+      for (unsigned int i = 0; i < 12; i++) {
+        const int s = -2400 + 200 * static_cast<int>(short_axis == 0 ? i : j);
+        const int l = -2400 + 200 * static_cast<int>(short_axis == 0 ? j : i);
+        unsigned char expected = nav2_costmap_2d::NO_INFORMATION;
+        if (s < -1219 && s + 200 > -1969) {
+          // The cell with data that is north-most (east-most) of those overlapping.
+          for (int n = 3; n >= 0; n--) {
+            const int south = -2520 + 750 * n;
+            if (south < l + 200 && south + 750 > l && chartedAt(0, n) != Charted::none) {
+              expected = costOf(chartedAt(0, n));
+              break;
+            }
+          }
+        }
+        const int cost = master->getCharMap()[master->getIndex(i, j)];
+        if (cost != expected) {
+          if (wrong == 0) {
+            first << "first (" << i << ", " << j << ") is " << cost << ", expected " <<
+              static_cast<int>(expected);
+          }
+          wrong++;
+        }
+      }
+    }
+    EXPECT_EQ(wrong, 0u) << first.str();
+    EXPECT_TRUE(accessesInRange(wrong == 0));
+  }
+
   std::shared_ptr<TestLifecycleNode> node_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::unique_ptr<nav2_costmap_2d::LayeredCostmap> layered_costmap_;
@@ -771,5 +856,18 @@ TEST_F(TileEdgesTest, ChartEdgeJustWestOfMapXZero1m) {check(small(1.0, {{"c", 4,
 // unchanged), and a chart whose east edge only touches tile column 1.
 TEST_F(TileEdgesTest, TilesInsideChartGuard1m) {check(small(1.0, {{"c", 4, -13, -13, 17, 17}}));}
 TEST_F(TileEdgesTest, ChartTouchingTileEdgeGuard1m) {check(small(1.0, {{"c", 4, -12, -12, 7, 15}}));}
+
+// A chart grid one cell long on x, then on y, whose two cell centres on that
+// axis round an ulp apart in the wrong order (checkOneCellAxis asserts it):
+// generateTile must order the bounds it clamps the tile to, as std::clamp
+// requires. The unfixed source passed crossed bounds. Where libstdc++ checks
+// its assertions (-D_GLIBCXX_ASSERTIONS, which GCC 15's libstdc++ also
+// defines in an unoptimized build such as this package's default colcon
+// build) it aborts in std::clamp here. Without them it returns the upper
+// bound, which gives these same cells, so in an optimized build (and with
+// GCC 13 on Jazzy) this case cannot fail on the unfixed source. The fixed
+// source passes either way.
+TEST_F(TileEdgesTest, OneCellLongOnX) {checkOneCellAxis(0);}
+TEST_F(TileEdgesTest, OneCellLongOnY) {checkOneCellAxis(1);}
 
 }  // namespace
