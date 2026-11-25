@@ -888,8 +888,13 @@ TEST_F(TileEdgesTest, ChartEdgeInTileAtMapOrigin100CellTiles1m)
 // to 0 (its centre outside the chart). Clipping the request to the chart's
 // edge (the issue's first proposal) loses grid_map's epsilon there.
 TEST_F(TileEdgesTest, ChartEdgeJustWestOfMapXZero1m) {check(small(1.0, {{"c", 4, 29, -12, 70, 15}}));}
-// Guards: the tile wholly inside the chart (the request is today's,
-// unchanged), and a chart whose east edge only touches tile column 1.
+// Guards: tiles wholly inside the chart, and a chart whose east edge only
+// touches tile column 1. The first pins the cells there, not the request:
+// generateTile sends the tile's own centre and length where nothing is
+// clipped, but rebuilding them from the edges differs by at most an ulp,
+// which moves the submap's edge only where it lies within rounding of a
+// chart cell edge, gaining or losing a cell that only touches the tile.
+// No cell here can tell the two requests apart.
 TEST_F(TileEdgesTest, TilesInsideChartGuard1m) {check(small(1.0, {{"c", 4, -13, -13, 17, 17}}));}
 TEST_F(TileEdgesTest, ChartTouchingTileEdgeGuard1m) {check(small(1.0, {{"c", 4, -12, -12, 7, 15}}));}
 
