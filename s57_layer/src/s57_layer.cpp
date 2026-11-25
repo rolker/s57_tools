@@ -625,17 +625,32 @@ void S57Layer::generateTile(TileID id)
           grid_map::Position cell_position;
           if(grid.second->getPosition(index, cell_position))
           {
-            int tile_min_x, tile_min_y, tile_max_x, tile_max_y;
-            tile->worldToMapEnforceBounds(
-              cell_position.x()-grid_half_resolution,
-              cell_position.y()-grid_half_resolution,
-              tile_min_x, tile_min_y
-            );
-            tile->worldToMapEnforceBounds(
-              cell_position.x()+grid_half_resolution,
-              cell_position.y()+grid_half_resolution,
-              tile_max_x, tile_max_y
-            );
+            // A chart cell paints the tile cells it overlaps with positive
+            // area: half-open ranges, floor for the near index and ceil - 1
+            // for the far one, so a chart cell that only touches a tile
+            // cell's edge, or lies outside the tile, paints nothing (near >
+            // far). Each index is clamped on both sides in double before the
+            // cast, so the cast is defined for any quotient: the near index
+            // to [0, tile_size_] and the far one to [-1, tile_size_ - 1],
+            // where tile_size_ and -1 occur only for a chart cell wholly
+            // east/north or west/south of the tile and give an empty range.
+            // A NaN quotient also gives an empty range, so it paints nothing:
+            // the inner std::min/std::max compares false with NaN and returns
+            // its first argument, the bound beyond the tile.
+            // The rule holds in exact arithmetic. Where a chart cell edge
+            // lies within floating-point rounding of a tile-cell edge, the
+            // quotient lands a hair either side of the integer, so either
+            // neighbour may be taken, as before this change. Charts placed
+            // from latitude and longitude (S57Dataset::getGrid) align with
+            // tile cells only by such an accident.
+            const double near_x = std::floor((cell_position.x()-grid_half_resolution-world_min_x)/resolution_);
+            const double near_y = std::floor((cell_position.y()-grid_half_resolution-world_min_y)/resolution_);
+            const double far_x = std::ceil((cell_position.x()+grid_half_resolution-world_min_x)/resolution_) - 1.0;
+            const double far_y = std::ceil((cell_position.y()+grid_half_resolution-world_min_y)/resolution_) - 1.0;
+            const int tile_min_x = static_cast<int>(std::max(0.0, std::min(double(tile_size_), near_x)));
+            const int tile_min_y = static_cast<int>(std::max(0.0, std::min(double(tile_size_), near_y)));
+            const int tile_max_x = static_cast<int>(std::min(tile_size_ - 1.0, std::max(-1.0, far_x)));
+            const int tile_max_y = static_cast<int>(std::min(tile_size_ - 1.0, std::max(-1.0, far_y)));
             for(int tile_y = tile_min_y; tile_y <= tile_max_y; tile_y++)
             {
               for(int tile_x = tile_min_x; tile_x <= tile_max_x; tile_x++)

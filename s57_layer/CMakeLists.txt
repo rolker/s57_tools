@@ -146,6 +146,26 @@ if(BUILD_TESTING)
     tf2_ros::tf2_ros
   )
 
+  # Chart cell edges on tile and tile-cell edges (#63). This executable
+  # defines bounds-checking Costmap2D::getCost(mx, my) and setCost(mx, my,
+  # cost), which take the place of Nav2's for the whole process, so it is
+  # kept apart from the other tests. That relies on default ELF symbol
+  # interposition: the layer and nav2_costmap_2d_core linked without
+  # -Bsymbolic, built without -fno-semantic-interposition or LTO across the
+  # boundary, and Nav2 not linked statically. Should that stop holding, the
+  # test's assertion on the number of setCost calls it saw fails loudly.
+  ament_add_gtest(test_tile_edges test/test_tile_edges.cpp)
+  target_include_directories(test_tile_edges PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_link_libraries(test_tile_edges
+    ${PROJECT_NAME}
+    nav2_costmap_2d::nav2_costmap_2d_core
+    nav2_util::nav2_util_core
+    rclcpp::rclcpp
+    tf2_ros::tf2_ros
+  )
+
   find_package(ament_lint_auto REQUIRED)
   # Skip copyright: existing files lack headers; tracked separately.
   set(ament_cmake_copyright_FOUND TRUE)
