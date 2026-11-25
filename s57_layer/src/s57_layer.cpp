@@ -637,6 +637,12 @@ void S57Layer::generateTile(TileID id)
             // A NaN quotient also gives an empty range, so it paints nothing:
             // the inner std::min/std::max compares false with NaN and returns
             // its first argument, the bound beyond the tile.
+            // The rule holds in exact arithmetic. Where a chart cell edge
+            // lies within floating-point rounding of a tile-cell edge, the
+            // quotient lands a hair either side of the integer, so either
+            // neighbour may be taken, as before this change. Charts placed
+            // from latitude and longitude (S57Dataset::getGrid) align with
+            // tile cells only by such an accident.
             const double near_x = std::floor((cell_position.x()-grid_half_resolution-world_min_x)/resolution_);
             const double near_y = std::floor((cell_position.y()-grid_half_resolution-world_min_y)/resolution_);
             const double far_x = std::ceil((cell_position.x()+grid_half_resolution-world_min_x)/resolution_) - 1.0;
